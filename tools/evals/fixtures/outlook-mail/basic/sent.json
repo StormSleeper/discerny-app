@@ -1,0 +1,100 @@
+[
+  {
+    "id": "s-205",
+    "subject": "Feltcraft dyehouse move – requalification plan",
+    "from": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "recipients": [
+      "tomasz.kowalczyk@pennywhistle.example"
+    ],
+    "sentDateTime": "2026-10-10T08:20:00Z",
+    "summary": "Tomasz, can you draft the colour-standard requalification plan for the Leicester site?",
+    "uri": "mail:///messages/s-205"
+  },
+  {
+    "id": "s-207",
+    "subject": "Sunday",
+    "from": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "recipients": [
+      "bill.hartley@homemail.example"
+    ],
+    "sentDateTime": "2026-10-10T07:30:00Z",
+    "summary": "Yes please, we'll be there at one.",
+    "uri": "mail:///messages/s-207"
+  },
+  {
+    "id": "s-204",
+    "subject": "Q3 KPI pack",
+    "from": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "recipients": [
+      "oliver.pemberton@pennywhistle.example"
+    ],
+    "sentDateTime": "2026-10-09T17:30:00Z",
+    "summary": "Oliver – I'll circulate the KPI pack by Mon 19 Oct, with the complaints trend you asked for.",
+    "uri": "mail:///messages/s-204"
+  },
+  {
+    "id": "s-201",
+    "subject": "RE: SCAR-031 – colour variation in Russet felt, lot RF-2207",
+    "from": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "recipients": [
+      "desmond.achebe@feltcraft.example"
+    ],
+    "sentDateTime": "2026-10-09T09:10:00Z",
+    "summary": "Hi Desmond, just checking the 8D is still on track for the 16th. Could you confirm?",
+    "uri": "mail:///messages/s-201"
+  },
+  {
+    "id": "s-206",
+    "subject": "Mk4 FAI prep",
+    "from": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "recipients": [
+      "declan.moss@pennywhistle.example"
+    ],
+    "sentDateTime": "2026-10-08T17:00:00Z",
+    "summary": "Microsoft Teams meeting Join: https://teams.example/l/meetup-join/19%3ameeting_fai Meeting ID: 312 554 901",
+    "uri": "mail:///messages/s-206"
+  },
+  {
+    "id": "s-202",
+    "subject": "RE: Load rig calibration certificate expiring 30 Sep",
+    "from": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "recipients": [
+      "declan.moss@pennywhistle.example"
+    ],
+    "sentDateTime": "2026-10-08T16:40:00Z",
+    "summary": "Declan – Calderbrook can do 21 Oct. I've raised NCR-2026-047 for the tests run after expiry.",
+    "uri": "mail:///messages/s-202"
+  },
+  {
+    "id": "s-203",
+    "subject": "Certificate template TF-22 – new layout",
+    "from": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "recipients": [
+      "ravi.chandrasekar@pennywhistle.example"
+    ],
+    "sentDateTime": "2026-10-08T11:00:00Z",
+    "summary": "Hi Ravi, could you send me the draft certificate layout from the LMS upgrade by Fri 16 Oct, so I can revise TF-22 in time?",
+    "uri": "mail:///messages/s-203"
+  }
+]

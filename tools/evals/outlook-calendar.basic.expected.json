@@ -1,0 +1,70 @@
+{
+  "scenario": "fixtures/outlook-calendar/basic",
+  "description": "One calendar run over the test data folder covering E20-E23, prep, invites, a cancellation, an overlap and the transcript pass.",
+  "setup": [
+    "Make a scratch data folder as README.md in this folder describes (a copy of the test data folder, discerny_data), and connect the helper to it.",
+    "In its SOURCES.md outlook-calendar block, add \"- fixture: <absolute path to tools/evals/fixtures/outlook-calendar/basic>\" and set transcripts to organizer-only (E23)."
+  ],
+  "expect": [
+    {
+      "eval": "E20",
+      "event": "AAMkAGI-mk4-fai-1020",
+      "result": "Tracked through T-0029 (cal ref): nothing new."
+    },
+    {
+      "eval": "E21",
+      "event": "AAMkAGI-fable-gonogo-1021",
+      "result": "Report \"T-0020 moved to 23 Oct\", proposing due 2026-10-23 14:00; T-0020 gains the ref cal|2026-10-23|fable range 2027 – go/no-go; no new item."
+    },
+    {
+      "eval": "E22",
+      "event": "AAMkAGI-calderbrook-1026, AAMkAGI-open-day-1024",
+      "result": "Prep items with due:2026-10-26 09:00 (user organises, needs an agenda) and due:2026-10-24 09:00 (please bring)."
+    },
+    {
+      "eval": "E23",
+      "event": "AAMkAGI-qa-weekly-1012",
+      "result": "Transcript items: a waiting-for item on Declan Moss (rig date, due 2026-10-14), one on Meera Ilangovan (tension-test results), and the user's own CAPA log update (an item, or an update proposal on T-0001)."
+    },
+    {
+      "eval": "-",
+      "event": "AAMkAGI-owl-redesign-1014",
+      "result": "One prep item (priority organiser, pre-read), due:2026-10-14 11:00, whose note also says no response recorded; no separate invite item."
+    },
+    {
+      "eval": "-",
+      "event": "AAMkAGI-weekly-qa-sync-1015",
+      "result": "Report \"T-0031 cancelled, consider closing\"; no item."
+    },
+    {
+      "eval": "-",
+      "event": "AAMkAGI-owl-redesign-1014 and AAMkAGI-feltcraft-call-1014",
+      "result": "Reported as an overlap."
+    },
+    {
+      "eval": "-",
+      "event": "AAMkAGI-imogen-oliver-1013, AAMkAGI-mgmt-review-1022",
+      "result": "Tracked (T-0018, T-0013): nothing new; the 1:1 invite was accepted."
+    },
+    {
+      "eval": "-",
+      "event": "AAMkAGI-stageworks-standup-1013",
+      "result": "No prep signal; invite accepted: nothing."
+    },
+    {
+      "eval": "-",
+      "event": "AAMkAGI-focus-1013, AAMkAGI-half-term, AAMkAGI-fellowship-1016",
+      "result": "Dropped (focus time, all-day, out of scope); the fellowship supper is never named."
+    },
+    {
+      "eval": "-",
+      "event": "reads",
+      "result": "At most 6 event and transcript reads (invite_check_cap)."
+    },
+    {
+      "eval": "-",
+      "event": "state",
+      "result": "last_run 2026-10-12T16:00:00Z and a last_result line; no watermark; discern check passes."
+    }
+  ]
+}

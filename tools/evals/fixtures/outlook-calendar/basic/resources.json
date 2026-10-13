@@ -1,0 +1,156 @@
+{
+  "calendar:///events/AAMkAGI-owl-redesign-1014": {
+    "id": "AAMkAGI-owl-redesign-1014",
+    "subject": "Owl redesign options",
+    "organizer": {
+      "name": "Hattie Lindqvist",
+      "address": "hattie.lindqvist@pennywhistle.example"
+    },
+    "attendees": [
+      {
+        "emailAddress": "imogen.hartley@pennywhistle.example",
+        "responseStatus": "none"
+      },
+      {
+        "emailAddress": "hattie.lindqvist@pennywhistle.example",
+        "responseStatus": "accepted"
+      }
+    ],
+    "start": {
+      "dateTime": "2026-10-14T10:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-14T11:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Agenda: 1) ear tuft options 2) retest timing. Pre-read: Owl-options.pptx (attached).",
+    "showAs": "tentative",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": true,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-owl-redesign-1014",
+    "uri": "calendar:///events/AAMkAGI-owl-redesign-1014",
+    "body": "Agenda: 1) ear tuft options 2) retest timing. Pre-read: Owl-options.pptx. Link: https://pennywhistle.sharepoint.example/sites/Fable2027/Owl-options.pptx"
+  },
+  "calendar:///events/AAMkAGI-imogen-oliver-1013": {
+    "id": "AAMkAGI-imogen-oliver-1013",
+    "subject": "Imogen / Oliver 1:1",
+    "organizer": {
+      "name": "Oliver Pemberton",
+      "address": "oliver.pemberton@pennywhistle.example"
+    },
+    "attendees": [
+      {
+        "emailAddress": "imogen.hartley@pennywhistle.example",
+        "responseStatus": "accepted"
+      },
+      {
+        "emailAddress": "oliver.pemberton@pennywhistle.example",
+        "responseStatus": "accepted"
+      }
+    ],
+    "start": {
+      "dateTime": "2026-10-13T15:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-13T15:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Fortnightly 1:1.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-imogen-oliver-1013",
+    "uri": "calendar:///events/AAMkAGI-imogen-oliver-1013",
+    "body": "Fortnightly 1:1."
+  },
+  "calendar:///events/AAMkAGI-stageworks-standup-1013": {
+    "id": "AAMkAGI-stageworks-standup-1013",
+    "subject": "Stageworks stand-up",
+    "organizer": {
+      "name": "Declan Moss",
+      "address": "declan.moss@pennywhistle.example"
+    },
+    "attendees": [
+      {
+        "emailAddress": "imogen.hartley@pennywhistle.example",
+        "responseStatus": "accepted"
+      },
+      {
+        "emailAddress": "declan.moss@pennywhistle.example",
+        "responseStatus": "accepted"
+      }
+    ],
+    "start": {
+      "dateTime": "2026-10-13T07:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-13T07:45:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Daily stand-up.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-stageworks-standup-1013",
+    "uri": "calendar:///events/AAMkAGI-stageworks-standup-1013",
+    "body": "Daily stand-up."
+  },
+  "calendar:///events/AAMkAGI-qa-weekly-1012": {
+    "id": "AAMkAGI-qa-weekly-1012",
+    "subject": "QA weekly",
+    "organizer": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "attendees": [
+      {
+        "emailAddress": "imogen.hartley@pennywhistle.example",
+        "responseStatus": "organizer"
+      },
+      {
+        "emailAddress": "meera.ilangovan@pennywhistle.example",
+        "responseStatus": "accepted"
+      },
+      {
+        "emailAddress": "declan.moss@pennywhistle.example",
+        "responseStatus": "accepted"
+      },
+      {
+        "emailAddress": "tomasz.kowalczyk@pennywhistle.example",
+        "responseStatus": "accepted"
+      }
+    ],
+    "start": {
+      "dateTime": "2026-10-12T08:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-12T09:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Weekly QA team meeting.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": true,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-qa-weekly-1012",
+    "uri": "calendar:///events/AAMkAGI-qa-weekly-1012",
+    "body": "Weekly QA team meeting.",
+    "meetingTranscriptUrl": "transcripts:///AAMkAGI-qa-weekly-1012"
+  },
+  "transcripts:///AAMkAGI-qa-weekly-1012": "[08:41] Imogen Hartley: So actions. Declan, can you send the rig recalibration date by Wednesday 14 October?\n[08:41] Declan Moss: Yes, I will.\n[08:43] Imogen Hartley: I will update the CAPA log for CAPA-2026-014 once the effectiveness check is done.\n[08:44] Meera Ilangovan: I will circulate the tension-test results to everyone.\n[08:45] Imogen Hartley: Thanks all."
+}

@@ -1,0 +1,15 @@
+[
+  {
+    "id": "1760176800000",
+    "chatId": "19:a8c3f1d20b6e47c9a1@thread.v2",
+    "from": {
+      "displayName": "Nell Ashdown",
+      "email": "nell.ashdown@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-11T10:00:00Z",
+    "summary": "Workbook ch. 4 v0.4 attached – changes from your comments on v0.3.",
+    "webUrl": "https://teams.example/l/message/19:a8c3f1d20b6e47c9a1@thread.v2/1760176800000",
+    "uri": "teams:///messages/1760176800000",
+    "hasAttachment": true
+  }
+]

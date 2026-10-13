@@ -1,0 +1,33 @@
+[
+  {
+    "id": "AAMkAGI-qa-weekly-1012",
+    "subject": "QA weekly",
+    "organizer": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "meera.ilangovan@pennywhistle.example",
+      "declan.moss@pennywhistle.example",
+      "tomasz.kowalczyk@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-12T08:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-12T09:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Weekly QA team meeting.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": true,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-qa-weekly-1012",
+    "uri": "calendar:///events/AAMkAGI-qa-weekly-1012"
+  }
+]

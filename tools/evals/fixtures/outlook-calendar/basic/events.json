@@ -1,0 +1,379 @@
+[
+  {
+    "id": "AAMkAGI-stageworks-standup-1013",
+    "subject": "Stageworks stand-up",
+    "organizer": {
+      "name": "Declan Moss",
+      "address": "declan.moss@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "declan.moss@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-13T07:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-13T07:45:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Daily stand-up.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-stageworks-standup-1013",
+    "uri": "calendar:///events/AAMkAGI-stageworks-standup-1013"
+  },
+  {
+    "id": "AAMkAGI-imogen-oliver-1013",
+    "subject": "Imogen / Oliver 1:1",
+    "organizer": {
+      "name": "Oliver Pemberton",
+      "address": "oliver.pemberton@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "oliver.pemberton@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-13T15:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-13T15:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Fortnightly 1:1.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-imogen-oliver-1013",
+    "uri": "calendar:///events/AAMkAGI-imogen-oliver-1013"
+  },
+  {
+    "id": "AAMkAGI-focus-1013",
+    "subject": "Focus time",
+    "organizer": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-13T12:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-13T14:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": true,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-focus-1013",
+    "uri": "calendar:///events/AAMkAGI-focus-1013"
+  },
+  {
+    "id": "AAMkAGI-owl-redesign-1014",
+    "subject": "Owl redesign options",
+    "organizer": {
+      "name": "Hattie Lindqvist",
+      "address": "hattie.lindqvist@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "hattie.lindqvist@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-14T10:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-14T11:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Agenda: 1) ear tuft options 2) retest timing. Pre-read: Owl-options.pptx (attached).",
+    "showAs": "tentative",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": true,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-owl-redesign-1014",
+    "uri": "calendar:///events/AAMkAGI-owl-redesign-1014"
+  },
+  {
+    "id": "AAMkAGI-feltcraft-call-1014",
+    "subject": "Supplier call – Feltcraft",
+    "organizer": {
+      "name": "Tomasz Kowalczyk",
+      "address": "tomasz.kowalczyk@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "tomasz.kowalczyk@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-14T10:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-14T11:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Weekly call.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-feltcraft-call-1014",
+    "uri": "calendar:///events/AAMkAGI-feltcraft-call-1014"
+  },
+  {
+    "id": "AAMkAGI-weekly-qa-sync-1015",
+    "subject": "Canceled: Weekly QA sync",
+    "organizer": {
+      "name": "Meera Ilangovan",
+      "address": "meera.ilangovan@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "meera.ilangovan@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-15T08:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-15T08:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": true,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-weekly-qa-sync-1015",
+    "uri": "calendar:///events/AAMkAGI-weekly-qa-sync-1015"
+  },
+  {
+    "id": "AAMkAGI-half-term",
+    "subject": "Half-term week (Academy)",
+    "organizer": {
+      "name": "Marguerite Duval",
+      "address": "marguerite.duval@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "marguerite.duval@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-19T00:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-24T00:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "",
+    "showAs": "free",
+    "isAllDay": true,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-half-term",
+    "uri": "calendar:///events/AAMkAGI-half-term"
+  },
+  {
+    "id": "AAMkAGI-fellowship-1016",
+    "subject": "Fellowship supper",
+    "organizer": {
+      "name": "Ruth Ashby",
+      "address": "ruth.ashby@homemail.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "ruth.ashby@homemail.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-16T18:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-16T20:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-fellowship-1016",
+    "uri": "calendar:///events/AAMkAGI-fellowship-1016"
+  },
+  {
+    "id": "AAMkAGI-mk4-fai-1020",
+    "subject": "Mk4 FAI – Tue 20 Oct",
+    "organizer": {
+      "name": "Declan Moss",
+      "address": "declan.moss@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "declan.moss@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-20T09:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-20T11:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "First-article inspection, Stageworks bay.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-mk4-fai-1020",
+    "uri": "calendar:///events/AAMkAGI-mk4-fai-1020"
+  },
+  {
+    "id": "AAMkAGI-mgmt-review-1022",
+    "subject": "Management review – Q3 2026",
+    "organizer": {
+      "name": "Oliver Pemberton",
+      "address": "oliver.pemberton@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "oliver.pemberton@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-22T09:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-22T11:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Q3 management review.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-mgmt-review-1022",
+    "uri": "calendar:///events/AAMkAGI-mgmt-review-1022"
+  },
+  {
+    "id": "AAMkAGI-fable-gonogo-1021",
+    "subject": "Fable Range 2027 – go/no-go",
+    "organizer": {
+      "name": "Hattie Lindqvist",
+      "address": "hattie.lindqvist@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "hattie.lindqvist@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-23T13:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-23T14:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Moved from 21 Oct. Decide wave 1 scope.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-fable-gonogo-1021",
+    "uri": "calendar:///events/AAMkAGI-fable-gonogo-1021"
+  },
+  {
+    "id": "AAMkAGI-open-day-1024",
+    "subject": "Academy open day – QA stand",
+    "organizer": {
+      "name": "Marguerite Duval",
+      "address": "marguerite.duval@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "marguerite.duval@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-24T08:00:00",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-24T12:00:00",
+      "timeZone": "UTC"
+    },
+    "summary": "Please bring the toy-safety demo kit and the EN 71 leaflets.",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-open-day-1024",
+    "uri": "calendar:///events/AAMkAGI-open-day-1024"
+  },
+  {
+    "id": "AAMkAGI-calderbrook-1026",
+    "subject": "Calibration review with Calderbrook",
+    "organizer": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "bookings@calderbrook-cal.example",
+      "declan.moss@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-26T09:00:00.0000000",
+      "timeZone": "GMT Standard Time"
+    },
+    "end": {
+      "dateTime": "2026-10-26T10:00:00.0000000",
+      "timeZone": "GMT Standard Time"
+    },
+    "summary": "",
+    "showAs": "busy",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": true,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-calderbrook-1026",
+    "uri": "calendar:///events/AAMkAGI-calderbrook-1026"
+  }
+]

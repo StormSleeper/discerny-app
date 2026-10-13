@@ -1,0 +1,53 @@
+[
+  {
+    "id": "1760255100000",
+    "channelId": "19:qa-general@thread.tacv2",
+    "teamId": "19:quality-team",
+    "messageType": "message",
+    "subject": "Recert audit evidence",
+    "from": {
+      "user": {
+        "displayName": "Tomasz Kowalczyk",
+        "email": "tomasz.kowalczyk@pennywhistle.example"
+      }
+    },
+    "createdDateTime": "2026-10-12T07:45:00Z",
+    "lastModifiedDateTime": "2026-10-12T07:45:00Z",
+    "bodyPreview": "<p>All: please upload your area's evidence to the audit folder by <b>Fri 6 Nov</b>.</p>",
+    "bodyTruncated": false,
+    "webUrl": "https://teams.example/l/message/19:qa-general@thread.tacv2/1760255100000",
+    "uri": "teams:///channel/1760255100000",
+    "replies": []
+  },
+  {
+    "id": "1760200000000",
+    "channelId": "19:qa-general@thread.tacv2",
+    "teamId": "19:quality-team",
+    "messageType": "systemEventMessage",
+    "subject": null,
+    "from": null,
+    "createdDateTime": "2026-10-11T16:26:40Z",
+    "lastModifiedDateTime": "2026-10-11T16:26:40Z",
+    "bodyPreview": "<systemEventMessage/>",
+    "bodyTruncated": false,
+    "replies": []
+  },
+  {
+    "id": "1760180000000",
+    "channelId": "19:qa-general@thread.tacv2",
+    "teamId": "19:quality-team",
+    "messageType": "message",
+    "subject": "Goods-in temps",
+    "from": {
+      "user": {
+        "displayName": "Imogen Hartley",
+        "email": "imogen.hartley@pennywhistle.example"
+      }
+    },
+    "createdDateTime": "2026-10-11T10:53:20Z",
+    "lastModifiedDateTime": "2026-10-11T10:53:20Z",
+    "bodyPreview": "<p>Two temps start on goods-in on Monday.</p>",
+    "bodyTruncated": false,
+    "replies": []
+  }
+]

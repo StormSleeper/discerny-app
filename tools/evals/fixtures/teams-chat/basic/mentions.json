@@ -1,0 +1,145 @@
+[
+  {
+    "id": "1760261400000",
+    "chatId": "19:a8c3f1d20b6e47c9a1@thread.v2",
+    "from": {
+      "displayName": "Ravi Chandrasekar",
+      "email": "ravi.chandrasekar@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-12T09:30:00Z",
+    "summary": "LMS upgrade window confirmed for 20 Oct 18:00–22:00; certificates will switch to the new template once...",
+    "webUrl": "https://teams.example/l/message/19:a8c3f1d20b6e47c9a1@thread.v2/1760261400000",
+    "uri": "teams:///messages/1760261400000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1760259000000",
+    "chatId": "19:kwame-imogen_ab12cd@unq.gbl.spaces",
+    "from": {
+      "displayName": "Kwame Mensah",
+      "email": "kwame.mensah@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-12T08:30:00Z",
+    "summary": "Morning – are you OK for me to quarantine the Russet roll from lot RF-2214 until the 8D lands?",
+    "webUrl": "https://teams.example/l/message/19:kwame-imogen_ab12cd@unq.gbl.spaces/1760259000000",
+    "uri": "teams:///messages/1760259000000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1760184000000",
+    "chatId": "19:c40e9a3b7d1f4e2a9c@thread.v2",
+    "from": {
+      "displayName": "Kwame Mensah",
+      "email": "kwame.mensah@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-11T12:00:00Z",
+    "summary": "Temps start Monday; training slots on the QP-08 rev F sampling plan are Tue and Wed 09:00, and I'll need the signed...",
+    "webUrl": "https://teams.example/l/message/19:c40e9a3b7d1f4e2a9c@thread.v2/1760184000000",
+    "uri": "teams:///messages/1760184000000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1760169600000",
+    "chatId": "19:c40e9a3b7d1f4e2a9c@thread.v2",
+    "from": {
+      "displayName": "Tomasz Kowalczyk",
+      "email": "tomasz.kowalczyk@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-11T08:00:00Z",
+    "summary": "Internal audit 8.5 is booked for Tue 20 Oct in the Stageworks bay; checklist attached and the sampling sheet is in the folder, plus the...",
+    "webUrl": "https://teams.example/l/message/19:c40e9a3b7d1f4e2a9c@thread.v2/1760169600000",
+    "uri": "teams:///messages/1760169600000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1760122800000",
+    "chatId": "19:fellowship77c1e0@thread.v2",
+    "from": {
+      "displayName": "Ruth (Fellowship)",
+      "email": "ruth.ashby@homemail.example"
+    },
+    "createdDateTime": "2026-10-10T19:00:00Z",
+    "summary": "Imogen, are you still bringing soup on Friday?",
+    "webUrl": "https://teams.example/l/message/19:fellowship77c1e0@thread.v2/1760122800000",
+    "uri": "teams:///messages/1760122800000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1760101200000",
+    "chatId": "19:a8c3f1d20b6e47c9a1@thread.v2",
+    "from": {
+      "displayName": "Marguerite Duval",
+      "email": "marguerite.duval@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-10T13:00:00Z",
+    "summary": "Rod-puppet module launch moves to 12 January; the course pack review gate pilot still applies. The draft pack will be in the shared drive by...",
+    "webUrl": "https://teams.example/l/message/19:a8c3f1d20b6e47c9a1@thread.v2/1760101200000",
+    "uri": "teams:///messages/1760101200000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1760097600000",
+    "chatId": "19:lunch-club9a1b2@thread.v2",
+    "from": {
+      "displayName": "Felix Okafor",
+      "email": "felix.okafor@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-10T12:00:00Z",
+    "summary": "Imogen, lunch order for Friday?",
+    "webUrl": "https://teams.example/l/message/19:lunch-club9a1b2@thread.v2/1760097600000",
+    "uri": "teams:///messages/1760097600000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1760007900000",
+    "chatId": "19:b77d02e5a1c94f6b8d@thread.v2",
+    "from": {
+      "displayName": "Anya Volkova",
+      "email": "anya.volkova@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-09T11:05:00Z",
+    "summary": "@Imogen Hartley can you send me the FAI attendee list for the 20th so I can book the bay?",
+    "webUrl": "https://teams.example/l/message/19:b77d02e5a1c94f6b8d@thread.v2/1760007900000",
+    "uri": "teams:///messages/1760007900000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1760004720000",
+    "chatId": "19:b77d02e5a1c94f6b8d@thread.v2",
+    "from": {
+      "displayName": "Declan Moss",
+      "email": "declan.moss@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-09T10:12:00Z",
+    "summary": "Imogen – for the safe-use chapter (ch. 4), can you confirm the leg-clamp torque should be 12 Nm as in DVR rev B, not 10?",
+    "webUrl": "https://teams.example/l/message/19:b77d02e5a1c94f6b8d@thread.v2/1760004720000",
+    "uri": "teams:///messages/1760004720000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1759996800000",
+    "chatId": "19:c40e9a3b7d1f4e2a9c@thread.v2",
+    "from": {
+      "displayName": "Imogen Hartley",
+      "email": "imogen.hartley@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-09T08:00:00Z",
+    "summary": "Thanks all",
+    "webUrl": "https://teams.example/l/message/19:c40e9a3b7d1f4e2a9c@thread.v2/1759996800000",
+    "uri": "teams:///messages/1759996800000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1759935600000",
+    "chatId": "19:a8c3f1d20b6e47c9a1@thread.v2",
+    "from": {
+      "displayName": "Nell Ashdown",
+      "email": "nell.ashdown@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-08T15:00:00Z",
+    "summary": "Workbook chapter 5 draft is up for tutors to review.",
+    "webUrl": "https://teams.example/l/message/19:a8c3f1d20b6e47c9a1@thread.v2/1759935600000",
+    "uri": "teams:///messages/1759935600000",
+    "hasAttachment": false
+  }
+]

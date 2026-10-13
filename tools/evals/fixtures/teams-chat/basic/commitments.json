@@ -1,0 +1,15 @@
+[
+  {
+    "id": "1760025600000",
+    "chatId": "19:c40e9a3b7d1f4e2a9c@thread.v2",
+    "from": {
+      "displayName": "Imogen Hartley",
+      "email": "imogen.hartley@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-09T16:00:00Z",
+    "summary": "I'll send the QP-08 training slides to Kwame by Wed 14 Oct.",
+    "webUrl": "https://teams.example/l/message/19:c40e9a3b7d1f4e2a9c@thread.v2/1760025600000",
+    "uri": "teams:///messages/1760025600000",
+    "hasAttachment": false
+  }
+]

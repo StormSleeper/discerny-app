@@ -1,0 +1,111 @@
+{
+  "scenario": "fixtures/outlook-mail/basic",
+  "description": "One mail run over the test data folder: 14 inbound and 7 sent messages covering evals E1-E6, E8, E11, E13, E15 and E16.",
+  "setup": [
+    "Make a scratch data folder as README.md in this folder describes (a copy of the test data folder, discerny_data), and connect the helper to it.",
+    "In its SOURCES.md, add \"- fixture: <absolute path to tools/evals/fixtures/outlook-mail/basic>\" to the outlook-mail block.",
+    "Delete the \"## outlook-calendar\" block, so mail handles invitations itself (E8)."
+  ],
+  "expect": [
+    {
+      "eval": "E1",
+      "message": "m-101",
+      "result": "New inbox item to review the Academy QA checklist; no who (Rosa Kim is not in PEOPLE.md), her name in a note, and a \"new person?\" line in the report."
+    },
+    {
+      "eval": "E2",
+      "message": "m-102",
+      "result": "New inbox item (add the complaints trend chart) whose note names T-0013 and T-0030; p:1, from the manager."
+    },
+    {
+      "eval": "E3",
+      "message": "m-103",
+      "result": "No new item; an update proposal on T-0031 (cancelled this week)."
+    },
+    {
+      "eval": "E4",
+      "message": "m-104",
+      "result": "No new item; report \"reply received, consider closing T-0022\"."
+    },
+    {
+      "eval": "E5",
+      "message": "s-201",
+      "result": "No new item; report \"T-0007 chased 9 Oct\", not \"consider closing\"."
+    },
+    {
+      "eval": "E6",
+      "message": "s-202",
+      "result": "No new item; report \"you replied 8 Oct, consider closing T-0009\"."
+    },
+    {
+      "eval": "E8",
+      "message": "m-106",
+      "result": "New ty:Meeting item with due:2026-11-03 14:00 and a ref cal|2026-11-03|supplier review – feltcraft beside the mail ref."
+    },
+    {
+      "eval": "E11",
+      "message": "m-107",
+      "result": "New item to acknowledge CC-2026-091 by 13 Oct; T-0001 and T-0025 unchanged."
+    },
+    {
+      "eval": "E13",
+      "message": "m-108, s-207, m-109",
+      "result": "No line in any file for any of them; m-108 and s-207 counted as out of scope, m-109 as filtered; none named in the report."
+    },
+    {
+      "eval": "E15",
+      "message": "m-110",
+      "result": "New item with who:Meera Ilangovan (her display name is \"Ilangovan, Meera\")."
+    },
+    {
+      "eval": "E16",
+      "message": "m-111",
+      "result": "Not captured."
+    },
+    {
+      "eval": "-",
+      "message": "m-112",
+      "result": "Dropped (Accepted reply)."
+    },
+    {
+      "eval": "-",
+      "message": "m-113",
+      "result": "Logged in IGNORED.md as a system notice."
+    },
+    {
+      "eval": "-",
+      "message": "m-114",
+      "result": "New FYI item (copied only), who:Callum Fraser."
+    },
+    {
+      "eval": "-",
+      "message": "m-105",
+      "result": "No new item: dropped, or an update proposal on T-0028."
+    },
+    {
+      "eval": "-",
+      "message": "s-203",
+      "result": "New waiting-for item on Ravi Chandrasekar (no reply), st:Waiting, urg:soon."
+    },
+    {
+      "eval": "-",
+      "message": "s-204",
+      "result": "New commitment item to circulate the KPI pack, due:2026-10-19, who:Oliver Pemberton."
+    },
+    {
+      "eval": "-",
+      "message": "s-205",
+      "result": "Nothing: answered by m-130."
+    },
+    {
+      "eval": "-",
+      "message": "s-206",
+      "result": "Dropped: an invitation the user sent."
+    },
+    {
+      "eval": "-",
+      "message": "state",
+      "result": "watermark 2026-10-12T16:00:00Z, waiting_checked_through 2026-10-11T16:00:00Z, last_run 2026-10-12T16:00:00Z; discern check passes."
+    }
+  ]
+}

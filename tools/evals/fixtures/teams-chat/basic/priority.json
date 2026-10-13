@@ -1,0 +1,28 @@
+[
+  {
+    "id": "1760266800000",
+    "chatId": "19:oliver-imogen_ef56ab@unq.gbl.spaces",
+    "from": {
+      "displayName": "Oliver Pemberton",
+      "email": "oliver.pemberton@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-12T11:00:00Z",
+    "summary": "The board wants a one-page summary of audit readiness for its 2 Nov meeting. I'll need it from you by Wed 28 Oct.",
+    "webUrl": "https://teams.example/l/message/19:oliver-imogen_ef56ab@unq.gbl.spaces/1760266800000",
+    "uri": "teams:///messages/1760266800000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1760004720000",
+    "chatId": "19:b77d02e5a1c94f6b8d@thread.v2",
+    "from": {
+      "displayName": "Declan Moss",
+      "email": "declan.moss@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-09T10:12:00Z",
+    "summary": "Imogen – for the safe-use chapter (ch. 4), can you confirm the leg-clamp torque should be 12 Nm as in DVR rev B, not 10?",
+    "webUrl": "https://teams.example/l/message/19:b77d02e5a1c94f6b8d@thread.v2/1760004720000",
+    "uri": "teams:///messages/1760004720000",
+    "hasAttachment": false
+  }
+]

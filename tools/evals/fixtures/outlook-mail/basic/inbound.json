@@ -1,0 +1,242 @@
+[
+  {
+    "id": "m-114",
+    "subject": "Supplier performance – September PPM",
+    "from": {
+      "name": "Callum Fraser",
+      "address": "callum.fraser@pennywhistle.example"
+    },
+    "toRecipients": [
+      "tomasz.kowalczyk@pennywhistle.example"
+    ],
+    "ccRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "receivedDateTime": "2026-10-12T12:20:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "FYI – September PPM for Feltcraft rose to 2,400 after the RF-2207 rejections; the dashboard in Loomwise has the breakdown by lot.",
+    "uri": "mail:///messages/m-114"
+  },
+  {
+    "id": "m-110",
+    "subject": "Goods-in sampling plan – sign-off",
+    "from": {
+      "name": "Ilangovan, Meera",
+      "address": "meera.ilangovan@pennywhistle.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-12T10:15:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "Imogen, could you sign off the revised sampling plan for felt and foam before Kwame loads it into the Goods-In app on Wednesday 14 Oct? It is the rev F plan with the colour check added.",
+    "uri": "mail:///messages/m-110"
+  },
+  {
+    "id": "m-103",
+    "subject": "Cancelled: Weekly QA sync",
+    "from": {
+      "name": "Meera Ilangovan",
+      "address": "meera.ilangovan@pennywhistle.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-12T09:02:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "This week's QA sync on Thu 15 Oct is cancelled; we'll pick up again on the 22nd.",
+    "uri": "mail:///messages/m-103"
+  },
+  {
+    "id": "m-101",
+    "subject": "Review",
+    "from": {
+      "name": "Rosa Kim",
+      "address": "rosa.kim@pennywhistle.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-12T08:14:00Z",
+    "importance": "normal",
+    "hasAttachments": true,
+    "summary": "Hi Imogen, could you review the attached draft of the Academy QA checklist and send comments by Thursday 15 Oct? It's the one Marguerite asked for.",
+    "uri": "mail:///messages/m-101"
+  },
+  {
+    "id": "m-102",
+    "subject": "Re: Management review",
+    "from": {
+      "name": "Oliver Pemberton",
+      "address": "oliver.pemberton@pennywhistle.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-12T07:40:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "Imogen, can you add a complaints trend chart (last four quarters) to the KPI pack? I'd like it in the pack you circulate on the 19th.",
+    "uri": "mail:///messages/m-102"
+  },
+  {
+    "id": "m-107",
+    "subject": "Complaint CC-2026-091 – Academy starter kit",
+    "from": {
+      "name": "Lena Brandt",
+      "address": "lena.brandt@pennywhistle.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-11T16:45:00Z",
+    "importance": "normal",
+    "hasAttachments": true,
+    "summary": "New complaint from Briar Lane Primary: the starter kit glue gun arrived without its tip guard. Photos attached. Can you acknowledge it under QP-12 ...",
+    "uri": "mail:///messages/m-107"
+  },
+  {
+    "id": "m-111",
+    "subject": "Audit prep – notes to self",
+    "from": {
+      "name": "Imogen Hartley",
+      "address": "imogen.hartley@pennywhistle.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-11T07:00:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "Evidence list for 8.5, ask Tomasz about sampling records.",
+    "uri": "mail:///messages/m-111"
+  },
+  {
+    "id": "m-112",
+    "subject": "Accepted: Imogen / Oliver 1:1",
+    "from": {
+      "name": "Oliver Pemberton",
+      "address": "oliver.pemberton@pennywhistle.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-10T19:05:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "",
+    "uri": "mail:///messages/m-112"
+  },
+  {
+    "id": "m-108",
+    "subject": "Sunday lunch",
+    "from": {
+      "name": "Dad",
+      "address": "bill.hartley@homemail.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-10T18:00:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "Roast at ours on Sunday? Bring the kids.",
+    "uri": "mail:///messages/m-108"
+  },
+  {
+    "id": "m-105",
+    "subject": "RE: Owl header card – warning label for sign-off",
+    "from": {
+      "name": "Hattie Lindqvist",
+      "address": "hattie.lindqvist@pennywhistle.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-10T11:30:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "The printer has moved the order to Thu 15 Oct, so sign-off by end of Wed 14 Oct still works.",
+    "uri": "mail:///messages/m-105"
+  },
+  {
+    "id": "m-113",
+    "subject": "Loomwise ERP – scheduled maintenance Sat 17 Oct",
+    "from": {
+      "name": "IT notices",
+      "address": "it-notices@pennywhistle.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-10T09:00:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "Loomwise will be unavailable from 06:00 to 10:00 on Saturday 17 October for scheduled maintenance.",
+    "uri": "mail:///messages/m-113"
+  },
+  {
+    "id": "m-109",
+    "subject": "Puppeteers' Guild newsletter – October",
+    "from": {
+      "name": "Puppeteers' Guild",
+      "address": "news@puppeteersguild.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-09T17:00:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "This month: shadow puppetry masterclass, guild awards shortlist.",
+    "uri": "mail:///messages/m-109"
+  },
+  {
+    "id": "m-106",
+    "subject": "Supplier review – Feltcraft",
+    "from": {
+      "name": "Tomasz Kowalczyk",
+      "address": "tomasz.kowalczyk@pennywhistle.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-09T14:05:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "Supplier review – Feltcraft. When: Tuesday 3 November 2026 14:00–15:00 (UTC+00:00) Dublin, Edinburgh, Lisbon, London. Where: Loft meeting room. Please bring the SCAR-031 8D status.",
+    "uri": "mail:///messages/m-106"
+  },
+  {
+    "id": "m-104",
+    "subject": "RE: Fable Range – retest of Owl and Dragon",
+    "from": {
+      "name": "Helena Sørensen",
+      "address": "helena.sorensen@brightmark.example"
+    },
+    "toRecipients": [
+      "imogen.hartley@pennywhistle.example"
+    ],
+    "ccRecipients": [],
+    "receivedDateTime": "2026-10-09T10:22:00Z",
+    "importance": "normal",
+    "hasAttachments": false,
+    "summary": "Hi Imogen, a retest of both SKUs is £1,850 plus VAT, with a lead time of 6 working days from receipt of samples.",
+    "uri": "mail:///messages/m-104"
+  }
+]

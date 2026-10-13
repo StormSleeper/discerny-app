@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Discerny</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{color-scheme:light}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 -apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#f6f7f9;color:#1d2330}
+header{position:sticky;top:0;z-index:5;background:#fff;border-bottom:1px solid #dfe3ea;padding:12px 20px}
+h1{font-size:18px;margin:0 0 2px;display:flex;gap:10px;align-items:center}
+.sub{color:#5b6475;font-size:12px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px}
+.seg{display:inline-flex;border:1px solid #c9cfda;border-radius:8px;overflow:hidden}
+.seg button{border:0;background:#fff;padding:6px 12px;cursor:pointer;font:inherit;color:#37405a}
+.seg button.on{background:#1f4fd8;color:#fff}
+input[type=search],input[type=text],input[type=date],select,textarea{font:inherit;border:1px solid #c9cfda;border-radius:6px;padding:5px 8px;background:#fff}
+input[type=search]{width:200px}
+label.chk{font-size:13px;color:#37405a;display:flex;gap:5px;align-items:center}
+.btn{border:1px solid #c9cfda;background:#fff;border-radius:6px;padding:5px 10px;cursor:pointer;font:inherit}
+.btn.p{background:#1f4fd8;color:#fff;border-color:#1f4fd8}
+.stats{display:flex;gap:14px;margin-left:auto;font-size:12px;color:#5b6475}
+.stats b{color:#1d2330}
+#sync{font-size:11px;font-weight:400;color:#1c7a3e;background:#e5f5ea;border-radius:10px;padding:1px 9px}
+#sync.err{color:#b0231f;background:#fde4e3}
+main{padding:16px 20px 60px;max-width:1100px;margin:0 auto}
+.grp{margin-bottom:22px}
+.grp h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:#37405a;margin:0 0 8px;display:flex;gap:8px;align-items:center}
+.grp h2 .n{background:#e3e8f3;border-radius:10px;padding:0 8px;font-size:11px}
+.item{background:#fff;border:1px solid #e1e5ec;border-left:4px solid #c9cfda;border-radius:8px;padding:8px 12px;margin-bottom:6px}
+.item.u-today{border-left-color:#d6332f}.item.u-week{border-left-color:#e28a1b}.item.u-soon{border-left-color:#2f7fd6}.item.u-later{border-left-color:#8a93a6}.item.u-fyi{border-left-color:#c9cfda}
+.item.done{opacity:.55}.item.done .t{text-decoration:line-through}
+.row{display:flex;gap:10px;align-items:flex-start}
+.row input[type=checkbox]{margin-top:3px;width:16px;height:16px}
+.t{font-weight:600;flex:1;cursor:pointer}
+.id{font:11px Consolas,monospace;background:#eef1f6;border:0;border-radius:5px;padding:2px 6px;color:#37405a;cursor:pointer;display:inline-flex;gap:4px;align-items:center;white-space:nowrap;margin-top:1px}
+.id:hover{background:#dfe6f6}.id.ok{background:#e5f5ea;color:#1c7a3e}
+.id svg{width:11px;height:11px}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0 0 26px}
+.chip{font-size:11px;border-radius:10px;padding:1px 8px;background:#eef1f6;color:#37405a}
+.chip.type{background:#e6eaff;color:#1f4fd8}.chip.today{background:#fde4e3;color:#b0231f}.chip.week{background:#fdeed6;color:#9a5a05}
+.chip.hi{background:#fde4e3;color:#b0231f}.chip.st{background:#e5f5ea;color:#1c7a3e}.chip.due{background:#fff3c4;color:#7a5b00}
+.det{display:none;margin:8px 0 2px 26px;font-size:13px}
+.item.open .det{display:block}
+.det .src{color:#5b6475;margin-bottom:6px}
+.det .note{margin:4px 0}
+.det textarea{width:100%;min-height:54px;margin-top:6px}
+.det .ctl{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;align-items:center}
+.det a{color:#1f4fd8;margin-right:10px}
+.sub-i{display:flex;gap:6px;align-items:center;margin:2px 0}
+.sub-i.x span{text-decoration:line-through;color:#8a93a6}
+.add{background:#fff;border:1px dashed #9aa5bd;border-radius:8px;padding:10px;margin:0 0 18px;display:none;gap:8px;flex-wrap:wrap}
+.add.show{display:flex}.add input[type=text]{flex:1;min-width:260px}
+.empty{color:#8a93a6;font-style:italic}
+#gate{max-width:560px;margin:80px auto;text-align:center;display:none}
+#gate .btn{padding:10px 18px;font-size:15px}
+#msg{color:#b0231f;margin-top:12px;font-size:13px}
+.chip.miss{background:#fde4e3;color:#b0231f}
+.pin{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
+.pin input{width:190px}
+.sub2{font-size:12px;font-weight:600;color:#5b6475;margin:10px 0 6px}
+.hist{font-size:12px;color:#5b6475;margin:2px 0}
+.chip.blk{background:#fde4e3;color:#b0231f}.chip.ok{background:#e5f5ea;color:#1c7a3e}
+.deps{display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:6px 0}
+.deps .dl{font-size:12px;font-weight:600;color:#5b6475}
+.deps input{width:230px}
+.xbtn{border:0;background:none;cursor:pointer;margin-left:4px;color:inherit;font:inherit;padding:0}
+.btn.ask{margin-left:auto;white-space:nowrap;padding:2px 9px;font-size:12px}
+.btn.ask.has{border-color:#1f4fd8;color:#1f4fd8}
+.badge{background:#1f4fd8;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;margin-left:4px}
+.item.asking{outline:2px solid #1f4fd8}
+body.ask-open #app{margin-right:380px}
+#askPane{position:fixed;top:0;right:0;bottom:0;width:380px;background:#fff;border-left:1px solid #dfe3ea;box-shadow:-4px 0 12px rgba(0,0,0,.06);z-index:20;display:none;flex-direction:column;padding:12px 14px;gap:8px;overflow:hidden}
+#askPane .ah{display:flex;gap:8px;align-items:flex-start}
+#askTitle{flex:1;font-weight:600;display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap}
+.actx{display:flex;flex-wrap:wrap;gap:5px}
+.alist{flex:1;overflow:auto;display:flex;flex-direction:column;gap:6px}
+.an{border:1px solid #e1e5ec;border-radius:8px;padding:6px 8px;background:#fafbfd}
+.an.click{cursor:pointer}.an.click:hover{background:#eef3ff}
+.ats{font-size:11px;color:#5b6475}
+.atx{white-space:pre-wrap;word-break:break-word;font-size:13px}
+.atx.sm{font-size:12px;color:#37405a}
+.aact{display:flex;gap:6px;margin-top:4px}.aact .btn{padding:1px 8px;font-size:12px}
+.an textarea{width:100%;min-height:60px}
+#askNew textarea{width:100%;min-height:90px}
+.arow{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
+.hint{font-size:12px;color:#5b6475}
+.chip.click{cursor:pointer}.chip.click:hover{filter:brightness(.94)}
+.chip.prj{background:#e3f4f0;color:#0f6b5c}.chip.tag{background:#f1ebfa;color:#5a2fa0}
+.chips.trow{margin-top:4px}
+.lnk{display:inline-flex;align-items:center;gap:2px;margin-right:10px}
+.picker{display:flex;flex-direction:column;gap:4px;flex:1;min-width:230px}.pchips{display:flex;flex-wrap:wrap;gap:4px}
+#addForm.show{flex-direction:column;align-items:stretch}
+#addForm input[type=text],#addForm textarea{flex:none}
+#addForm .wide{width:100%;min-width:0}
+#addForm textarea{min-height:66px;resize:vertical}
+#addForm .arow2{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start}
+#addForm .picker input{width:100%;min-width:0}
+</style></head><body>
+<div id="gate">
+  <h2>Discerny</h2>
+  <p id="gateTxt">Connect the Discerny folder that holds TASKS.md. Your browser will ask once for permission.</p>
+  <button class="btn p" id="connect">Connect folder</button>
+  <div id="msg"></div>
+</div>
+<div id="dls"></div>
+<div id="app" style="display:none">
+<header>
+  <h1>Discerny <span id="sync">synced</span> <button class="btn" id="askAll" style="font-size:12px;font-weight:400" title="Show every queued Ask agent note">0 asks queued</button>
+  <span class="seg" id="pages" style="margin-left:8px;font-size:14px;font-weight:400"><button data-p="tasks" class="on">Tasks</button><button data-p="people">People</button><button data-p="projects">Projects</button><button data-p="systems">Systems</button></span></h1>
+  <div class="sub" id="subline">TASKS.md is the source of truth – every change is saved straight back to the file.</div>
+  <div class="bar" id="peopleBar" style="display:none">
+    <div class="seg" id="pviews">
+      <button data-v="name" class="on">By Name</button><button data-v="need">Needs data</button><button data-v="co">By company</button><button data-v="dept">By department</button><button data-v="grp">By group</button>
+    </div>
+    <input type="search" id="pq" placeholder="Search people…">
+    <label class="chk"><input type="checkbox" id="showLeft"> Show people who left</label>
+    <button class="btn" id="addPBtn">+ Add person</button>
+    <div class="stats" id="pstats"></div>
+  </div>
+  <div class="bar" id="projBar" style="display:none">
+    <input type="search" id="jq" placeholder="Search projects…">
+    <button class="btn" id="addProjBtn">+ Add project</button>
+    <div class="stats" id="jstats"></div>
+  </div>
+  <div class="bar" id="sysBar" style="display:none">
+    <input type="search" id="sq" placeholder="Search systems…">
+    <button class="btn" id="addSysBtn">+ Add system</button>
+    <div class="stats" id="sstats"></div>
+  </div>
+  <div class="bar" id="taskBar">
+    <div class="seg" id="views">
+      <button data-v="type" class="on">By type</button><button data-v="urg">By urgency</button><button data-v="person">By person</button><button data-v="tag">By tag</button><button data-v="project">By project</button>
+    </div>
+    <select id="tsort" title="Sort within each group"><option value="urg">Sort: urgency</option><option value="due">Sort: due date</option><option value="new">Sort: assigned (newest first)</option><option value="old">Sort: assigned (oldest first)</option></select>
+    <select id="ftag" title="Filter by tag"></select><select id="fprj" title="Filter by project"></select>
+    <input type="search" id="q" placeholder="Search text or ID…">
+    <label class="chk"><input type="checkbox" id="showDone"> Show done</label>
+    <button class="btn" id="addBtn">+ Add item</button>
+    <div class="stats" id="stats"></div>
+  </div>
+</header>
+<main>
+  <div id="peoplePane" style="display:none">
+    <div class="add" id="addPForm">
+      <input type="text" id="pName" placeholder="Full name (must match who: on tasks)">
+      <input type="text" id="pGrp" list="dl-grp" placeholder="Group (e.g. Puppet Studio)" style="width:200px;flex:none">
+      <button class="btn p" id="pSave">Add</button>
+    </div>
+    <div id="pout"></div>
+  </div>
+  <div id="projPane" style="display:none">
+    <div class="add" id="addProjForm"><input type="text" id="jName" placeholder="Project name"><select id="jType"></select><button class="btn p" id="jSave">Add</button></div>
+    <div id="projOut"></div>
+  </div>
+  <div id="sysPane" style="display:none">
+    <div class="add" id="addSysForm"><input type="text" id="sName" placeholder="System name"><select id="sType"></select><button class="btn p" id="sSave">Add</button></div>
+    <div id="sysOut"></div>
+  </div>
+  <div id="tasksPane">
+  <div class="add" id="addForm">
+    <input type="text" id="aTitle" class="wide" placeholder="Title (required)">
+    <div class="arow2"><select id="aType"></select><select id="aUrg"></select><input type="text" id="aPerson" placeholder="Person" style="width:160px"></div>
+    <div class="arow2"><div class="picker" id="aTags"></div><div class="picker" id="aPrjs"></div></div>
+    <textarea id="aDetails" class="wide" rows="3" placeholder="Details (optional) – saved as a note: line on the task"></textarea>
+    <div class="arow2"><button class="btn p" id="aSave">Add</button></div>
+  </div>
+  <div id="out"></div>
+  </div>
+</main>
+<aside id="askPane">
+  <div class="ah"><div id="askTitle"></div><button class="btn" id="askClose" title="Close">×</button></div>
+  <div class="actx" id="askCtx"></div>
+  <div class="alist" id="askList"></div>
+  <div id="askNew">
+    <textarea id="askText" placeholder="Note or request for the agent – a correction, a question, 'split this up', 'draft a reply', 'depends on T-00xx'…"></textarea>
+    <div class="arow"><span class="hint">Ctrl+Enter to queue</span><button class="btn p" id="askAdd">Queue note</button></div>
+  </div>
+</aside>
+</div>
+<script>
+//<core>
+var URG={today:'Today',week:'This week',soon:'Next 2 weeks',later:'Later',fyi:'FYI / awareness'};
+var URG_ORDER=['today','week','soon','later','fyi'];
+var TYPES=['Task','Meeting','Process','Document','FYI'];
+var TYPE_LABEL={Task:'Tasks',Meeting:'Meetings',Process:'Processes & SOPs',Document:'Documents to read',FYI:'FYI / awareness'};
+var STATUS=['To do','In progress','Waiting'];
+var ITEM_RE=/^- \[( |x)\] (T-\d+) (.*)$/;
+function parseMeta(s){var m={};s.split(';').forEach(function(p){var i=p.indexOf(':');if(i>0)m[p.slice(0,i).trim()]=p.slice(i+1).trim();});return m;}
+function parse(text){
+  var lines=String(text||'').replace(/\r/g,'').split('\n');var pre=[],items=[],cur=null;
+  if(lines.length&&lines[lines.length-1]==='')lines.pop();
+  lines.forEach(function(ln){
+    var m=ITEM_RE.exec(ln);
+    if(m){var rest=m[3],meta={},bi=rest.lastIndexOf(' {');
+      if(bi>-1&&rest.charAt(rest.length-1)==='}'){meta=parseMeta(rest.slice(bi+2,-1));rest=rest.slice(0,bi);}
+      cur={id:m[2],done:m[1]==='x',title:rest,meta:meta,subs:[]};items.push(cur);return;}
+    if(!cur){pre.push(ln);return;}
+    var s=/^  - (src|note|link|my|ref): ?(.*)$/.exec(ln);
+    if(s){cur.subs.push({k:s[1],v:s[2]});return;}
+    var c=/^  - \[( |x)\] (.*)$/.exec(ln);
+    if(c){cur.subs.push({k:'sub',v:c[2],x:c[1]==='x'});return;}
+    cur.subs.push({k:'raw',v:ln});
+  });
+  return {pre:pre,items:items};}
+var META_ORDER=['ty','who','prj','tg','top','urg','p','due','st','dep','done','asg'];
+function serItem(it){
+  var parts=[];META_ORDER.forEach(function(k){if(it.meta[k]!==undefined&&it.meta[k]!=='')parts.push(k+':'+String(it.meta[k]).replace(/;/g,','));});
+  Object.keys(it.meta).forEach(function(k){if(META_ORDER.indexOf(k)<0&&it.meta[k]!=='')parts.push(k+':'+String(it.meta[k]).replace(/;/g,','));});
+  var s='- ['+(it.done?'x':' ')+'] '+it.id+' '+it.title+(parts.length?' {'+parts.join('; ')+'}':'');
+  it.subs.forEach(function(b){
+    if(b.k==='raw')s+='\n'+b.v;
+    else if(b.k==='sub')s+='\n  - ['+(b.x?'x':' ')+'] '+b.v;
+    else s+='\n  - '+b.k+': '+b.v;});
+  return s;}
+function serialize(model){return model.pre.join('\n')+'\n'+model.items.map(serItem).join('\n')+(model.items.length?'\n':'');}
+function nextId(model){var n=0;model.pre.forEach(function(l){var m=/next-id:\s*(\d+)/.exec(l);if(m)n=parseInt(m[1],10);});
+  model.items.forEach(function(i){var k=parseInt(i.id.slice(2),10);if(k>=n)n=k+1;});return n;}
+function setNextId(model,n){var f=false;model.pre=model.pre.map(function(l){if(/next-id:/.test(l)){f=true;return '<!-- next-id: '+n+' -->';}return l;});
+  if(!f)model.pre.push('<!-- next-id: '+n+' -->');}
+function fmtId(n){return 'T-'+('0000'+n).slice(-4);}
+function getSub(it,k){return it.subs.filter(function(b){return b.k===k;});}
+// ---- people (PEOPLE.md): "## Group" headings, "- Name {co:; dept:; title:; mgr:; st:Left; chk:date}" + "  - note:/hist:" lines
+var PFIELDS=['co','dept','title','mgr'];
+var PLABEL={co:'Company',dept:'Department',title:'Job title',mgr:'Reports to',grp:'Group'};
+var PMETA_ORDER=['id','co','dept','title','mgr','ext','st','chk'];
+function pParse(text){
+  var lines=String(text||'').replace(/\r/g,'').split('\n');var pre=[],people=[],cur=null,grp='Other',started=false;
+  lines.forEach(function(ln){
+    var h=/^## (.*)$/.exec(ln);
+    if(h){grp=h[1].trim()||'Other';started=true;cur=null;return;}
+    var m=/^- (.+)$/.exec(ln);
+    if(m){started=true;var rest=m[1],meta={},bi=rest.lastIndexOf(' {');
+      if(bi>-1&&rest.charAt(rest.length-1)==='}'){meta=parseMeta(rest.slice(bi+2,-1));rest=rest.slice(0,bi);}
+      cur={name:rest.trim(),grp:grp,meta:meta,subs:[]};people.push(cur);return;}
+    if(!started){pre.push(ln);return;}
+    if(!cur||ln.trim()==='')return;
+    var s=/^  - (note|hist): ?(.*)$/.exec(ln);
+    if(s){cur.subs.push({k:s[1],v:s[2]});return;}
+    cur.subs.push({k:'raw',v:ln});});
+  while(pre.length&&pre[pre.length-1].trim()==='')pre.pop();
+  return {pre:pre,people:people};}
+function pSerItem(p){
+  var parts=[];PMETA_ORDER.forEach(function(k){if(p.meta[k]!==undefined&&p.meta[k]!=='')parts.push(k+':'+String(p.meta[k]).replace(/;/g,','));});
+  Object.keys(p.meta).forEach(function(k){if(PMETA_ORDER.indexOf(k)<0&&p.meta[k]!=='')parts.push(k+':'+String(p.meta[k]).replace(/;/g,','));});
+  var s='- '+p.name+(parts.length?' {'+parts.join('; ')+'}':'');
+  p.subs.forEach(function(b){s+=(b.k==='raw')?'\n'+b.v:'\n  - '+b.k+': '+b.v;});
+  return s;}
+function pSerialize(model){
+  var order=[];model.people.forEach(function(p){var g=p.grp||'Other';if(order.indexOf(g)<0)order.push(g);});
+  var out=model.pre.slice();
+  order.forEach(function(g){out.push('');out.push('## '+g);model.people.forEach(function(p){if((p.grp||'Other')===g)out.push(pSerItem(p));});});
+  return out.join('\n')+'\n';}
+function pMissing(p){return PFIELDS.filter(function(k){return !p.meta[k];});}
+// person IDs (P-####, permanent, never reused; counter lives in a next-id comment in PEOPLE.md)
+function fmtPId(n){return 'P-'+('0000'+n).slice(-4);}
+function pNextId(model){var n=0;model.pre.forEach(function(l){var m=/next-id:\s*(\d+)/.exec(l);if(m)n=parseInt(m[1],10);});
+  model.people.forEach(function(p){var m=/^P-(\d+)$/.exec(p.meta.id||'');if(m&&parseInt(m[1],10)>=n)n=parseInt(m[1],10)+1;});return n;}
+function pSetNextId(model,n){var f=false;model.pre=model.pre.map(function(l){if(/next-id:/.test(l)){f=true;return '<!-- next-id: '+n+' -->';}return l;});
+  if(!f)model.pre.push('<!-- next-id: '+n+' -->');}
+function ensurePIds(model){var n=pNextId(model),c=0;
+  model.people.forEach(function(p){if(!/^P-\d+$/.test(p.meta.id||'')){p.meta.id=fmtPId(n++);c++;}});
+  if(c||!model.pre.some(function(l){return /next-id:/.test(l);}))pSetNextId(model,n);return c;}
+// task dependencies: dep:T-0012,T-0015 means "blocked by"
+function depList(i){return String(i.meta.dep||'').split(/[ ,]+/).filter(Boolean);}
+// ask-agent queue (ASK-AGENT.md): one line per note "- T-0012 | 2026-10-06 14:32 | text" (newlines stored as " ⏎ ")
+var NOTE_RE=/^- ((?:T|P|PRJ|SYS)-\d+) \| (\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?) \| (.*)$/;
+function aParse(text){var lines=String(text||'').replace(/\r/g,'').split('\n');if(lines.length&&lines[lines.length-1]==='')lines.pop();
+  var notes=[];lines.forEach(function(ln){var m=NOTE_RE.exec(ln);if(m)notes.push({id:m[1],ts:m[2],text:m[3].split(' ⏎ ').join('\n'),raw:ln});});
+  return {lines:lines,notes:notes};}
+function aLine(id,ts,text){return '- '+id+' | '+ts+' | '+String(text).replace(/\r/g,'').split('\n').map(function(s){return s.trim();}).filter(Boolean).join(' ⏎ ');}
+// ---- tags / projects / systems / relationships (PROJECTS.md, SYSTEMS.md, RELATIONSHIPS.md)
+function csv(s){return String(s||'').split(',').map(function(x){return x.trim();}).filter(Boolean);}
+function tagsOf(i){var t=csv(i.meta.tg);if(!t.length&&!i.meta.prj&&i.meta.top)t=[i.meta.top];return t;}
+function prjOf(i){return csv(i.meta.prj);}
+function cleanTag(s){return String(s||'').replace(/[;,{}]/g,' ').replace(/\s+/g,' ').trim();}
+var EMETA_ORDER=['id','type','owner','parent','part-of','st'];
+function eParse(text){
+  var lines=String(text||'').replace(/\r/g,'').split('\n');var pre=[],ents=[],cur=null,grp='',started=false;
+  lines.forEach(function(ln){
+    var h=/^## (.*)$/.exec(ln);
+    if(h){grp=h[1].trim();started=true;cur=null;return;}
+    var m=/^- (.+)$/.exec(ln);
+    if(m){started=true;var rest=m[1],meta={},bi=rest.lastIndexOf(' {');
+      if(bi>-1&&rest.charAt(rest.length-1)==='}'){meta=parseMeta(rest.slice(bi+2,-1));rest=rest.slice(0,bi);}
+      cur={name:rest.trim(),grp:grp,meta:meta,subs:[]};ents.push(cur);return;}
+    if(!started){pre.push(ln);return;}
+    if(!cur||ln.trim()==='')return;
+    var s=/^  - (note|link|my): ?(.*)$/.exec(ln);
+    if(s){cur.subs.push({k:s[1],v:s[2]});return;}
+    cur.subs.push({k:'raw',v:ln});});
+  while(pre.length&&pre[pre.length-1].trim()==='')pre.pop();
+  return {pre:pre,ents:ents};}
+function eSerItem(e){
+  var parts=[];EMETA_ORDER.forEach(function(k){if(e.meta[k]!==undefined&&e.meta[k]!=='')parts.push(k+':'+String(e.meta[k]).replace(/;/g,','));});
+  Object.keys(e.meta).forEach(function(k){if(EMETA_ORDER.indexOf(k)<0&&e.meta[k]!=='')parts.push(k+':'+String(e.meta[k]).replace(/;/g,','));});
+  var s='- '+e.name+(parts.length?' {'+parts.join('; ')+'}':'');
+  e.subs.forEach(function(b){s+=(b.k==='raw')?'\n'+b.v:'\n  - '+b.k+': '+b.v;});
+  return s;}
+function eSerialize(model){
+  var order=[];model.ents.forEach(function(e){var g=e.grp||'';if(order.indexOf(g)<0)order.push(g);});
+  var out=model.pre.slice();
+  order.forEach(function(g){out.push('');if(g)out.push('## '+g);model.ents.forEach(function(e){if((e.grp||'')===g)out.push(eSerItem(e));});});
+  return out.join('\n')+'\n';}
+function fmtEId(kind,n){return kind+'-'+('0000'+n).slice(-4);}
+function eNextId(model,kind){var n=0,re=new RegExp('^'+kind+'-(\\d+)$');
+  model.pre.forEach(function(l){var m=/next-id:\s*(\d+)/.exec(l);if(m)n=parseInt(m[1],10);});
+  model.ents.forEach(function(e){var m=re.exec(e.meta.id||'');if(m&&parseInt(m[1],10)>=n)n=parseInt(m[1],10)+1;});return n||1;}
+function eSetNextId(model,n){var f=false;model.pre=model.pre.map(function(l){if(/next-id:/.test(l)){f=true;return '<!-- next-id: '+n+' -->';}return l;});
+  if(!f)model.pre.push('<!-- next-id: '+n+' -->');}
+function ensureEIds(model,kind){var n=eNextId(model,kind),c=0,re=new RegExp('^'+kind+'-\\d+$');
+  model.ents.forEach(function(e){if(!re.test(e.meta.id||'')){e.meta.id=fmtEId(kind,n++);c++;}});
+  if(c)eSetNextId(model,n);return c;}
+// relationships: "- T-0007 ~ T-0032 | related" (symmetric, stored once) or "- T-0014 -> SYS-0002 | concerns"
+var REL_RE=/^- ((?:T|P|PRJ|SYS)-\d+) (~|->) ((?:T|P|PRJ|SYS)-\d+) \| (.+)$/;
+function rParse(text){var lines=String(text||'').replace(/\r/g,'').split('\n');if(lines.length&&lines[lines.length-1]==='')lines.pop();
+  var rels=[];lines.forEach(function(ln){var m=REL_RE.exec(ln);if(m)rels.push({a:m[1],op:m[2],b:m[3],type:m[4].trim(),raw:ln});});
+  return {lines:lines,rels:rels};}
+function kindOf(id){return String(id).split('-')[0];}
+var REL_PAIRS={'T|SYS':'concerns','T|P':'involves','P|SYS':'owns','PRJ|SYS':'uses'};
+function relLine(a,b){
+  if(a===b)return {err:'An item cannot be linked to itself.'};
+  var ka=kindOf(a),kb=kindOf(b);
+  if(ka===kb&&ka!=='PRJ'){var s=[a,b].sort();return {line:'- '+s[0]+' ~ '+s[1]+' | related'};}
+  var k1=ka+'|'+kb,k2=kb+'|'+ka;
+  if(REL_PAIRS[k1])return {line:'- '+a+' -> '+b+' | '+REL_PAIRS[k1]};
+  if(REL_PAIRS[k2])return {line:'- '+b+' -> '+a+' | '+REL_PAIRS[k2]};
+  return {err:'Cannot link '+ka+' to '+kb+' (projects are linked to tasks with the Project field).'};}
+//</core>
+
+// ------------- file layer -------------
+var dir=null,TASKS=null,DONE=null,INBOX=null,PEOPLE=null,ASK={lines:[],notes:[]},lastMod={},busy=false;
+var $=function(id){return document.getElementById(id);};
+function idb(){return new Promise(function(res,rej){var r=indexedDB.open('discerny',1);r.onupgradeneeded=function(){r.result.createObjectStore('h');};r.onsuccess=function(){res(r.result);};r.onerror=function(){rej(r.error);};});}
+async function idbGet(k){var d=await idb();return new Promise(function(res){var q=d.transaction('h').objectStore('h').get(k);q.onsuccess=function(){res(q.result);};q.onerror=function(){res(null);};});}
+async function idbSet(k,v){var d=await idb();return new Promise(function(res){var t=d.transaction('h','readwrite');t.objectStore('h').put(v,k);t.oncomplete=res;});}
+async function readFile(name){try{var h=await dir.getFileHandle(name);var f=await h.getFile();lastMod[name]=f.lastModified;return await f.text();}catch(e){if(e.name==='NotFoundError')return '';throw e;}}
+async function writeFile(name,text){var h=await dir.getFileHandle(name,{create:true});var w=await h.createWritable();await w.write(text);await w.close();var f=await h.getFile();lastMod[name]=f.lastModified;}
+async function modOf(name){try{var h=await dir.getFileHandle(name);return (await h.getFile()).lastModified;}catch(e){return 0;}}
+function setSync(ok,msg){var s=$('sync');s.textContent=msg||(ok?'synced':'error');s.className=ok?'':'err';}
+// read-modify-write against the freshest copy on disk
+async function mutate(name,fn){
+  var model=parse(await readFile(name));
+  var r=fn(model);
+  await writeFile(name,serialize(model));
+  return r;}
+async function reload(){
+  TASKS=parse(await readFile('TASKS.md'));
+  DONE=$('showDone').checked?parse(await readFile('DONE.md')):null;
+  INBOX=parse(await readFile('INBOX.md'));
+  PEOPLE=pParse(await readFile('PEOPLE.md'));
+  if(PEOPLE.people.some(function(p){return !/^P-\d+$/.test(p.meta.id||'');})){await mutateP(function(){});PEOPLE=pParse(await readFile('PEOPLE.md'));}
+  PROJ=eParse(await readFile('PROJECTS.md'));SYSM=eParse(await readFile('SYSTEMS.md'));
+  if(PROJ.ents.some(function(e){return !/^PRJ-\d+$/.test(e.meta.id||'');})){await mutateE('PRJ',function(){});PROJ=eParse(await readFile('PROJECTS.md'));}
+  if(SYSM.ents.some(function(e){return !/^SYS-\d+$/.test(e.meta.id||'');})){await mutateE('SYS',function(){});SYSM=eParse(await readFile('SYSTEMS.md'));}
+  REL=rParse(await readFile('RELATIONSHIPS.md'));
+  ASK=aParse(await readFile('ASK-AGENT.md'));
+  render();}
+async function safe(fn){if(busy)return;busy=true;try{await fn();setSync(true);}catch(e){console.error(e);setSync(false,'error: '+e.message);}finally{busy=false;}}
+
+// ------------- operations -------------
+function today(){return new Date().toISOString().slice(0,10);}
+function patchMeta(id,patch){return safe(async function(){
+  await mutate('TASKS.md',function(m){var it=m.items.filter(function(i){return i.id===id;})[0];if(!it)return;for(var k in patch){if(patch[k]===''||patch[k]==null)delete it.meta[k];else it.meta[k]=patch[k];}});
+  await reload();});}
+function patchItem(id,fn){return safe(async function(){
+  await mutate('TASKS.md',function(m){var it=m.items.filter(function(i){return i.id===id;})[0];if(it)fn(it);});
+  await reload();});}
+function complete(id){return safe(async function(){
+  var moved=null;
+  var cur=parse(await readFile('TASKS.md')).items.filter(function(i){return i.id===id;})[0];
+  if(!cur)return;
+  await mutate('DONE.md',function(m){cur.done=true;cur.meta.done=today();delete cur.meta.st;m.items=m.items.filter(function(i){return i.id!==id;});m.items.push(cur);moved=cur;});
+  await mutate('TASKS.md',function(m){m.items=m.items.filter(function(i){return i.id!==id;});});
+  await reload();});}
+function reopen(id){return safe(async function(){
+  var cur=parse(await readFile('DONE.md')).items.filter(function(i){return i.id===id;})[0];
+  if(!cur)return;
+  await mutate('TASKS.md',function(m){cur.done=false;delete cur.meta.done;m.items=m.items.filter(function(i){return i.id!==id;});m.items.push(cur);m.items.sort(function(a,b){return a.id<b.id?-1:1;});});
+  await mutate('DONE.md',function(m){m.items=m.items.filter(function(i){return i.id!==id;});});
+  await reload();});}
+// ---- projects / systems / relationships operations
+var EDEF={PRJ:{file:'PROJECTS.md',word:'project',out:'projOut',types:['Project','Workstream','Pod'],sts:['Active','On hold','Done'],pk:'parent'},
+  SYS:{file:'SYSTEMS.md',word:'system',out:'sysOut',types:['Platform','Pipeline','Registry','Application','Instrument','Other'],sts:['Live','In build','Delayed','Retired'],pk:'part-of'}};
+var REL_HEAD=['# Relationships','<!-- One line per link, stored once (shown on both items): `- A ~ B | related` (symmetric) or `- A -> B | type` (involves, concerns, owns, uses). Validate: both IDs exist, no duplicates, no self-links. `dep:` on tasks is separate. -->',''];
+async function mutateE(kind,fn){var d=EDEF[kind];var m=eParse(await readFile(d.file));var r=fn(m);ensureEIds(m,kind);await writeFile(d.file,eSerialize(m));return r;}
+async function createEnt(kind,name,meta){return mutateE(kind,function(m){var n=eNextId(m,kind),id=fmtEId(kind,n),mm={id:id};
+  for(var k in meta)if(meta[k])mm[k]=meta[k];
+  m.ents.push({name:name,grp:m.ents.length?m.ents[m.ents.length-1].grp:'',meta:mm,subs:[]});eSetNextId(m,n+1);return id;});}
+function editEnt(kind,id,fn){return safe(async function(){await mutateE(kind,function(m){var e=m.ents.filter(function(x){return x.meta.id===id;})[0];if(e)fn(e,m);});await reload();});}
+function patchEnt(kind,id,patch){return editEnt(kind,id,function(e){for(var k in patch){if(patch[k]===''||patch[k]==null)delete e.meta[k];else e.meta[k]=patch[k];}});}
+function addEntUI(kind,name,type){return safe(async function(){await createEnt(kind,name,{type:type,st:kind==='PRJ'?'Active':''});await reload();});}
+function removeEnt(kind,id){return safe(async function(){
+  var pk=EDEF[kind].pk;
+  await mutateE(kind,function(m){m.ents=m.ents.filter(function(x){return x.meta.id!==id;});m.ents.forEach(function(x){if(x.meta[pk]===id)delete x.meta[pk];});});
+  await rMutate(function(l){return l.filter(function(ln){var m=REL_RE.exec(ln);return !(m&&(m[1]===id||m[3]===id));});});
+  if(kind==='PRJ')await mutate('TASKS.md',function(m){m.items.forEach(function(i){var all=prjOf(i),p=all.filter(function(x){return x!==id;});if(p.length!==all.length){if(p.length)i.meta.prj=p.join(',');else delete i.meta.prj;}});});
+  await reload();});}
+async function rMutate(fn){var lines=rParse(await readFile('RELATIONSHIPS.md')).lines;if(!lines.length)lines=REL_HEAD.slice();var out=fn(lines);await writeFile('RELATIONSHIPS.md',out.join('\n')+'\n');}
+async function idExists(id){var k=kindOf(id);
+  if(k==='T'){var f=['TASKS.md','DONE.md','INBOX.md'];for(var x=0;x<f.length;x++){if(parse(await readFile(f[x])).items.some(function(i){return i.id===id;}))return true;}return false;}
+  if(k==='P')return pParse(await readFile('PEOPLE.md')).people.some(function(p){return p.meta.id===id;});
+  var d=EDEF[k];if(!d)return false;return eParse(await readFile(d.file)).ents.some(function(e){return e.meta.id===id;});}
+function addRel(a,b){return safe(async function(){
+  var r=relLine(a,b);if(r.err){alert(r.err);return;}
+  if(!(await idExists(a))||!(await idExists(b))){alert('Both items must exist.');return;}
+  var dup=false;await rMutate(function(l){if(l.indexOf(r.line)>=0){dup=true;return l;}l.push(r.line);return l;});
+  if(dup)alert('Already linked.');
+  await reload();});}
+function removeRel(raw){return safe(async function(){await rMutate(function(l){var k=l.indexOf(raw);if(k>=0)l.splice(k,1);return l;});await reload();});}
+function addPrjToTask(i,v){var id=resolvePrj(v);
+  if(!id){var nm=cleanTag(v);if(!nm)return;if(!confirm('No project called "'+nm+'". Create it?'))return;
+    return safe(async function(){var nid=await createEnt('PRJ',nm,{type:'Project',st:'Active'});
+      await mutate('TASKS.md',function(m){var it=m.items.filter(function(x){return x.id===i.id;})[0];if(it){var p=prjOf(it);p.push(nid);it.meta.prj=p.join(',');}});await reload();});}
+  if(prjOf(i).indexOf(id)>=0)return;patchMeta(i.id,{prj:prjOf(i).concat([id]).join(',')});}
+function addItem(o){return safe(async function(){
+  var ids=[];for(var k=0;k<o.prjs.length;k++){var p=o.prjs[k];ids.push(p.isNew?await createEnt('PRJ',p.name,{type:'Project',st:'Active'}):p.key);}
+  await mutate('TASKS.md',function(m){var n=nextId(m);var mt={ty:o.ty,who:o.who,urg:o.urg,p:'2',asg:nowStamp()};
+    if(ids.length)mt.prj=ids.join(',');if(o.tags.length)mt.tg=o.tags.join(',');
+    var subs=[{k:'src',v:'Added '+today()}];
+    String(o.details||'').split('\n').map(function(s){return s.trim();}).filter(Boolean).forEach(function(v){subs.push({k:'note',v:v});});
+    m.items.push({id:fmtId(n),done:false,title:o.title,meta:mt,subs:subs});setNextId(m,n+1);});
+  await reload();});}
+function acceptInbox(id){return safe(async function(){
+  var cur=parse(await readFile('INBOX.md')).items.filter(function(i){return i.id===id;})[0];if(!cur)return;
+  await mutate('TASKS.md',function(m){m.items=m.items.filter(function(i){return i.id!==id;});m.items.push(cur);m.items.sort(function(a,b){return a.id<b.id?-1:1;});
+    var n=parseInt(id.slice(2),10)+1;if(n>nextId(m))setNextId(m,n);});
+  await mutate('INBOX.md',function(m){m.items=m.items.filter(function(i){return i.id!==id;});});
+  await reload();});}
+function dismissInbox(id){var why=window.prompt('Reason for ignoring (optional)','not actionable');if(why===null)return;
+  return safe(async function(){
+  var cur=parse(await readFile('INBOX.md')).items.filter(function(i){return i.id===id;})[0];if(!cur)return;
+  var refs=ignorable(getSub(cur,'ref').map(function(b){return b.v;}));if(!refs.length)refs=['inbox|'+cur.title];
+  why=(why||'dismissed').replace(/\|/g,'/');
+  var ig=await readFile('IGNORED.md');if(ig&&ig.slice(-1)!=='\n')ig+='\n';
+  refs.forEach(function(r){ig+=r+' | '+today()+' | '+(why||'dismissed').replace(/\n/g,' ')+' ('+id+')\n';});
+  await writeFile('IGNORED.md',ig);
+  await mutate('INBOX.md',function(m){m.items=m.items.filter(function(i){return i.id!==id;});});
+  await reload();});}
+// container refs (a whole chat or thread: any scheme ending in |*, or the legacy bare teams|chat-prefix) mean "related", so they must never be logged as a blanket ignore
+function ignorable(refs){return refs.filter(function(r){return !/\|\*$/.test(r)&&!/^teams\|[^|]+$/.test(r);});}
+function removeItem(id){return safe(async function(){
+  var refs=[];
+  await mutate('TASKS.md',function(m){var it=m.items.filter(function(i){return i.id===id;})[0];if(it)refs=getSub(it,'ref').map(function(b){return b.v;});m.items=m.items.filter(function(i){return i.id!==id;});});
+  refs=ignorable(refs);
+  if(refs.length){var ig=await readFile('IGNORED.md');if(ig&&ig.slice(-1)!=='\n')ig+='\n';
+    refs.forEach(function(r){ig+=r+' | '+today()+' | deleted by user ('+id+')\n';});await writeFile('IGNORED.md',ig);}
+  await reload();});}
+// ---- people operations (read-modify-write against the freshest PEOPLE.md)
+async function mutateP(fn){var m=pParse(await readFile('PEOPLE.md'));var r=fn(m);ensurePIds(m);await writeFile('PEOPLE.md',pSerialize(m));return r;}
+function findP(m,name){return m.people.filter(function(p){return p.name===name;})[0];}
+function editPerson(name,fn){return safe(async function(){await mutateP(function(m){var p=findP(m,name);if(p)fn(p);});await reload();});}
+// changing a known field records "date | Label: old -> new" so role moves are visible
+function patchPerson(name,patch){return editPerson(name,function(p){
+  var touched=false;
+  Object.keys(patch).forEach(function(k){
+    var nv=patch[k]==null?'':String(patch[k]).trim();
+    if(k==='grp'){p.grp=nv||'Other';return;}
+    var old=p.meta[k]||'';if(nv===old)return;
+    if(nv==='')delete p.meta[k];else p.meta[k]=nv;
+    if(PFIELDS.indexOf(k)>=0){touched=true;if(old&&nv)p.subs.push({k:'hist',v:today()+' | '+PLABEL[k]+': '+old+' → '+nv});}});
+  if(touched&&patch.chk===undefined)p.meta.chk=today();});}
+function addPerson(name,grp){return safe(async function(){
+  await mutateP(function(m){if(findP(m,name))return;m.people.push({name:name,grp:grp||'Other',meta:{},subs:[]});});
+  await reload();});}
+function removePerson(name){return safe(async function(){
+  await mutateP(function(m){m.people=m.people.filter(function(p){return p.name!==name;});});await reload();});}
+// ---- ask-agent queue operations: each only adds, edits or removes ONE line of ASK-AGENT.md
+var ASK_HEAD=['# Ask agent queue','<!-- One line per pending note: - ID | YYYY-MM-DD HH:MM | text. Written by discerny-old.html. The agent removes a line once it is actioned (skill: discern-ask-agent) and records it in ASK-AGENT-LOG.md. -->',''];
+function nowStamp(){var d=new Date(),p=function(n){return ('0'+n).slice(-2);};return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());}
+async function whenFree(){var n=0;while(busy&&n++<50)await new Promise(function(r){setTimeout(r,100);});}
+async function aMutate(fn){var lines=aParse(await readFile('ASK-AGENT.md')).lines;if(!lines.length)lines=ASK_HEAD.slice();
+  var out=fn(lines);await writeFile('ASK-AGENT.md',out.join('\n')+'\n');}
+async function askOp(fn){await whenFree();var ok=false;await safe(async function(){await aMutate(fn);await reload();ok=true;});return ok;}
+function addAsk(id,text){var line=aLine(id,nowStamp(),text);return askOp(function(l){l.push(line);return l;});}
+function removeAsk(raw){return askOp(function(l){var k=l.indexOf(raw);if(k>=0)l.splice(k,1);return l;});}
+function editAsk(raw,text){return askOp(function(l){var k=l.indexOf(raw),m=NOTE_RE.exec(raw);if(k>=0&&m&&String(text).trim())l[k]=aLine(m[1],m[2],text);return l;});}
+
+// ------------- rendering -------------
+var view='type',openId=null,page='tasks',pview='name',openP=null;
+function el(t,c,h){var e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+var COPY_SVG='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/></svg>';
+function meta(i,k,d){var v=i.meta[k];return v==null||v===''?d:v;}
+function allItems(){var a=TASKS?TASKS.items.slice():[];if(DONE)a=a.concat(DONE.items);return a;}
+function render(){renderLists();if(page==='people')renderPeople();else if(page==='projects')renderEnts('PRJ');else if(page==='systems')renderEnts('SYS');else renderTasks();renderAsk();updateAskTotal();}
+function findTaskById(id){var a=allItems().concat(INBOX?INBOX.items:[]);return a.filter(function(i){return i.id===id;})[0];}
+function isOpenTask(id){return !!(TASKS&&TASKS.items.filter(function(i){return i.id===id;})[0]);}
+function dependsOn(a,b,seen){seen=seen||{};if(a===b)return true;if(seen[a])return false;seen[a]=1;var t=TASKS.items.filter(function(i){return i.id===a;})[0];
+  return !!t&&depList(t).some(function(d){return dependsOn(d,b,seen);});}
+function shortT(s){s=String(s||'');return s.length>40?s.slice(0,38)+'…':s;}
+function renderTasks(){
+  if(!TASKS)return;
+  var q=$('q').value.toLowerCase();var all=allItems();
+  var openN=TASKS.items.length;
+  $('stats').innerHTML='<span><b>'+openN+'</b> open</span><span><b>'+TASKS.items.filter(function(i){return meta(i,'urg')==='today';}).length+'</b> due today</span>'+(DONE?'<span><b>'+DONE.items.length+'</b> done</span>':'');
+  var list=all.filter(function(i){
+    if(q&&(i.id+' '+i.title+' '+meta(i,'who','')+' '+topicText(i)+' '+getSub(i,'note').map(function(b){return b.v;}).join(' ')).toLowerCase().indexOf(q)<0)return false;if(filt.tag&&tagsOf(i).indexOf(filt.tag)<0)return false;if(filt.prj&&prjRoll(i).indexOf(filt.prj)<0)return false;return true;});
+  var ts=$('tsort').value;
+  if(ts==='due')list.sort(function(a,b){return (a.done-b.done)||meta(a,'due','9999').localeCompare(meta(b,'due','9999'))||URG_ORDER.indexOf(meta(a,'urg','later'))-URG_ORDER.indexOf(meta(b,'urg','later'))||(parseInt(meta(a,'p','2'),10)-parseInt(meta(b,'p','2'),10))||(a.id<b.id?-1:1);});
+  else if(ts!=='urg')list.sort(function(a,b){var c=(a.done-b.done)||String(meta(a,'asg','')).localeCompare(String(meta(b,'asg','')));if(c&&ts==='new'&&a.done===b.done)c=-c;return c||(a.id<b.id?-1:1);});
+  else list.sort(function(a,b){return (a.done-b.done)||URG_ORDER.indexOf(meta(a,'urg','later'))-URG_ORDER.indexOf(meta(b,'urg','later'))||meta(a,'due','z').localeCompare(meta(b,'due','z'))||(parseInt(meta(a,'p','2'),10)-parseInt(meta(b,'p','2'),10))||(a.id<b.id?-1:1);});
+  var groups={},order=[];
+  function put(g,i){if(!groups[g]){groups[g]=[];order.push(g);}if(groups[g].indexOf(i)<0)groups[g].push(i);}
+  list.forEach(function(i){
+    if(view==='type')put(meta(i,'ty','Task'),i);
+    else if(view==='urg')put(meta(i,'urg','later'),i);
+    else if(view==='person')put(meta(i,'who','Unassigned'),i);
+    else if(view==='tag'){var tg=tagsOf(i);if(!tg.length)put('Untagged',i);else tg.forEach(function(t){put(t,i);});}
+    else{var ps=prjRoll(i);if(!ps.length)put('No project',i);else ps.forEach(function(p){put(prjPath(p),i);});}});
+  if(view==='type'){var known=TYPES.filter(function(t){return groups[t];});order=known.concat(order.filter(function(g){return TYPES.indexOf(g)<0;}));}
+  else if(view==='urg'){order=URG_ORDER.filter(function(u){return groups[u];}).concat(order.filter(function(g){return URG_ORDER.indexOf(g)<0;}));}
+  else if(view==='project')order.sort(function(a,b){return (a==='No project')-(b==='No project')||a.localeCompare(b);});
+  else order.sort(function(a,b){return (a==='Untagged')-(b==='Untagged')||groups[b].length-groups[a].length||a.localeCompare(b);});
+  var out=$('out');var keepScroll=window.scrollY;out.innerHTML='';
+  var dlt=document.createElement('datalist');dlt.id='dl-tasks';TASKS.items.forEach(function(i){var o=document.createElement('option');o.value=i.id+' – '+shortT(i.title);dlt.appendChild(o);});out.appendChild(dlt);
+  var inb=(INBOX?INBOX.items:[]).filter(function(i){return !q||(i.id+' '+i.title+' '+meta(i,'who','')+' '+topicText(i)).toLowerCase().indexOf(q)>=0;});
+  if(inb.length){var isec=el('div','grp');isec.appendChild(el('h2','','Inbox – to triage <span class="n">'+inb.length+'</span>'));
+    inb.forEach(function(i){isec.appendChild(inboxCard(i));});out.appendChild(isec);}
+  if(!order.length&&!inb.length)out.appendChild(el('div','empty','Nothing to show.'));
+  order.forEach(function(g){
+    var sec=el('div','grp');
+    sec.appendChild(el('h2','',esc(view==='type'&&TYPE_LABEL[g]?TYPE_LABEL[g]:view==='urg'&&URG[g]?URG[g]:g)+' <span class="n">'+groups[g].length+'</span>'));
+    groups[g].forEach(function(i){sec.appendChild(card(i));});
+    out.appendChild(sec);});
+  window.scrollTo(0,keepScroll);
+}
+function inboxCard(i){
+  var d=el('div','item u-'+meta(i,'urg','later'));d.style.borderStyle='dashed';
+  var r=el('div','row');r.appendChild(idBtn(i.id));
+  var t=el('div','t',esc(i.title));t.onclick=function(){openId=openId===i.id?null:i.id;render();};r.appendChild(t);
+  var a=el('button','btn p','Accept');a.onclick=function(){acceptInbox(i.id);};
+  var x=el('button','btn','Dismiss');x.onclick=function(){dismissInbox(i.id);};
+  r.appendChild(a);r.appendChild(x);d.appendChild(r);
+  var ch=el('div','chips');ch.style.marginLeft='0';
+  ch.innerHTML='<span class="chip type">'+esc(meta(i,'ty','Task'))+'</span><span class="chip">'+esc(meta(i,'who','Unassigned'))+'</span><span class="chip">'+esc(URG[meta(i,'urg','later')]||'')+'</span>'+topicChipsHtml(i);
+  d.appendChild(ch);
+  if(openId===i.id){var det=el('div','det');det.style.marginLeft='0';
+    getSub(i,'src').forEach(function(b){det.appendChild(el('div','src','Source: '+esc(b.v)));});
+    getSub(i,'note').forEach(function(b){det.appendChild(el('div','note',esc(b.v)));});
+    getSub(i,'link').forEach(function(b){var m=/\[(.*?)\]\((.*?)\)/.exec(b.v);if(m)det.innerHTML+='<a href="'+esc(m[2])+'" target="_blank" rel="noopener">'+esc(m[1])+'</a>';});
+    d.appendChild(det);}
+  return d;}
+function idBtn(id){var b=el('button','id',COPY_SVG+' '+id);b.title='Copy '+id;
+  b.onclick=function(e){e.stopPropagation();var done=function(){b.classList.add('ok');setTimeout(function(){b.classList.remove('ok');},900);};
+    try{navigator.clipboard.writeText(id).then(done,function(){window.prompt('Copy:',id);});}catch(x){window.prompt('Copy:',id);}};return b;}
+function card(i){
+  var urg=meta(i,'urg','later');
+  var d=el('div','item u-'+urg+(i.done?' done':'')+(openId===i.id?' open':'')+(askMode==='item'&&askTarget===i.id?' asking':''));
+  var r=el('div','row');
+  var cb=document.createElement('input');cb.type='checkbox';cb.checked=i.done;
+  cb.onchange=function(){if(i.done)reopen(i.id);else complete(i.id);};
+  var t=el('div','t',esc(i.title));t.onclick=function(){openId=openId===i.id?null:i.id;render();};
+  d.dataset.id=i.id;r.appendChild(cb);r.appendChild(idBtn(i.id));r.appendChild(t);r.appendChild(askBtn(i.id));d.appendChild(r);
+  var ch=el('div','chips');var h='<span class="chip type">'+esc(meta(i,'ty','Task'))+'</span>';
+  if(view!=='person')h+='<span class="chip">'+esc(meta(i,'who','Unassigned'))+'</span>';
+  if(view!=='urg')h+='<span class="chip '+(urg==='today'?'today':urg==='week'?'week':'')+'">'+esc(URG[urg]||urg)+'</span>';
+  if(meta(i,'asg',''))h+='<span class="chip" title="Date/time communicated to you">assigned '+esc(meta(i,'asg',''))+'</span>';
+  if(meta(i,'due',''))h+='<span class="chip due">due '+esc(meta(i,'due',''))+'</span>';
+  if(meta(i,'p','2')==='1')h+='<span class="chip hi">High</span>';
+  if(meta(i,'st',''))h+='<span class="chip st">'+esc(meta(i,'st',''))+'</span>';
+  var subs=getSub(i,'sub');if(subs.length)h+='<span class="chip">'+subs.filter(function(s){return s.x;}).length+'/'+subs.length+' sub-tasks</span>';
+  if(!i.done){var dl=depList(i),ob=dl.filter(isOpenTask);
+    if(ob.length)h+='<span class="chip blk" title="Waiting on '+esc(ob.join(', '))+'">⛔ Blocked by '+esc(ob.join(', '))+'</span>';
+    else if(dl.length)h+='<span class="chip ok">dependencies done</span>';
+    var nb=TASKS.items.filter(function(x){return depList(x).indexOf(i.id)>=0;}).length;if(nb)h+='<span class="chip">Blocks '+nb+'</span>';}
+  var nr=relsOf(i.id).length;if(nr)h+='<span class="chip">↔ '+nr+' linked</span>';
+  ch.innerHTML=h;d.appendChild(ch);
+  if(openId===i.id)d.appendChild(detail(i));
+  var tr=topicRow(i);if(tr)d.appendChild(tr);
+  return d;}
+function detail(i){
+  var det=el('div','det');
+  getSub(i,'src').forEach(function(b){det.appendChild(el('div','src','Source: '+esc(b.v)));});
+  getSub(i,'note').forEach(function(b){det.appendChild(el('div','note',esc(b.v)));});
+  var links=getSub(i,'link');if(links.length){var l=el('div','');l.style.margin='6px 0';links.forEach(function(b){var m=/\[(.*?)\]\((.*?)\)/.exec(b.v);if(m)l.innerHTML+='<a href="'+esc(m[2])+'" target="_blank" rel="noopener">'+esc(m[1])+'</a>';});det.appendChild(l);}
+  // sub-tasks
+  getSub(i,'sub').forEach(function(b,idx){var row=el('div','sub-i'+(b.x?' x':''));var c=document.createElement('input');c.type='checkbox';c.checked=!!b.x;
+    c.onchange=function(){patchItem(i.id,function(it){var s=getSub(it,'sub')[idx];if(s)s.x=!s.x;});};
+    var sp=el('span','',esc(b.v));var rm=el('button','btn','×');rm.style.padding='0 6px';rm.onclick=function(){patchItem(i.id,function(it){var s=getSub(it,'sub')[idx];it.subs.splice(it.subs.indexOf(s),1);});};
+    row.appendChild(c);row.appendChild(sp);row.appendChild(rm);det.appendChild(row);});
+  var ns=document.createElement('input');ns.type='text';ns.placeholder='+ add sub-task (Enter)';ns.style.cssText='width:100%;margin:4px 0';
+  ns.onkeydown=function(e){if(e.key==='Enter'&&ns.value.trim()){var v=ns.value.trim();patchItem(i.id,function(it){var last=-1;it.subs.forEach(function(s,k){if(s.k==='sub')last=k;});var o={k:'sub',v:v,x:false};if(last<0)it.subs.push(o);else it.subs.splice(last+1,0,o);});}};
+  det.appendChild(ns);
+  // dependencies (blocked by); "blocks" is derived from other tasks
+  var deps=depList(i);var dv=el('div','deps');dv.appendChild(el('span','dl','Blocked by:'));
+  deps.forEach(function(d){var t=findTaskById(d),open=isOpenTask(d);
+    var c=el('span','chip '+(open?'blk':'ok'),esc(d)+(t?' – '+esc(shortT(t.title)):' (not found)')+(open?'':' ✓'));
+    var x=el('button','xbtn','×');x.title='Remove dependency';x.onclick=function(){patchMeta(i.id,{dep:deps.filter(function(z){return z!==d;}).join(',')});};
+    c.appendChild(x);dv.appendChild(c);});
+  var di=document.createElement('input');di.type='text';di.setAttribute('list','dl-tasks');di.placeholder='+ blocked by… (pick or type T-####)';
+  di.onchange=function(){var v=di.value.trim();if(!v)return;var m=/T-\d+/i.exec(v),tid=null;
+    if(m)tid=m[0].toUpperCase();else{var hits=TASKS.items.filter(function(x){return x.title.toLowerCase().indexOf(v.toLowerCase())>=0;});if(hits.length===1)tid=hits[0].id;}
+    di.value='';
+    if(!tid||!findTaskById(tid)){alert('No unique task matches "'+v+'".');return;}
+    if(tid===i.id){alert('A task cannot depend on itself.');return;}
+    if(deps.indexOf(tid)>=0)return;
+    if(dependsOn(tid,i.id)){alert(tid+' already depends on '+i.id+' — that would create a loop.');return;}
+    patchMeta(i.id,{dep:deps.concat([tid]).join(',')});};
+  dv.appendChild(di);det.appendChild(dv);
+  var blocks=TASKS.items.filter(function(x){return depList(x).indexOf(i.id)>=0;});
+  if(blocks.length){var bv=el('div','deps');bv.appendChild(el('span','dl','Blocks:'));blocks.forEach(function(b){bv.appendChild(el('span','chip',esc(b.id)+' – '+esc(shortT(b.title))));});det.appendChild(bv);}
+  det.appendChild(prjEditor(i));det.appendChild(tagEditor(i));det.appendChild(relBlock(i.id));
+  // controls
+  var ctl=el('div','ctl');
+  var sel=el('select','');STATUS.forEach(function(s){var o=el('option','',s);o.value=s;if(s===(meta(i,'st','To do')))o.selected=true;sel.appendChild(o);});
+  sel.onchange=function(){patchMeta(i.id,{st:sel.value==='To do'?'':sel.value});};
+  var us=el('select','');URG_ORDER.forEach(function(u){var o=el('option','',URG[u]);o.value=u;if(u===meta(i,'urg','later'))o.selected=true;us.appendChild(o);});
+  us.onchange=function(){patchMeta(i.id,{urg:us.value});};
+  var ps=el('select','');[['1','High'],['2','Medium'],['3','Low']].forEach(function(p){var o=el('option','',p[1]);o.value=p[0];if(p[0]===meta(i,'p','2'))o.selected=true;ps.appendChild(o);});
+  ps.onchange=function(){patchMeta(i.id,{p:ps.value});};
+  var dv=meta(i,'due','');var du=document.createElement('input');du.type='date';du.title='Due date';du.value=dv.slice(0,10);var dt=document.createElement('input');dt.type='time';dt.title='Due time (optional)';dt.value=dv.slice(11,16);function setDue(){patchMeta(i.id,{due:du.value?(du.value+(dt.value?' '+dt.value:'')):''});}du.onchange=setDue;dt.onchange=setDue;
+  var ag=document.createElement('input');ag.type='datetime-local';ag.title='Assigned (when it was communicated to you)';ag.value=meta(i,'asg','').replace(' ','T');ag.onchange=function(){patchMeta(i.id,{asg:ag.value.replace('T',' ')});};
+  var rn=el('button','btn','Edit title');rn.onclick=function(){var v=window.prompt('Title',i.title);if(v&&v.trim())patchItem(i.id,function(it){it.title=v.trim();});};
+  var rm=el('button','btn','Delete');rm.onclick=function(){if(confirm('Delete '+i.id+'? (It will not go to DONE.md)'))removeItem(i.id);};
+  [sel,us,ps,du,dt,ag,rn,rm].forEach(function(x){ctl.appendChild(x);});det.appendChild(ctl);
+  var ta=document.createElement('textarea');ta.placeholder='Your notes (saved to the file as "my:" lines)…';
+  ta.value=getSub(i,'my').map(function(b){return b.v;}).join('\n');
+  ta.onchange=function(){var lines=ta.value.split('\n').map(function(s){return s.trim();}).filter(Boolean);
+    patchItem(i.id,function(it){var first=-1;it.subs.forEach(function(s,k){if(s.k==='my'&&first<0)first=k;});it.subs=it.subs.filter(function(s){return s.k!=='my';});
+      var add=lines.map(function(v){return {k:'my',v:v};});var at=first<0?(function(){var p=it.subs.length;for(var k=0;k<it.subs.length;k++){if(it.subs[k].k==='sub'||it.subs[k].k==='raw'){p=k;break;}}return p;})():first;
+      Array.prototype.splice.apply(it.subs,[at,0].concat(add));});};
+  det.appendChild(ta);return det;}
+
+// ------------- tags, projects, systems, links (rendering) -------------
+var PROJ=null,SYSM=null,REL={lines:[],rels:[]},openE=null,filt={tag:'',prj:''};
+function entsOf(kind){var m=kind==='PRJ'?PROJ:SYSM;return m?m.ents:[];}
+function findEnt(id){return entsOf(kindOf(id)).filter(function(e){return e.meta.id===id;})[0];}
+function kids(kind,id){var pk=EDEF[kind].pk;return entsOf(kind).filter(function(e){return e.meta[pk]===id;});}
+function entDesc(kind,id,seen){seen=seen||{};var out=[id];if(seen[id])return out;seen[id]=1;kids(kind,id).forEach(function(c){out=out.concat(entDesc(kind,c.meta.id,seen));});return out;}
+function prjAnc(id){var out=[],e=findEnt(id),n=0;while(e&&e.meta.parent&&n++<20){out.push(e.meta.parent);e=findEnt(e.meta.parent);}return out;}
+function prjPath(id){return prjAnc(id).reverse().concat([id]).map(function(x){var e=findEnt(x);return e?e.name:x;}).join(' › ');}
+function prjRoll(i){var out=[];prjOf(i).forEach(function(p){[p].concat(prjAnc(p)).forEach(function(x){if(out.indexOf(x)<0)out.push(x);});});return out;}
+function relsOf(id){return REL.rels.filter(function(r){return r.a===id||r.b===id;}).map(function(r){return {other:r.a===id?r.b:r.a,type:r.type,raw:r.raw,from:r.a===id};});}
+function labelAny(id){var k=kindOf(id);if(k==='T'){var t=findTaskById(id);return t?t.title:null;}if(k==='P'){var p=findPersonById(id);return p?p.name:null;}var e=findEnt(id);return e?e.name:null;}
+function pageFor(id){return {T:'tasks',P:'people',PRJ:'projects',SYS:'systems'}[kindOf(id)]||'tasks';}
+function topicText(i){return tagsOf(i).concat(prjOf(i).map(function(p){var e=findEnt(p);return e?e.name:p;})).join(' ');}
+function topicChipsHtml(i){var h='';prjOf(i).forEach(function(p){var e=findEnt(p);h+='<span class="chip prj">▣ '+esc(e?e.name:p)+'</span>';});tagsOf(i).forEach(function(t){h+='<span class="chip tag"># '+esc(t)+'</span>';});return h;}
+function topicRow(i){var ps=prjOf(i),tg=tagsOf(i);if(!ps.length&&!tg.length)return null;var row=el('div','chips trow');
+  ps.forEach(function(p){var e=findEnt(p);var c=el('span','chip prj click','▣ '+esc(e?e.name:p));c.title='Filter by this project';c.onclick=function(ev){ev.stopPropagation();filt.prj=p;render();};row.appendChild(c);});
+  tg.forEach(function(t){var c=el('span','chip tag click','# '+esc(t));c.title='Filter by this tag';c.onclick=function(ev){ev.stopPropagation();filt.tag=t;render();};row.appendChild(c);});
+  return row;}
+function resolvePrj(v){v=String(v||'').trim();if(!v)return null;var m=/PRJ-\d+/i.exec(v);if(m){var e=findEnt(m[0].toUpperCase());return e?e.meta.id:null;}
+  var lo=v.toLowerCase(),hit=entsOf('PRJ').filter(function(e){return e.name.toLowerCase()===lo;})[0];return hit?hit.meta.id:null;}
+function resolveAny(v){var m=/\b(?:T|P|PRJ|SYS)-\d+\b/i.exec(v);if(m){var id=m[0].toUpperCase();return labelAny(id)!=null?id:(kindOf(id)==='T'?id:null);}
+  var lo=String(v).toLowerCase(),c=[];
+  (TASKS?TASKS.items:[]).forEach(function(i){if(i.title.toLowerCase().indexOf(lo)>=0)c.push(i.id);});
+  ['PRJ','SYS'].forEach(function(k){entsOf(k).forEach(function(e){if(e.name.toLowerCase().indexOf(lo)>=0)c.push(e.meta.id);});});
+  (PEOPLE?PEOPLE.people:[]).forEach(function(p){if(p.meta.id&&p.name.toLowerCase().indexOf(lo)>=0)c.push(p.meta.id);});
+  return c.length===1?c[0]:null;}
+function opt(v){return '<option value="'+esc(v)+'">';}
+function renderLists(){
+  if(!TASKS)return;
+  var tags={};allItems().concat(INBOX?INBOX.items:[]).forEach(function(i){tagsOf(i).forEach(function(t){tags[t]=1;});});
+  var tl=Object.keys(tags).sort(function(a,b){return a.localeCompare(b);});
+  var pl=entsOf('PRJ').filter(function(e){return e.meta.id;}).map(function(e){return {id:e.meta.id,path:prjPath(e.meta.id)};}).sort(function(a,b){return a.path.localeCompare(b.path);});
+  var h='<datalist id="dl-tags">'+tl.map(opt).join('')+'</datalist>';
+  h+='<datalist id="dl-prj">'+pl.map(function(p){return opt(p.id+' – '+p.path);}).join('')+'</datalist>';
+  var rel=TASKS.items.map(function(i){return i.id+' – '+shortT(i.title);});
+  ['PRJ','SYS'].forEach(function(k){entsOf(k).forEach(function(e){if(e.meta.id)rel.push(e.meta.id+' – '+e.name);});});
+  (PEOPLE?PEOPLE.people:[]).forEach(function(p){if(p.meta.id)rel.push(p.meta.id+' – '+p.name);});
+  h+='<datalist id="dl-rel">'+rel.map(opt).join('')+'</datalist>';
+  h+='<datalist id="dl-names">'+(PEOPLE?PEOPLE.people.map(function(p){return opt(p.name);}).join(''):'')+'</datalist>';
+  $('dls').innerHTML=h;
+  if(filt.tag&&!tags[filt.tag])filt.tag='';if(filt.prj&&!findEnt(filt.prj))filt.prj='';
+  var ft=$('ftag'),fp=$('fprj');
+  ft.innerHTML='<option value="">All tags</option>'+tl.map(function(t){return '<option value="'+esc(t)+'">#'+esc(t)+'</option>';}).join('');ft.value=filt.tag;
+  fp.innerHTML='<option value="">All projects</option>'+pl.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.path)+'</option>';}).join('');fp.value=filt.prj;
+  ft.style.display=tl.length?'':'none';fp.style.display=pl.length?'':'none';}
+// ---- Links between items
+var REL_WORD={concerns:['concerns','concerned by'],involves:['involves','involved in'],owns:['owns','owned by'],uses:['uses','used by']};
+function relBlock(id){
+  var box=el('div','deps');box.appendChild(el('span','dl','Linked:'));
+  relsOf(id).forEach(function(r){var lab=labelAny(r.other);
+    var w=r.type==='related'?'':(REL_WORD[r.type]?REL_WORD[r.type][r.from?0:1]+' ':r.type+' ');
+    var c=el('span','chip click',esc(w)+esc(r.other)+(lab?' – '+esc(shortT(lab)):''));c.title='Open '+r.other;c.onclick=function(){jumpTo(r.other);};
+    var x=el('button','xbtn','×');x.title='Remove link';x.onclick=function(e){e.stopPropagation();removeRel(r.raw);};c.appendChild(x);box.appendChild(c);});
+  var inp=document.createElement('input');inp.type='text';inp.setAttribute('list','dl-rel');inp.placeholder='+ link to task, system, person… (T-, SYS-, P-)';
+  inp.onchange=function(){var v=inp.value.trim();inp.value='';if(!v)return;var oid=resolveAny(v);if(!oid){alert('No unique match for "'+v+'".');return;}addRel(id,oid);};
+  box.appendChild(inp);return box;}
+function jumpTo(id){var k=kindOf(id);
+  var after=function(){setTimeout(function(){var n=document.querySelector('[data-id="'+id+'"]');if(n&&n.scrollIntoView)n.scrollIntoView({block:'center'});},60);};
+  if(k==='T'){$('q').value='';filt.tag='';filt.prj='';var go=function(){openId=id;setPage('tasks');after();};
+    if(!findTaskById(id)&&!$('showDone').checked){$('showDone').checked=true;safe(reload).then(go);}else go();}
+  else if(k==='P'){var p=findPersonById(id);if(p){openP=p.name;$('pq').value='';if(p.meta.st==='Left')$('showLeft').checked=true;setPage('people');after();}}
+  else{openE=id;setPage(k==='PRJ'?'projects':'systems');after();}}
+function tagEditor(i){var tags=tagsOf(i);var v=el('div','deps');v.appendChild(el('span','dl','Tags:'));
+  tags.forEach(function(t){var c=el('span','chip tag','# '+esc(t));var x=el('button','xbtn','×');x.title='Remove tag';x.onclick=function(){patchMeta(i.id,{tg:tags.filter(function(z){return z!==t;}).join(','),top:''});};c.appendChild(x);v.appendChild(c);});
+  var inp=document.createElement('input');inp.type='text';inp.setAttribute('list','dl-tags');inp.placeholder='+ tag (pick or type a new one)';
+  function add(){var t=cleanTag(inp.value);inp.value='';if(!t||tags.indexOf(t)>=0)return;patchMeta(i.id,{tg:tags.concat([t]).join(','),top:''});}
+  inp.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();add();}};inp.onchange=add;
+  v.appendChild(inp);return v;}
+function prjEditor(i){var ps=prjOf(i);var v=el('div','deps');v.appendChild(el('span','dl','Projects:'));
+  ps.forEach(function(p){var e=findEnt(p);var c=el('span','chip prj','▣ '+esc(e?e.name:p));var x=el('button','xbtn','×');x.title='Remove from project';x.onclick=function(){patchMeta(i.id,{prj:ps.filter(function(z){return z!==p;}).join(',')});};c.appendChild(x);v.appendChild(c);});
+  var inp=document.createElement('input');inp.type='text';inp.setAttribute('list','dl-prj');inp.placeholder='+ project (pick, or type a new name)';
+  function add(){var t=inp.value.trim();inp.value='';if(t)addPrjToTask(i,t);}
+  inp.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();add();}};inp.onchange=add;
+  v.appendChild(inp);return v;}
+// ---- combo pickers for the add-task form (existing or new; multiple)
+function makePicker(host,listId,ph,resolve){
+  host.innerHTML='';var chips=el('div','pchips');var inp=document.createElement('input');inp.type='text';inp.setAttribute('list',listId);inp.placeholder=ph;
+  host.appendChild(chips);host.appendChild(inp);var sel=[];
+  function draw(){chips.innerHTML='';sel.forEach(function(s,k){var c=el('span','chip '+s.cls,esc(s.label)+(s.isNew?' (new)':''));var x=el('button','xbtn','×');x.onclick=function(){sel.splice(k,1);draw();};c.appendChild(x);chips.appendChild(c);});}
+  function add(){var v=inp.value.trim();inp.value='';if(!v)return;var r=resolve(v);if(!r||!r.key||sel.some(function(s){return s.key===r.key;}))return;sel.push(r);draw();}
+  inp.onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();add();}};inp.onchange=add;
+  return {get:function(){add();return sel.slice();},clear:function(){sel=[];inp.value='';draw();}};}
+var tagPick=null,prjPick=null;
+function initAddForm(){
+  tagPick=makePicker($('aTags'),'dl-tags','Tags – pick or type new, Enter',function(v){var t=cleanTag(v);return t?{key:t,label:'# '+t,cls:'tag'}:null;});
+  prjPick=makePicker($('aPrjs'),'dl-prj','Project – pick, or type a new name, Enter',function(v){var id=resolvePrj(v);if(id){var e=findEnt(id);return {key:id,label:'▣ '+(e?e.name:id),cls:'prj'};}
+    var nm=cleanTag(v);return nm?{key:'new:'+nm.toLowerCase(),label:'▣ '+nm,cls:'prj',isNew:true,name:nm}:null;});}
+// ---- projects & systems pages
+function entTasks(kind,id){
+  if(kind==='PRJ'){var ids=entDesc('PRJ',id);return TASKS?TASKS.items.filter(function(i){return prjOf(i).some(function(p){return ids.indexOf(p)>=0;});}):[];}
+  return relsOf(id).filter(function(r){return kindOf(r.other)==='T';}).map(function(r){return findTaskById(r.other);}).filter(function(t){return t&&isOpenTask(t.id);});}
+function entCard(kind,e,depth){
+  var id=e.meta.id,D=EDEF[kind];
+  var d=el('div','item'+(openE===id?' open':'')+(askMode==='item'&&askTarget===id?' asking':''));d.dataset.id=id;d.style.marginLeft=(depth*22)+'px';
+  var r=el('div','row');r.appendChild(idBtn(id));var t=el('div','t',esc(e.name));t.onclick=function(){openE=openE===id?null:id;renderEnts(kind);};r.appendChild(t);r.appendChild(askBtn(id));d.appendChild(r);
+  var ch=el('div','chips');ch.style.marginLeft='0';var h='';
+  if(e.meta.type)h+='<span class="chip type">'+esc(e.meta.type)+'</span>';
+  if(e.meta.st)h+='<span class="chip st">'+esc(e.meta.st)+'</span>';
+  if(e.meta.owner)h+='<span class="chip">owner: '+esc(e.meta.owner)+'</span>';
+  var par=e.meta[D.pk];if(par){var pe=findEnt(par);h+='<span class="chip">'+(kind==='PRJ'?'in ':'part of ')+esc(pe?pe.name:par)+'</span>';}
+  var n=entTasks(kind,id).length;if(n)h+='<span class="chip st">'+n+' open task'+(n>1?'s':'')+'</span>';
+  var nr=relsOf(id).filter(function(x){return kindOf(x.other)!=='T';}).length;if(nr)h+='<span class="chip">↔ '+nr+' linked</span>';
+  ch.innerHTML=h;d.appendChild(ch);
+  if(openE===id)d.appendChild(entDetail(kind,e));
+  return d;}
+function entDetail(kind,e){
+  var id=e.meta.id,D=EDEF[kind];var det=el('div','det');det.style.marginLeft='0';
+  e.subs.forEach(function(b){if(b.k==='note')det.appendChild(el('div','note',esc(b.v)));});
+  var lk=el('div','');lk.style.margin='6px 0';
+  e.subs.forEach(function(b){if(b.k!=='link')return;var m=/\[(.*?)\]\((.*?)\)/.exec(b.v);if(!m)return;
+    var w=el('span','lnk','<a href="'+esc(m[2])+'" target="_blank" rel="noopener">'+esc(m[1])+'</a>');
+    var x=el('button','xbtn','×');x.title='Remove link';x.onclick=function(){editEnt(kind,id,function(q){var k=q.subs.indexOf(q.subs.filter(function(s){return s.k==='link'&&s.v===b.v;})[0]);if(k>=0)q.subs.splice(k,1);});};
+    w.appendChild(x);lk.appendChild(w);});
+  det.appendChild(lk);
+  var ts=entTasks(kind,id);
+  if(ts.length){var tv=el('div','deps');tv.appendChild(el('span','dl','Tasks:'));ts.forEach(function(t){var c=el('span','chip click',esc(t.id)+' – '+esc(shortT(t.title)));c.onclick=function(){jumpTo(t.id);};tv.appendChild(c);});det.appendChild(tv);}
+  det.appendChild(relBlock(id));
+  var ctl=el('div','ctl');
+  function mk(list,cur,key,blank){var s=el('select','');var b0=el('option','',blank);b0.value='';s.appendChild(b0);list.forEach(function(v){var o=el('option','',esc(v));o.value=v;if(v===cur)o.selected=true;s.appendChild(o);});
+    s.onchange=function(){var p={};p[key]=s.value;patchEnt(kind,id,p);};return s;}
+  ctl.appendChild(mk(D.types,e.meta.type,'type','(no type)'));ctl.appendChild(mk(D.sts,e.meta.st,'st','(no status)'));
+  var ex=entDesc(kind,id);var ps=el('select','');ps.title=kind==='PRJ'?'Parent project':'Part of system';
+  var o0=el('option','',kind==='PRJ'?'(no parent)':'(not part of another system)');o0.value='';ps.appendChild(o0);
+  entsOf(kind).forEach(function(x){if(!x.meta.id||ex.indexOf(x.meta.id)>=0)return;var o=el('option','',esc(kind==='PRJ'?prjPath(x.meta.id):x.name));o.value=x.meta.id;if(x.meta.id===e.meta[D.pk])o.selected=true;ps.appendChild(o);});
+  ps.onchange=function(){var p={};p[D.pk]=ps.value;patchEnt(kind,id,p);};ctl.appendChild(ps);
+  if(kind==='SYS'){var ow=document.createElement('input');ow.type='text';ow.setAttribute('list','dl-names');ow.placeholder='Owner (person)';ow.value=e.meta.owner||'';ow.onchange=function(){patchEnt(kind,id,{owner:ow.value.trim()});};ctl.appendChild(ow);}
+  var rn=el('button','btn','Rename');rn.onclick=function(){var v=window.prompt('Name',e.name);if(v&&v.trim())editEnt(kind,id,function(q){q.name=cleanTag(v);});};
+  var rm=el('button','btn','Delete');rm.onclick=function(){if(confirm('Delete '+id+' ('+e.name+')? Links to it are removed'+(kind==='PRJ'?' and tasks lose this project':'')+'.'))removeEnt(kind,id);};
+  ctl.appendChild(rn);ctl.appendChild(rm);det.appendChild(ctl);
+  var la=el('div','ctl');var ll=document.createElement('input');ll.type='text';ll.placeholder='Link label';ll.style.width='150px';var lu=document.createElement('input');lu.type='text';lu.placeholder='https://…';lu.style.width='280px';
+  var lb=el('button','btn','Add link');lb.onclick=function(){var a=cleanTag(ll.value),u=lu.value.trim();if(!a||!u)return;editEnt(kind,id,function(q){q.subs.push({k:'link',v:'['+a+']('+u+')'});});};
+  la.appendChild(ll);la.appendChild(lu);la.appendChild(lb);det.appendChild(la);
+  var ta=document.createElement('textarea');ta.placeholder='Notes (saved as "note:" lines)…';ta.value=e.subs.filter(function(b){return b.k==='note';}).map(function(b){return b.v;}).join('\n');
+  ta.onchange=function(){var lines=ta.value.split('\n').map(function(s){return s.trim();}).filter(Boolean);
+    editEnt(kind,id,function(q){q.subs=lines.map(function(v){return {k:'note',v:v};}).concat(q.subs.filter(function(s){return s.k!=='note';}));});};
+  det.appendChild(ta);return det;}
+function renderEnts(kind){
+  var D=EDEF[kind],m=kind==='PRJ'?PROJ:SYSM;if(!m)return;
+  var q=$(kind==='PRJ'?'jq':'sq').value.toLowerCase();var out=$(D.out);out.innerHTML='';
+  var keep=window.scrollY;
+  var all=m.ents;$(kind==='PRJ'?'jstats':'sstats').innerHTML='<span><b>'+all.length+'</b> '+D.word+(all.length===1?'':'s')+'</span>';
+  var match=function(e){return !q||(e.name+' '+Object.keys(e.meta).map(function(k){return e.meta[k];}).join(' ')+' '+e.subs.map(function(b){return b.v;}).join(' ')).toLowerCase().indexOf(q)>=0;};
+  function show(e,dep){return dep<9&&(match(e)||kids(kind,e.meta.id).some(function(c){return show(c,dep+1);}));}
+  var roots=all.filter(function(e){var p=e.meta[D.pk];return !p||!findEnt(p);}).sort(function(a,b){return a.name.localeCompare(b.name);});
+  var s=el('div','grp');var n=0;
+  function walk(e,dep){if(!show(e,dep))return;n++;s.appendChild(entCard(kind,e,dep));kids(kind,e.meta.id).sort(function(a,b){return a.name.localeCompare(b.name);}).forEach(function(c){walk(c,dep+1);});}
+  roots.forEach(function(e){walk(e,0);});
+  if(!n)s.appendChild(el('div','empty','Nothing to show.'));
+  out.appendChild(s);window.scrollTo(0,keep);}
+
+// ------------- ask agent pane -------------
+var askMode=null,askTarget=null,askDrafts={};
+function findPersonById(id){return PEOPLE?PEOPLE.people.filter(function(p){return p.meta.id===id;})[0]:null;}
+function askNotes(id){return ASK.notes.filter(function(n){return n.id===id;});}
+function labelFor(id){var l=labelAny(id);return l||'('+({T:'task',P:'person',PRJ:'project',SYS:'system'}[kindOf(id)]||'item')+' not found)';}
+function askBtn(id){var n=askNotes(id).length;var b=el('button','btn ask'+(n?' has':''),'Ask agent'+(n?'<span class="badge">'+n+'</span>':''));
+  b.title='Queue a note or request for the agent about '+id;b.onclick=function(e){e.stopPropagation();openAsk(id);};return b;}
+function saveDraft(){if(askMode==='item'&&askTarget)askDrafts[askTarget]=$('askText').value;}
+function openAsk(id){saveDraft();askMode='item';askTarget=id;$('askText').value=askDrafts[id]||'';render();$('askText').focus();}
+function openAskAll(){saveDraft();askMode='all';askTarget=null;render();}
+function closeAsk(){saveDraft();askMode=null;askTarget=null;render();}
+function updateAskTotal(){var n=ASK.notes.length,b=$('askAll');b.textContent=n+' ask'+(n===1?'':'s')+' queued';b.className='btn'+(n?' p':'');}
+function chipHtml(s){return s?'<span class="chip">'+esc(s)+'</span>':'';}
+async function submitAsk(){var tx=$('askText'),v=tx.value.trim(),id=askTarget;if(!v||!id||askMode!=='item')return;
+  var ok=await addAsk(id,v);if(ok){delete askDrafts[id];if(askTarget===id)tx.value='';tx.focus();}}
+function renderAsk(){
+  var pane=$('askPane');
+  if(!askMode){pane.style.display='none';document.body.classList.remove('ask-open');return;}
+  pane.style.display='flex';document.body.classList.add('ask-open');
+  var list=$('askList');list.innerHTML='';$('askNew').style.display=askMode==='item'?'block':'none';
+  var ttl=$('askTitle'),ctx=$('askCtx');ttl.innerHTML='';
+  if(askMode==='all'){
+    ttl.textContent='All queued asks';
+    ctx.innerHTML='<span class="hint">Click an item to open it. To have your agent work through the queue, ask it to run the discern-ask-agent skill.</span>';
+    var ids=[];ASK.notes.forEach(function(n){if(ids.indexOf(n.id)<0)ids.push(n.id);});
+    if(!ids.length)list.appendChild(el('div','empty','Nothing queued.'));
+    ids.forEach(function(id){var ns=askNotes(id);var d=el('div','an click');
+      d.appendChild(el('div','ats',esc(id)+' · '+ns.length+' note'+(ns.length>1?'s':'')));
+      d.appendChild(el('div','atx','<b>'+esc(labelFor(id))+'</b>'));
+      ns.forEach(function(n){d.appendChild(el('div','atx sm',esc(n.text.split('\n').join(' ⏎ '))));});
+      d.onclick=function(){setPage(pageFor(id));openAsk(id);};list.appendChild(d);});
+    return;}
+  var id=askTarget,isP=/^P-/.test(id);
+  ttl.appendChild(idBtn(id));ttl.appendChild(el('span','',esc(labelFor(id))));
+  var h='';
+  if(isP){var p=findPersonById(id);if(p)h=chipHtml(p.meta.title)+chipHtml(p.meta.co)+chipHtml(p.meta.dept)+chipHtml(p.grp);}
+  else if(/^(PRJ|SYS)-/.test(id)){var ee=findEnt(id);if(ee)h=chipHtml(ee.meta.type)+chipHtml(ee.meta.st)+chipHtml(ee.meta.owner);}
+  else{var t=findTaskById(id);if(t){h=chipHtml(meta(t,'ty',''))+chipHtml(meta(t,'who',''))+topicChipsHtml(t)+chipHtml(URG[meta(t,'urg','')]||'')+(meta(t,'due','')?chipHtml('due '+meta(t,'due','')):'')+(depList(t).length?chipHtml('blocked by '+depList(t).join(', ')):'');}}
+  ctx.innerHTML=h;
+  var ns=askNotes(id);
+  if(!ns.length)list.appendChild(el('div','empty','No notes queued for this item yet.'));
+  ns.forEach(function(n){var d=el('div','an');
+    d.appendChild(el('div','ats',esc(n.ts)));
+    var tx=el('div','atx',esc(n.text));d.appendChild(tx);
+    var act=el('div','aact');var eb=el('button','btn','Edit'),db=el('button','btn','Delete');
+    eb.onclick=function(){d.innerHTML='';var ta=document.createElement('textarea');ta.value=n.text;d.appendChild(ta);
+      var a2=el('div','aact');var sv=el('button','btn p','Save'),cn=el('button','btn','Cancel');
+      sv.onclick=function(){if(ta.value.trim())editAsk(n.raw,ta.value);};cn.onclick=renderAsk;
+      a2.appendChild(sv);a2.appendChild(cn);d.appendChild(a2);ta.focus();};
+    db.onclick=function(){removeAsk(n.raw);};
+    act.appendChild(eb);act.appendChild(db);d.appendChild(act);list.appendChild(d);});}
+
+// ------------- people page -------------
+function hiddenWho(){try{return JSON.parse(localStorage.getItem('discerny-hide-who')||'[]');}catch(e){return [];}}
+function hideWho(n){try{var a=hiddenWho();a.push(n);localStorage.setItem('discerny-hide-who',JSON.stringify(a));}catch(e){}}
+function pField(p,k){var i=document.createElement('input');i.type='text';i.value=(k==='grp'?p.grp:p.meta[k])||'';i.placeholder=PLABEL[k];
+  i.setAttribute('list','dl-'+k);i.dataset.key=p.name+'|'+k;
+  i.onchange=function(){var o={};o[k]=i.value.trim();patchPerson(p.name,o);};return i;}
+function pChips(p,skipGrp){var m=p.meta,h='';
+  if(m.st==='Left')h+='<span class="chip">Left</span>';
+  if(m.ext&&/^(y|yes|true|1)$/i.test(m.ext))h+='<span class="chip" style="background:#f3e5fb;color:#7a1fa2">External</span>';
+  if(m.mgr)h+='<span class="chip">→ '+esc(m.mgr)+'</span>';
+  if(m.st!=='Left')pMissing(p).forEach(function(k){h+='<span class="chip miss">no '+esc(PLABEL[k].toLowerCase())+'</span>';});
+  if(!skipGrp&&p.grp)h+='<span class="chip">'+esc(p.grp)+'</span>';
+  var n=TASKS?TASKS.items.filter(function(i){return meta(i,'who','')===p.name;}).length:0;
+  if(n)h+='<span class="chip st">'+n+' open task'+(n>1?'s':'')+'</span>';
+  h+='<span class="chip">'+(m.chk?'checked '+esc(m.chk):'unverified')+'</span>';
+  if(m.id)relsOf(m.id).forEach(function(r){if(kindOf(r.other)==='SYS'){var sy=findEnt(r.other);h+='<span class="chip">⚙ '+esc(sy?sy.name:r.other)+'</span>';}});
+  return h;}
+function pEditor(p){
+  var det=el('div','det');det.style.marginLeft='0';
+  var g=el('div','pin');['co','dept','title','mgr','grp'].forEach(function(k){g.appendChild(pField(p,k));});det.appendChild(g);
+  if(p.meta.id)det.appendChild(relBlock(p.meta.id));
+  var ctl=el('div','ctl');
+  var st=el('select','');['Active','Left'].forEach(function(s){var o=el('option','',s);o.value=s;if((p.meta.st==='Left')===(s==='Left'))o.selected=true;st.appendChild(o);});
+  st.onchange=function(){patchPerson(p.name,{st:st.value==='Left'?'Left':''});};
+  var vb=el('button','btn','Mark verified today');vb.onclick=function(){patchPerson(p.name,{chk:today()});};
+  var rm=el('button','btn','Remove');rm.onclick=function(){if(confirm('Remove '+p.name+' from People? Tasks keep their who: label.'))removePerson(p.name);};
+  [st,vb,rm].forEach(function(x){ctl.appendChild(x);});det.appendChild(ctl);
+  var ta=document.createElement('textarea');ta.placeholder='Notes about this person (saved as "note:" lines)…';
+  ta.value=p.subs.filter(function(b){return b.k==='note';}).map(function(b){return b.v;}).join('\n');
+  ta.onchange=function(){var lines=ta.value.split('\n').map(function(s){return s.trim();}).filter(Boolean);
+    editPerson(p.name,function(q){q.subs=q.subs.filter(function(s){return s.k!=='note';});q.subs=lines.map(function(v){return {k:'note',v:v};}).concat(q.subs);});};
+  det.appendChild(ta);
+  var hs=p.subs.filter(function(b){return b.k==='hist';});
+  if(hs.length){det.appendChild(el('div','sub2','Change history'));hs.forEach(function(b){det.appendChild(el('div','hist',esc(b.v)));});}
+  return det;}
+function pRow(p,inline,skipGrp){
+  var d=el('div','item'+(openP===p.name?' open':'')+(askMode==='item'&&askTarget===p.meta.id?' asking':''));
+  var r=el('div','row');var t=el('div','t',esc([p.name+(p.meta.title?' - '+p.meta.title:''),p.meta.co,p.meta.dept].filter(Boolean).join(' | ')));
+  t.onclick=function(){openP=openP===p.name?null:p.name;renderPeople();};
+  if(p.meta.id){r.appendChild(idBtn(p.meta.id));d.dataset.id=p.meta.id;}
+  r.appendChild(t);if(p.meta.id)r.appendChild(askBtn(p.meta.id));d.appendChild(r);
+  var ch=el('div','chips');ch.style.marginLeft='0';ch.innerHTML=pChips(p,skipGrp);d.appendChild(ch);
+  if(inline&&openP!==p.name){var w=el('div','pin');pMissing(p).forEach(function(k){w.appendChild(pField(p,k));});d.appendChild(w);}
+  if(openP===p.name)d.appendChild(pEditor(p));
+  return d;}
+function renderPeople(){
+  if(!PEOPLE)return;
+  var out=$('pout');var q=$('pq').value.toLowerCase(),showLeft=$('showLeft').checked;
+  var ae=document.activeElement,key=ae&&ae.dataset?ae.dataset.key:null,keep=window.scrollY;
+  var all=PEOPLE.people;
+  var ppl=all.filter(function(p){
+    if(p.meta.st==='Left'&&!showLeft)return false;
+    if(!q)return true;
+    return (p.name+' '+Object.keys(p.meta).map(function(k){return p.meta[k];}).join(' ')+' '+p.grp+' '+p.subs.map(function(b){return b.v;}).join(' ')).toLowerCase().indexOf(q)>=0;});
+  var active=all.filter(function(p){return p.meta.st!=='Left';});
+  var needAll=active.filter(function(p){return pMissing(p).length;});
+  $('pstats').innerHTML='<span><b>'+active.length+'</b> people</span><span><b>'+needAll.length+'</b> with missing data</span>';
+  out.innerHTML='';
+  // shared suggestion lists keep spelling of companies / departments consistent
+  ['co','dept','title','grp'].forEach(function(k){var seen={},dl=document.createElement('datalist');dl.id='dl-'+k;
+    all.forEach(function(p){var v=k==='grp'?p.grp:p.meta[k];if(v&&!seen[v]){seen[v]=1;var o=document.createElement('option');o.value=v;dl.appendChild(o);}});out.appendChild(dl);});
+  var dm=document.createElement('datalist');dm.id='dl-mgr';all.forEach(function(p){var o=document.createElement('option');o.value=p.name;dm.appendChild(o);});out.appendChild(dm);
+  function section(title,n){var s=el('div','grp');s.appendChild(el('h2','',esc(title)+' <span class="n">'+n+'</span>'));out.appendChild(s);return s;}
+  function cmpName(a,b){return a.name.localeCompare(b.name);}
+  if(pview==='name'){
+    var s0=section('All people',ppl.length);
+    if(!ppl.length)s0.appendChild(el('div','empty','Nobody to show.'));
+    ppl.slice().sort(cmpName).forEach(function(p){s0.appendChild(pRow(p,false));});
+  }else if(pview==='need'){
+    var need=ppl.filter(function(p){return p.meta.st!=='Left'&&pMissing(p).length;}).sort(function(a,b){return pMissing(b).length-pMissing(a).length||cmpName(a,b);});
+    var s1=section('Missing data',need.length);
+    if(!need.length)s1.appendChild(el('div','empty','Nobody is missing company, department, title or manager.'));
+    need.forEach(function(p){s1.appendChild(pRow(p,true));});
+    var known={};all.forEach(function(p){known[p.name.toLowerCase()]=1;});
+    var hid=hiddenWho(),cand={};
+    (TASKS?TASKS.items:[]).concat(INBOX?INBOX.items:[]).forEach(function(i){var w=meta(i,'who','');
+      if(w&&w!=='Unassigned'&&!known[w.toLowerCase()]&&hid.indexOf(w)<0&&(!q||w.toLowerCase().indexOf(q)>=0))cand[w]=(cand[w]||0)+1;});
+    var names=Object.keys(cand).sort();
+    if(names.length){var s2=section('On your tasks but not in People',names.length);
+      names.forEach(function(w){var d=el('div','item');var r=el('div','row');r.appendChild(el('div','t',esc(w)+' <span class="chip">'+cand[w]+' item'+(cand[w]>1?'s':'')+'</span>'));
+        var a=el('button','btn p','Add');a.onclick=function(){addPerson(w,'Other');};
+        var x=el('button','btn','Not a person');x.onclick=function(){hideWho(w);renderPeople();};
+        r.appendChild(a);r.appendChild(x);d.appendChild(r);s2.appendChild(d);});}
+  }else{
+    var kf=pview==='co'?function(p){return p.meta.co||'No company';}:pview==='dept'?function(p){return p.meta.dept||'No department';}:function(p){return p.grp||'Other';};
+    var groups={},order=[];
+    ppl.forEach(function(p){var g=kf(p);if(!groups[g]){groups[g]=[];order.push(g);}groups[g].push(p);});
+    order.sort(function(a,b){var na=/^No /.test(a),nb=/^No /.test(b);return (na-nb)||a.localeCompare(b);});
+    if(!order.length)out.appendChild(el('div','empty','Nobody to show.'));
+    order.forEach(function(g){
+      var s=section(g,groups[g].length);
+      if(pview==='co'){var sub={},so=[];groups[g].forEach(function(p){var d=p.meta.dept||'No department';if(!sub[d]){sub[d]=[];so.push(d);}sub[d].push(p);});
+        so.sort(function(a,b){var na=/^No /.test(a),nb=/^No /.test(b);return (na-nb)||a.localeCompare(b);});
+        so.forEach(function(d){s.appendChild(el('div','sub2',esc(d)+' ('+sub[d].length+')'));sub[d].sort(cmpName).forEach(function(p){s.appendChild(pRow(p,false));});});}
+      else groups[g].sort(cmpName).forEach(function(p){s.appendChild(pRow(p,false,pview==='grp'));});});
+  }
+  if(key){var f=out.querySelectorAll('input[data-key]');for(var n=0;n<f.length;n++){if(f[n].dataset.key===key){f[n].focus();break;}}}
+  window.scrollTo(0,keep);}
+function setPage(p){page=p;
+  [].forEach.call($('pages').children,function(b){b.className=b.getAttribute('data-p')===p?'on':'';});
+  var map={tasks:['taskBar','tasksPane'],people:['peopleBar','peoplePane'],projects:['projBar','projPane'],systems:['sysBar','sysPane']};
+  Object.keys(map).forEach(function(k){var on=k===p;$(map[k][0]).style.display=on?'flex':'none';$(map[k][1]).style.display=on?'block':'none';});
+  $('subline').textContent={tasks:'TASKS.md is the source of truth – every change is saved straight back to the file.',people:'PEOPLE.md is the source of truth – fill in company, department, title and manager; edits are saved straight back to the file.',projects:'PROJECTS.md is the source of truth – projects, workstreams and pods; tasks join them with the Project field.',systems:'SYSTEMS.md is the source of truth – the systems and platforms you work with; link them to tasks, people and projects.'}[p];
+  try{localStorage.setItem('discerny-page',p);}catch(e){}
+  render();}
+
+// ------------- startup -------------
+async function start(){
+  $('gate').style.display='none';$('app').style.display='block';
+  TYPES.forEach(function(t){var o=el('option','',t);o.value=t;$('aType').appendChild(o);});
+  URG_ORDER.forEach(function(u){var o=el('option','',URG[u]);o.value=u;$('aUrg').appendChild(o);});
+  $('aUrg').value='week';
+  EDEF.PRJ.types.forEach(function(t){var o=el('option','',t);o.value=t;$('jType').appendChild(o);});EDEF.SYS.types.forEach(function(t){var o=el('option','',t);o.value=t;$('sType').appendChild(o);});
+  initAddForm();
+  await safe(reload);
+  try{var sp=localStorage.getItem('discerny-page');if(['people','projects','systems'].indexOf(sp)>=0)setPage(sp);}catch(e){}
+  setInterval(poll,3000);window.addEventListener('focus',poll);}
+async function poll(){
+  if(busy||!dir)return;var a=document.activeElement;if(a&&(a.tagName==='TEXTAREA'||(a.tagName==='INPUT'&&a.type==='text'&&a.id!=='q'&&a.id!=='pq')))return;
+  try{var changed=false;var names=['TASKS.md','INBOX.md','PEOPLE.md','ASK-AGENT.md','PROJECTS.md','SYSTEMS.md','RELATIONSHIPS.md'].concat($('showDone').checked?['DONE.md']:[]);
+    for(var k=0;k<names.length;k++){var m=await modOf(names[k]);if(m&&m!==lastMod[names[k]])changed=true;}
+    if(changed)await safe(reload);}catch(e){setSync(false,'cannot read folder');}}
+function showGate(txt,btn){$('gate').style.display='block';$('gateTxt').textContent=txt;$('connect').textContent=btn;}
+$('connect').onclick=async function(){
+  try{
+    if(dir){var p=await dir.requestPermission({mode:'readwrite'});if(p!=='granted'){$('msg').textContent='Permission not granted.';return;}}
+    else{dir=await window.showDirectoryPicker({mode:'readwrite',id:'discerny'});await idbSet('dir',dir);}
+    var h=null;try{h=await dir.getFileHandle('TASKS.md');}catch(e){$('msg').textContent='No TASKS.md in "'+dir.name+'" – pick the Discerny folder.';dir=null;return;}
+    await start();
+  }catch(e){$('msg').textContent=e.name+': '+e.message;}};
+$('views').onclick=function(e){var v=e.target.getAttribute('data-v');if(!v)return;view=v;[].forEach.call($('views').children,function(b){b.className=b.getAttribute('data-v')===v?'on':'';});render();};
+$('q').oninput=render;$('tsort').onchange=render;
+$('pages').onclick=function(e){var p=e.target.getAttribute('data-p');if(p)setPage(p);};
+$('pviews').onclick=function(e){var v=e.target.getAttribute('data-v');if(!v)return;pview=v;[].forEach.call($('pviews').children,function(b){b.className=b.getAttribute('data-v')===v?'on':'';});renderPeople();};
+$('pq').oninput=renderPeople;
+$('showLeft').onchange=renderPeople;
+$('addPBtn').onclick=function(){$('addPForm').classList.toggle('show');};
+$('pSave').onclick=function(){var n=$('pName').value.trim();if(!n)return;addPerson(n,$('pGrp').value.trim()||'Other');$('pName').value='';};
+$('showDone').onchange=function(){safe(reload);};
+$('askAll').onclick=openAskAll;$('askClose').onclick=closeAsk;$('askAdd').onclick=submitAsk;
+$('askText').onkeydown=function(e){if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();submitAsk();}};
+$('addBtn').onclick=function(){$('addForm').classList.toggle('show');};
+$('aSave').onclick=function(){var t=$('aTitle').value.trim();if(!t){$('aTitle').focus();return;}
+  var tg=tagPick.get().map(function(x){return x.key;}),pj=prjPick.get();
+  addItem({title:t,ty:$('aType').value,urg:$('aUrg').value,who:$('aPerson').value.trim()||'Unassigned',tags:tg,prjs:pj,details:$('aDetails').value});
+  $('aTitle').value='';$('aDetails').value='';tagPick.clear();prjPick.clear();};
+$('ftag').onchange=function(){filt.tag=this.value;render();};$('fprj').onchange=function(){filt.prj=this.value;render();};
+$('jq').oninput=function(){renderEnts('PRJ');};$('sq').oninput=function(){renderEnts('SYS');};
+$('addProjBtn').onclick=function(){$('addProjForm').classList.toggle('show');};$('addSysBtn').onclick=function(){$('addSysForm').classList.toggle('show');};
+$('jSave').onclick=function(){var n=cleanTag($('jName').value);if(!n)return;addEntUI('PRJ',n,$('jType').value);$('jName').value='';};
+$('sSave').onclick=function(){var n=cleanTag($('sName').value);if(!n)return;addEntUI('SYS',n,$('sType').value);$('sName').value='';};
+(async function(){
+  if(!('showDirectoryPicker' in window)){showGate('This browser cannot access local folders. Open this file in Edge or Chrome.','—');$('connect').disabled=true;return;}
+  try{var h=await idbGet('dir');
+    if(h){dir=h;var p=await h.queryPermission({mode:'readwrite'});if(p==='granted'){await start();return;}showGate('Reconnect to the Discerny folder (one click).','Reconnect');return;}}catch(e){}
+  showGate('Connect the Discerny folder that holds TASKS.md. Your browser will ask once for permission.','Connect folder');
+})();
+</script></body></html>

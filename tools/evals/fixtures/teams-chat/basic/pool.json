@@ -1,0 +1,41 @@
+[
+  {
+    "id": "1760259000000",
+    "chatId": "19:kwame-imogen_ab12cd@unq.gbl.spaces",
+    "from": {
+      "displayName": "Kwame Mensah",
+      "email": "kwame.mensah@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-12T08:30:00Z",
+    "summary": "Morning – are you OK for me to quarantine the Russet roll from lot RF-2214 until the 8D lands?",
+    "webUrl": "https://teams.example/l/message/19:kwame-imogen_ab12cd@unq.gbl.spaces/1760259000000",
+    "uri": "teams:///messages/1760259000000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1759910400000",
+    "chatId": "19:b77d02e5a1c94f6b8d@thread.v2",
+    "from": {
+      "displayName": "Declan Moss",
+      "email": "declan.moss@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-08T08:00:00Z",
+    "summary": "Calderbrook confirmed 21 Oct for the rig.",
+    "webUrl": "https://teams.example/l/message/19:b77d02e5a1c94f6b8d@thread.v2/1759910400000",
+    "uri": "teams:///messages/1759910400000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1759996800000",
+    "chatId": "19:c40e9a3b7d1f4e2a9c@thread.v2",
+    "from": {
+      "displayName": "Imogen Hartley",
+      "email": "imogen.hartley@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-09T08:00:00Z",
+    "summary": "Thanks all",
+    "webUrl": "https://teams.example/l/message/19:c40e9a3b7d1f4e2a9c@thread.v2/1759996800000",
+    "uri": "teams:///messages/1759996800000",
+    "hasAttachment": false
+  }
+]

@@ -1,0 +1,41 @@
+[
+  {
+    "id": "1760021000000",
+    "chatId": "19:kwame-imogen_ab12cd@unq.gbl.spaces",
+    "from": {
+      "displayName": "Imogen Hartley",
+      "email": "imogen.hartley@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-09T14:43:20Z",
+    "summary": "Please let me know when the temps are booked.",
+    "webUrl": "https://teams.example/l/message/19:kwame-imogen_ab12cd@unq.gbl.spaces/1760021000000",
+    "uri": "teams:///messages/1760021000000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1759914000000",
+    "chatId": "19:gus-imogen_cd34ef@unq.gbl.spaces",
+    "from": {
+      "displayName": "Imogen Hartley",
+      "email": "imogen.hartley@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-08T09:00:00Z",
+    "summary": "Gus, can you send me the calibration register export so I can check the October items?",
+    "webUrl": "https://teams.example/l/message/19:gus-imogen_cd34ef@unq.gbl.spaces/1759914000000",
+    "uri": "teams:///messages/1759914000000",
+    "hasAttachment": false
+  },
+  {
+    "id": "1759856400000",
+    "chatId": "19:b77d02e5a1c94f6b8d@thread.v2",
+    "from": {
+      "displayName": "Imogen Hartley",
+      "email": "imogen.hartley@pennywhistle.example"
+    },
+    "createdDateTime": "2026-10-07T17:00:00Z",
+    "summary": "Declan, could you confirm the Calderbrook date?",
+    "webUrl": "https://teams.example/l/message/19:b77d02e5a1c94f6b8d@thread.v2/1759856400000",
+    "uri": "teams:///messages/1759856400000",
+    "hasAttachment": false
+  }
+]

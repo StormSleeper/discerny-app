@@ -1,0 +1,95 @@
+{
+  "scenario": "fixtures/teams-chat/basic",
+  "description": "One Teams run over the test data folder covering E18 and E19, the mention filter, priority people, files, commitments, asks with a shared reply pool, a watched channel and an out-of-scope chat.",
+  "setup": [
+    "Make a scratch data folder as README.md in this folder describes (a copy of the test data folder, discerny_data), and connect the helper to it.",
+    "In its SOURCES.md teams-chat block, add \"- fixture: <absolute path to tools/evals/fixtures/teams-chat/basic>\" and change mention_read_cap to 2 (E18)."
+  ],
+  "expect": [
+    {
+      "eval": "E19",
+      "message": "1760004720000",
+      "result": "Related to T-0021 (Stageworks Mk4 chat) and about the same chapter: an update proposal on T-0021, no new item."
+    },
+    {
+      "eval": "E19",
+      "message": "1760007900000",
+      "result": "Related chat but a different topic (FAI attendee list): a new inbox item."
+    },
+    {
+      "eval": "E18",
+      "message": "1760101200000, 1760169600000, 1760184000000, 1760261400000",
+      "result": "Four truncated group-chat summaries without the name: at most 2 full-text reads; the unread ones are kept as candidates, none dropped."
+    },
+    {
+      "eval": "-",
+      "message": "1759935600000",
+      "result": "Dropped by the mention filter (group chat, no name or handle)."
+    },
+    {
+      "eval": "-",
+      "message": "1759996800000",
+      "result": "Dropped: the user's own message."
+    },
+    {
+      "eval": "-",
+      "message": "1760259000000",
+      "result": "Kept (inbound 1:1): new item to decide on quarantining lot RF-2214, who:Kwame Mensah; may propose relate to T-0007."
+    },
+    {
+      "eval": "-",
+      "message": "1760266800000",
+      "result": "New item (priority person, 1:1): one-page audit readiness summary, due:2026-10-28, p:1."
+    },
+    {
+      "eval": "-",
+      "message": "1760176800000",
+      "result": "Pass C: the v0.4 workbook chapter; an update proposal on T-0021 or a new Document item related to it."
+    },
+    {
+      "eval": "-",
+      "message": "1760025600000",
+      "result": "Commitment: send the QP-08 training slides to Kwame, due:2026-10-14, p:2."
+    },
+    {
+      "eval": "-",
+      "message": "1759914000000",
+      "result": "Waiting-for item on Gus Whitfield (no reply in the pool)."
+    },
+    {
+      "eval": "-",
+      "message": "1760021000000",
+      "result": "Answered (Kwame wrote later in the same chat): nothing."
+    },
+    {
+      "eval": "-",
+      "message": "1759856400000",
+      "result": "Answered (Declan replied in the chat on 8 Oct): nothing."
+    },
+    {
+      "eval": "-",
+      "message": "1760255100000",
+      "result": "Watched channel post: new item to upload audit evidence by 2026-11-06."
+    },
+    {
+      "eval": "-",
+      "message": "1760200000000, 1760180000000",
+      "result": "Dropped: system event, and the user's own post."
+    },
+    {
+      "eval": "-",
+      "message": "1760122800000",
+      "result": "Out of scope: never named in the report; optionally a container line for that chat in IGNORED.md with the reason personal."
+    },
+    {
+      "eval": "-",
+      "message": "1760097600000",
+      "result": "Dropped by exclude_chat (lunch club)."
+    },
+    {
+      "eval": "-",
+      "message": "state",
+      "result": "watermark 2026-10-12T16:00:00Z, waiting_checked_through 2026-10-11T16:00:00Z, last_run 2026-10-12T16:00:00Z; discern check passes."
+    }
+  ]
+}
