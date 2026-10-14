@@ -51,13 +51,17 @@ On the first run, a source has no block in `SOURCES.md` yet, so its skill asks h
 
 ## Getting started
 
-1. **Get the app.** Download this repository as a zip and unzip it, for example to `~/discerny`. This is the app folder. Your data goes in a folder of its own.
+1. **Get the app.** Clone this repository (`git clone https://github.com/StormSleeper/discerny-app.git`), or download it as a zip and unzip it, for example to `~/discerny-app`. This is the app folder. Your data goes in a folder of its own.
 2. **Make your data folder.** In the app folder, run `node tools/discern.mjs new ~/discerny-data` (any new or empty folder will do). It copies the blank starter files from `new_discerny_repo` and connects the app to the copy. Without Node, copy the `new_discerny_repo` folder somewhere private yourself. If you keep your data in git, use a private repository.
 3. **Open the UI.** Open `discerny.html` in Chrome or Edge, click to choose a folder, and pick your data folder. Allow the browser to edit files when it asks. To switch to another data folder later, use *Change folder* at the bottom of the sidebar.
 4. **Work through the starter project.** Your data folder starts with one project, *Discerny Setup*, and three tasks:
    - T-0001: connect your agent to your data folder. For Claude Code, that means starting it in the app folder with `claude --add-dir ~/discerny-data`.
    - T-0002: set up the `discern-ask-agent` skill. Claude Code already has it; the task says how to add it to a Claude project, and has a prompt to paste in for any other agent.
    - T-0003: run the skill once. It finds a note waiting on your own record (P-0001) and asks for your name.
+
+### Try it on sample data first
+
+[discerny-example](https://github.com/StormSleeper/discerny-example) is a ready-made data folder for a fictional company, Pennywhistle Puppet Works, with a few weeks of tasks, meetings, people, projects and systems already in it. It is the quickest way to see what Discerny looks like in use. Clone it beside the app folder (`git clone https://github.com/StormSleeper/discerny-example.git`), then choose that folder in the UI, or run `node tools/discern.mjs connect ../discerny-example` in the app folder. Its README says how to put the sample data back after you've changed it.
 
 You can have more than one data folder, for example one to try things out in. Switch the UI with *Change folder*, and your agent with `node tools/discern.mjs connect <folder>` in the app folder; `node tools/discern.mjs connect` on its own shows which folder is connected.
 
@@ -86,7 +90,7 @@ You can have more than one data folder, for example one to try things out in. Sw
 | `AGENTS.md` | Instructions for AI agents (`CLAUDE.md` points Claude to it) |
 | `SOURCE-SKILLS.md` | The rules every source skill follows |
 | `.claude/skills/` | The Discerny skills for Claude (a hidden folder) |
-| `tools/` | `discern.mjs`, the helper: it connects the app to a data folder (`connect`, `new`) and does the fiddly parts for source skills. Also its tests (`node --test tools/test/discern.test.mjs`) and `evals/`, test data for the skills. Both run on a copy of the test data folder, a fictional company called Pennywhistle Puppet Works: `discerny-example` beside the app folder, as of its last commit, or the folder named in `DISCERNY_TEST_DATA` |
+| `tools/` | `discern.mjs`, the helper: it connects the app to a data folder (`connect`, `new`) and does the fiddly parts for source skills. Also its tests (`node --test tools/test/discern.test.mjs`) and `evals/`, test data for the skills. Both run on a copy of the test data folder, a fictional company called Pennywhistle Puppet Works: [discerny-example](https://github.com/StormSleeper/discerny-example), cloned beside the app folder and read as of its last commit, or the folder named in `DISCERNY_TEST_DATA` |
 | `new_discerny_repo/` | The blank starter files a new data folder is copied from |
 | `data-folder.txt` | Where your data folder is, so your agent and the skills can find it. Written by `discern connect` and `discern new` |
 
