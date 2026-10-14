@@ -46,6 +46,14 @@ function run(dir, args, input, now = NOW) {
 }
 const read = (d, f) => fs.readFileSync(path.join(d, f), 'utf8');
 
+test('--version prints the version from discerny.html', () => {
+  const r = spawnSync(process.execPath, [CLI, '--version'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout);
+  const m = /var VERSION='([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'));
+  assert.ok(m, 'discerny.html declares VERSION');
+  assert.equal(r.stdout.trim(), m[1]);
+});
+
 test('check passes on the test data folder', () => {
   const r = run(folder(), ['check']);
   assert.equal(r.code, 0, r.out);

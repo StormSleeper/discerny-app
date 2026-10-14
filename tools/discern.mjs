@@ -4,6 +4,7 @@
 // //<core> and //</core>), so the UI and this helper can never disagree about the format.
 //
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
+//   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
 // Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, migrate.
 // Input for match, add, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
@@ -59,7 +60,7 @@ function loadCore() {
     const html = fs.readFileSync(p, 'utf8');
     const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
     if (a < 0 || b < a) continue;
-    const names = ['parse', 'serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS'];
+    const names = ['VERSION', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS'];
     const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
     try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
     catch (e) { fail(`the //<core> block in ${name} did not load: ${e.message}`); }
@@ -682,6 +683,10 @@ CMD.migrate = function () {
 };
 
 const cmd = ARGS[0];
+if (cmd === '--version' || cmd === 'version') {
+  process.stdout.write((C.VERSION || 'unknown') + '\n');
+  process.exit(0);
+}
 if (!cmd || !CMD[cmd]) {
   process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|ignore|note|ref|commit|log|check|migrate> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);

@@ -96,6 +96,19 @@ You can have more than one data folder, for example one to try things out in. Sw
 
 `discerny.html` is the UI: Today, Inbox, Next actions, Waiting for, Upcoming, FYI, Projects, People, Systems, Weekly review, Done and an Agent page, with search (Ctrl K), undo and dark mode. `discerny-old.html` is the earlier four-page version (Tasks, People, Projects, Systems). Both work on the same files, and the old one is kept for now while the new one is being tested.
 
+### Version
+
+The UI shows the app's version on the folder page, and `node tools/discern.mjs --version` prints it. A version has four numbers, `MAJOR.MINOR.PATCH.BUILD`:
+
+- **MAJOR** goes up for a big change to the app.
+- **MINOR** goes up when the way your data folder is written changes.
+- **PATCH** goes up with the first change after each release.
+- **BUILD** goes up with every change, and never goes back down.
+
+If the first two numbers differ from the last release you had, your data folders need an Upgrade before the new app will work on them. If only the last two differ, just pull.
+
+The `main` branch holds only releases, and each one is tagged `v<version>`, such as `v0.1.1.1`. The `dev` branch holds every change as it's made, each with its own build number. Stay on `main` unless you want to try changes before they're released. Each version number is set when a change is made, never by hand. `CHANGELOG.md` says what each release changed.
+
 ## Writing your own skills
 
 A Discerny skill is a set of instructions your agent runs on request, such as "check my mail for new tasks" or "chase everything I've been waiting on for more than a week". Name them `discern-<name>`.
