@@ -2,7 +2,7 @@
   "scenario": "fixtures/outlook-calendar/basic",
   "description": "One calendar run over the test data folder covering E20-E23, prep, invites, a cancellation, an overlap and the transcript pass.",
   "setup": [
-    "Make a scratch data folder as README.md in this folder describes (a copy of the test data folder, discerny_data), and connect the helper to it.",
+    "Make a scratch data folder as README.md in this folder describes (a copy of the test data folder, discerny-example, as of its last commit), and connect the helper to it.",
     "In its SOURCES.md outlook-calendar block, add \"- fixture: <absolute path to tools/evals/fixtures/outlook-calendar/basic>\" and set transcripts to organizer-only (E23)."
   ],
   "expect": [

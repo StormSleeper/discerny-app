@@ -1,5 +1,5 @@
 // Tests for tools/discern.mjs, run against a fresh copy of the test data folder for each test:
-// discerny_data beside the app folder, or the folder in $DISCERNY_TEST_DATA.
+// discerny-example beside the app folder, or the folder in $DISCERNY_TEST_DATA.
 //   node --test tools/test/discern.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -11,12 +11,31 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CLI = path.join(REPO, 'tools', 'discern.mjs');
-const DATA = path.resolve(process.env.DISCERNY_TEST_DATA || path.join(REPO, '..', 'discerny_data'));
+const DATA = path.resolve(process.env.DISCERNY_TEST_DATA || path.join(REPO, '..', 'discerny-example'));
 const NOW = '2026-10-12T15:00:00Z';
+const BASE = committed();
+
+// The example folder doubles as a data folder the app can be connected to, so using the app
+// changes it. The tests expect exact results (next IDs, inbox contents), so they read it as of
+// its last git commit and ignore uncommitted edits. A folder named in $DISCERNY_TEST_DATA, or
+// one that is not the top of its own git repository, is copied as it stands.
+function committed() {
+  if (process.env.DISCERNY_TEST_DATA) return DATA;
+  const top = spawnSync('git', ['-C', DATA, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+  if (top.status !== 0 || fs.realpathSync(top.stdout.trim()) !== fs.realpathSync(DATA)) return DATA;
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-base-'));
+  const tar = path.join(d, '..', path.basename(d) + '.tar');
+  const a = spawnSync('git', ['-C', DATA, 'archive', '-o', tar, 'HEAD'], { encoding: 'utf8' });
+  if (a.status !== 0) throw new Error(`git archive failed in ${DATA}: ${a.stderr}`);
+  const x = spawnSync('tar', ['-xf', tar, '-C', d], { encoding: 'utf8' });
+  fs.rmSync(tar, { force: true });
+  if (x.status !== 0) throw new Error(`tar failed: ${x.stderr}`);
+  return d;
+}
 
 function folder() {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-'));
-  fs.cpSync(DATA, d, { recursive: true });
+  fs.cpSync(BASE, d, { recursive: true });
   return d;
 }
 function run(dir, args, input, now = NOW) {

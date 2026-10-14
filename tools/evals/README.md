@@ -4,11 +4,11 @@ Tests for the skills in `.claude/skills/`. `fixtures/` holds recorded connector 
 
 An eval passes when it succeeds 3 runs out of 3 on Haiku 5.5, Sonnet 5.5 and Opus 5.5 at medium effort. Record tokens and tool calls for each run, so later versions of a skill can be compared against them. The helper evals run without a model: `node --test tools/test/discern.test.mjs` from the app folder.
 
-Every eval runs over the test data folder: a fictional company, Pennywhistle Puppet Works, kept outside the app in `discerny_data` beside the app folder. The helper tests copy it afresh for each test, from there or from the folder in `DISCERNY_TEST_DATA`, so they never change it.
+Every eval runs over the test data folder: a fictional company, Pennywhistle Puppet Works, kept outside the app in `discerny-example` beside the app folder. That folder is also a data folder you can connect the app to and try it on, so it may hold edits of your own; the evals use it as of its last git commit. The helper tests copy it afresh for each test, from its last commit or from the folder in `DISCERNY_TEST_DATA`, so they never change it.
 
 ## Running one
 
-1. Make a scratch data folder: copy the test data folder somewhere outside the app folder.
+1. Make a scratch data folder outside the app folder from the test data folder's last commit: `mkdir <scratch folder>`, then `git -C ../discerny-example archive HEAD | tar -x -C <scratch folder>`.
 2. Follow the `setup` steps in `<source>.basic.expected.json`; the main one adds `fixture: <absolute path to the fixture folder>` to the source's block in the scratch folder's `SOURCES.md`.
 3. In the app folder, run `node tools/discern.mjs connect <scratch folder>`. Start Claude in the app folder with `claude --add-dir <scratch folder>` and ask it to run the skill, such as "check my mail for Discerny". Tell it not to open anything outside the app, scratch and fixture folders.
 4. Compare the scratch folder's `INBOX.md`, `IGNORED.md` and `SOURCES.md`, and the run's report, with `expect` in the same file.
