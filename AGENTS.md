@@ -60,7 +60,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 
 - Edit single lines in place. Never rewrite a whole file, and never leave a file empty: the UI refuses to save over a file that suddenly loses its contents, so keep the `#` heading and header comments in every file.
 - IDs are permanent and never reused. Each file with IDs has `<!-- next-id: N -->` near the top. When you add an item, use N and then increase it. Tasks and inbox items share the counter in `TASKS.md`.
-- Work only inside the data folder; change the app folder only when the user asks you to write or change a skill. Never send, reply to, move or mark anything in an outside system (mail, chat, calendars). If the user wants a message sent, write a draft in `drafts/` and tell them.
+- Work only inside the data folder; change the app folder only when the user asks you to change Discerny itself: its UI, helper, instructions or skills. Never send, reply to, move or mark anything in an outside system (mail, chat, calendars). If the user wants a message sent, write a draft in `drafts/` and tell them.
 - The UI may be open while you work. It notices your edits and does not overwrite them, but it is safest to edit only the lines you need.
 - When you are unsure what the user meant, ask. If no one is there to answer, leave the item as it is and say why.
 - Times without a time zone are the user's local time: the `timezone` in the `## defaults` block of `SOURCES.md`. State in `SOURCES.md` is UTC.
