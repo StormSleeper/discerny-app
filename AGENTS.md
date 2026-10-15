@@ -42,6 +42,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `IGNORED.md` | Threads already judged not actionable | by source skills, for dedupe |
 | `REFRESH-LOG.md` | Reports of source-skill runs, newest last (created on the first run) | append only; read when asked |
 | `drafts/` | Messages you drafted for the user (`<ID>-<slug>.md`). Never sent | when asked |
+| `DISCERNY.md` | What the folder is, and its Format version as `<!-- format: <version> -->`. No file, or no comment, means 0.1.0.0. `discern check` reports it. Only an Upgrade changes it; never edit it | never; run `discern check` |
 
 ### In the app folder
 

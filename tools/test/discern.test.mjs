@@ -60,6 +60,45 @@ test('check passes on the test data folder', () => {
   assert.equal(r.json.ok, true);
 });
 
+test('check reports a folder with no DISCERNY.md as Format 0.1.0.0, the same as the app', () => {
+  const r = run(folder(), ['check']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.format, { folder: '0.1.0.0', app: '0.1.0.0', is: 'same' });
+});
+
+const folderInFormat = (format) => {
+  const d = folder();
+  fs.writeFileSync(path.join(d, 'DISCERNY.md'), `# Discerny data folder\n\n<!-- format: ${format} -->\n\nThis folder holds Discerny data.\n`);
+  return d;
+};
+
+test('check reports a DISCERNY.md with no format comment as Format 0.1.0.0', () => {
+  const d = folder();
+  fs.writeFileSync(path.join(d, 'DISCERNY.md'), '# Discerny data folder\n\nThis folder holds Discerny data.\n');
+  const r = run(d, ['check']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.format, { folder: '0.1.0.0', app: '0.1.0.0', is: 'same' });
+});
+
+test('the app\'s Format version is its newest Migration: next if there is one unlanded, else 0.1.0.0 with none', () => {
+  const dir = path.join(REPO, 'migrations');
+  const names = fs.existsSync(dir) ? fs.readdirSync(dir).filter(n => fs.statSync(path.join(dir, n)).isDirectory()) : [];
+  const built = names.filter(n => /^\d+(\.\d+)*$/.test(n))
+    .sort((a, b) => { const x = a.split('.'), y = b.split('.'); for (let i = 0; i < Math.max(x.length, y.length); i++) { const d = (+x[i] || 0) - (+y[i] || 0); if (d) return d; } return 0; });
+  const newest = names.includes('next') ? 'next' : built.length ? built[built.length - 1] : '0.1.0.0';
+  assert.equal(run(folder(), ['check']).json.format.app, newest);
+});
+
+test('check fails on a folder in an older or newer Format, or next', () => {
+  for (const [format, is] of [['0.0.1.5', 'older'], ['0.2.0.1', 'newer'], ['next', 'newer']]) {
+    const r = run(folderInFormat(format), ['check']);
+    assert.equal(r.code, 1, `${format}: ${r.out}`);
+    assert.equal(r.json.ok, false);
+    assert.deepEqual(r.json.format, { folder: format, app: '0.1.0.0', is });
+    assert.ok(r.json.errors.some(e => e.includes(format)), `${format}: ${r.json.errors}`);
+  }
+});
+
 test('local converts to the user time zone across the clock change (E7, E22)', () => {
   const d = folder();
   const r = run(d, ['local'], ['2026-10-24T09:00:00Z', '2026-10-26T09:00:00Z',
@@ -280,6 +319,27 @@ test('new makes a data folder from the starter and connects to it; connect switc
   assert.equal(runApp(a, ['state', 'outlook-mail']).json.user.name, 'Imogen Hartley');
   assert.equal(runApp(a, ['connect', path.join(a, 'tools')]).code, 1);
   assert.equal(runApp(a, ['connect']).json.folder, d);
+});
+
+test('new writes DISCERNY.md with the app\'s Format version, and check finds it the same', () => {
+  const a = app(), mine = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-new-')), 'mine');
+  assert.equal(fs.existsSync(path.join(a, 'new_discerny_repo', 'DISCERNY.md')), false, 'the starter carries no DISCERNY.md');
+  assert.equal(runApp(a, ['new', mine]).code, 0);
+  const text = read(mine, 'DISCERNY.md');
+  assert.match(text, /^# /);
+  assert.match(text, /<!-- format: 0\.1\.0\.0 -->/);
+  const c = runApp(a, ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.deepEqual(c.json.format, { folder: '0.1.0.0', app: '0.1.0.0', is: 'same' });
+});
+
+test('connect connects to a folder in another Format, and warns', () => {
+  const a = app(), d = folderInFormat('0.2.0.1');
+  const r = runApp(a, ['connect', d]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.json.connected, d);
+  assert.ok(r.json.warnings.some(w => w.includes('0.2.0.1')), r.out);
+  assert.deepEqual(runApp(a, ['connect', folder()]).json.warnings, []);
 });
 
 test('transcript items share an event but not a calid ref', () => {

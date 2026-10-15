@@ -60,7 +60,7 @@ function loadCore() {
     const html = fs.readFileSync(p, 'utf8');
     const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
     if (a < 0 || b < a) continue;
-    const names = ['VERSION', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS'];
+    const names = ['VERSION', 'FORMAT', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS'];
     const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
     try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
     catch (e) { fail(`the //<core> block in ${name} did not load: ${e.message}`); }
@@ -295,6 +295,15 @@ function actionFor(res, pass, c) {
   }
 }
 
+// The Format version a data folder records in DISCERNY.md, against this app's, and the message
+// to give when they differ (null when they are the same).
+function formatStanding(dir) {
+  const f = path.join(dir, 'DISCERNY.md');
+  const folder = C.formatOf(fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''), is = C.formatIs(folder);
+  const problem = is === 'same' ? null : `the data folder is in Format ${folder}, ${is} than this app's ${C.FORMAT}`;
+  return { format: { folder, app: C.FORMAT, is }, problem };
+}
+
 // ---------------------------------------------------------------- commands
 const CMD = {};
 
@@ -309,6 +318,8 @@ CMD.connect = function () {
   if (!isDataFolder(d)) fail(`${d} has no TASKS.md, so it is not a Discerny data folder. To start a new one there, run: discern new ${want}`);
   fs.writeFileSync(LINK, d + '\n');
   const warnings = process.env.DISCERNY_DIR ? ['DISCERNY_DIR is set, and it overrides data-folder.txt until it is unset'] : [];
+  const { problem } = formatStanding(d);
+  if (problem) warnings.push(problem);
   out({ connected: d, warnings });
 };
 
@@ -319,6 +330,7 @@ CMD.new = function () {
   if (fs.existsSync(d) && fs.readdirSync(d).length) fail(`${d} is not empty: choose a new or empty folder, or run discern connect ${want} if it already holds Discerny data`);
   if (!isDataFolder(STARTER)) fail(`the starter folder ${STARTER} is missing`);
   fs.cpSync(STARTER, d, { recursive: true });
+  fs.writeFileSync(path.join(d, 'DISCERNY.md'), `# Discerny data folder\n\n<!-- format: ${C.FORMAT} -->\n\nThis folder holds one person's Discerny data, a task tracker kept as Markdown files whose app lives at https://github.com/StormSleeper/discerny-app.\n`);
   fs.writeFileSync(LINK, d + '\n');
   out({ created: d, connected: d });
 };
@@ -646,7 +658,9 @@ CMD.check = function () {
   const S = sources();
   if (!S.blocks.defaults) warnings.push('SOURCES.md has no "## defaults" block');
   else if (!val(S.blocks.defaults, 'timezone')) warnings.push('SOURCES.md defaults has no timezone');
-  out({ ok: !errors.length, errors, warnings, items: all.size, next_id: counter ? +counter : null });
+  const { format, problem } = formatStanding(DIR);
+  if (problem) errors.push(problem);
+  out({ ok: !errors.length, errors, warnings, format, items: all.size, next_id: counter ? +counter : null });
   if (errors.length) process.exit(1);
 };
 

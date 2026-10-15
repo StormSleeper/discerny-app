@@ -386,7 +386,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.1.1.1'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.1.1.2'; // the app's version; tools/discern.mjs reads it from here
+var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Next 2 weeks',later:'Later',fyi:'FYI / awareness'};
 var URG_ORDER=['today','week','soon','later','fyi'];
 var TYPES=['Task','Meeting','Process','Document','FYI'];
@@ -538,6 +539,14 @@ function relLine(a,b){
   if(REL_PAIRS[k1])return {line:'- '+a+' -> '+b+' | '+REL_PAIRS[k1]};
   if(REL_PAIRS[k2])return {line:'- '+b+' -> '+a+' | '+REL_PAIRS[k2]};
   return {err:'Cannot link '+ka+' to '+kb+' (projects are linked to tasks with the Project field).'};}
+// versions compare part by part, a missing part counting as 0; 'next' (an unlanded Migration) is newer than any
+function versionCmp(a,b){if(a===b)return 0;if(a==='next')return 1;if(b==='next')return -1;
+  var x=String(a).split('.'),y=String(b).split('.');
+  for(var i=0;i<Math.max(x.length,y.length);i++){var d=(+x[i]||0)-(+y[i]||0);if(d)return d<0?-1:1;}return 0;}
+// DISCERNY.md records a data folder's Format version as <!-- format: <version> -->; no file or no comment means 0.1.0.0
+function formatOf(text){var m=/<!--\s*format:\s*(\S+?)\s*-->/.exec(String(text||''));return m?m[1]:'0.1.0.0';}
+// how a folder's Format version stands against this app's: 'same', 'older' or 'newer'
+function formatIs(v){var c=versionCmp(v,FORMAT);return c?(c<0?'older':'newer'):'same';}
 //</core>
 
 /* ===================== constants shared with discerny-old.html ===================== */

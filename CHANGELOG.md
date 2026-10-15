@@ -5,3 +5,4 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 ## Unreleased
 
 - The folder page shows which version of Discerny you have, and `node tools/discern.mjs --version` prints it.
+- New data folders get a DISCERNY.md that records their Format, and `discern check` says whether a folder's Format matches the app's.
