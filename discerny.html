@@ -386,7 +386,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.1.1.2'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.1.1.3'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Next 2 weeks',later:'Later',fyi:'FYI / awareness'};
 var URG_ORDER=['today','week','soon','later','fyi'];
@@ -557,7 +557,7 @@ var EDEF = {
 var REL_HEAD = ['# Relationships', '<!-- One line per link, stored once (shown on both items): `- A ~ B | related` (symmetric) or `- A -> B | type` (involves, concerns, owns, uses). Validate: both IDs exist, no duplicates, no self-links. `dep:` on tasks is separate. -->', ''];
 var ASK_HEAD = ['# Ask agent queue', '<!-- One line per pending note: - ID | YYYY-MM-DD HH:MM | text. Written by discerny.html. The agent removes a line once it is actioned (skill: discern-ask-agent) and records it in ASK-AGENT-LOG.md. -->', ''];
 var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', ignored: 'IGNORED.md' };
-var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md'];
+var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
 var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, ignored: function (t) { return { text: String(t || '') }; } };
 function serKey(k, m) {
   if (k === 'tasks' || k === 'inbox' || k === 'done') return serialize(m);
@@ -1155,6 +1155,16 @@ async function persist(job) {
 }
 function isPermErr(e) { return !!e && (e.name === 'NotAllowedError' || e.name === 'SecurityError'); }
 function errText(e) { return (e && (e.message || e.name)) || 'unknown error'; }
+// The gate for a folder whose DISCERNY.md records a Format other than this app's, or null when they match.
+async function formatGate() {
+  var v = formatOf(await readText('DISCERNY.md')), is = formatIs(v);
+  return is === 'same' ? null : { mode: v === 'next' ? 'fmtnext' : is === 'older' ? 'fmtold' : 'fmtnew', msg: '', format: v };
+}
+// An open folder whose Format changed (an Upgrade ran while the page was open) is refused, not written to.
+function refuseFormat(g) {
+  if (Q.jobs.some(function (j) { return !j.sync; })) g.msg = 'Changes you had not saved yet were not written to it.';
+  Q.jobs = []; Q.blocked = null; S.ready = false; S.gate = g;
+}
 async function kick() {
   if (Q.running || Q.blocked) return;
   Q.running = true;
@@ -1162,6 +1172,8 @@ async function kick() {
   while (Q.jobs.length && !Q.blocked) {
     var job = Q.jobs[0];
     try {
+      var g = await formatGate();
+      if (g) { refuseFormat(g); break; }
       if (job.sync) { var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now(); }
       else { await persist(job); Q.wrote = true; Q.lastSaved = Date.now(); }
       Q.jobs.shift();
@@ -2559,16 +2571,19 @@ var GATE = {
   wrong: ['That folder has no TASKS.md', 'Pick your Discerny data folder: the one with TASKS.md and PEOPLE.md in it. To start a new one, copy the new_discerny_repo folder that comes with Discerny, and pick the copy.', 'Choose folder…', 'pick'],
   denied: ['Permission wasn’t given', 'Discerny can’t read or save your files without it. Try again and choose Allow.', 'Try again', 'regrant'],
   error: ['Something went wrong', '%s', 'Try again', 'pick'],
+  fmtold: ['This folder needs an upgrade', '“%s” is in Format %f, older than the Format %a this version of Discerny reads and writes. Ask your agent to “upgrade my Discerny folder”, or run node tools/discern.mjs upgrade in the Discerny app folder. Then reload this page.', 'Choose a different folder', 'refolder'],
+  fmtnew: ['This folder needs a newer Discerny', '“%s” is in Format %f, newer than the Format %a this version of Discerny reads and writes. Get the newer Discerny from github.com/StormSleeper/discerny-app and open the folder with that.', 'Choose a different folder', 'refolder'],
+  fmtnext: ['This folder was upgraded by an unreleased Discerny', '“%s” is in Format next: a test build of Discerny upgraded it, so no released version can read it. This version reads and writes Format %a. Restore the backup copy the upgrade made beside the folder.', 'Choose a different folder', 'refolder'],
   nosupport: ['Open this file in Chrome or Edge', 'This browser can’t edit files in a folder. Discerny needs Google Chrome or Microsoft Edge.', '', ''],
   loading: ['Opening your folder…', 'Reading your files.', '', '']
 };
 function vGate() {
-  var g = GATE[S.gate.mode] || GATE.pick, msg = g[1].replace('%s', S.gate.mode === 'error' ? (S.gate.msg || 'Unknown error') : S.folder);
+  var g = GATE[S.gate.mode] || GATE.pick, msg = g[1].replace('%s', S.gate.mode === 'error' ? (S.gate.msg || 'Unknown error') : S.folder).replace('%f', S.gate.format).replace('%a', FORMAT);
   var h = '<div class="gate" data-k="gate"><main class="gate-c" aria-labelledby="gate-h"><div class="brand" style="padding:0"><span class="logo" aria-hidden="true">' + ic('check') + '</span><span class="brand-t"><b>Discerny</b><span>Version ' + VERSION + '</span></span></div>' +
     '<h1 id="gate-h">' + esc(g[0]) + '</h1><p>' + esc(msg) + '</p>' + (S.gate.msg && S.gate.mode !== 'error' ? '<p class="err-t">' + esc(S.gate.msg) + '</p>' : '');
   if (g[2]) h += '<div class="acts">' + bt(g[2], g[3], { cls: 'primary lg' }) + (S.gate.mode === 'reconnect' || S.gate.mode === 'denied' ? bt('Choose a different folder', 'pick', { cls: 'lg' }) : '') + '</div>';
   if (S.gate.mode === 'pick' || S.gate.mode === 'reconnect') h += '<p class="hint">Your browser will ask to let this page view and edit files in the folder. If it offers <strong>Allow on every visit</strong>, choose that and Discerny will open straight in next time.</p>';
-  return h + '</main></div>';
+  return h + '</main></div>' + vToasts();
 }
 
 /* ===================== extra operations used by the panel ===================== */
@@ -3078,6 +3093,8 @@ var ACT = {
   'e-link-add': function (el) { addEntityLink(did(el)); },
   'e-link-del': function (el) { var id = did(el), v = dvv(el); commit(OPS.removeEntLink(kindOf(id), id, v), { toast: 'Link removed.', undo: OPS.addEntLink(kindOf(id), id, v) }); },
   pick: function () { pickFolder(); },
+  // From a folder refused after it was open, switching reloads the page so nothing of it carries over.
+  refolder: function () { if (S.m) changeFolder(); else pickFolder(); },
   folder: function () { changeFolder(); },
   regrant: function () { regrant(); }
 };
@@ -3331,7 +3348,11 @@ async function openFolder() {
   }
   S.gate = { mode: 'loading', msg: '' };
   render();
-  try { var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now(); }
+  try {
+    var g = await formatGate();
+    if (g) { S.gate = g; render(); return; }
+    var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now();
+  }
   catch (e) { console.error(e); S.gate = isPermErr(e) ? { mode: 'reconnect', msg: '' } : { mode: 'error', msg: errText(e) }; render(); return; }
   S.ready = true;
   if (S.view === 'inbox') go('inbox');

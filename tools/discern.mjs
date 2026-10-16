@@ -9,6 +9,7 @@
 // Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, migrate.
 // Input for match, add, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
+// Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
 //
 // The app (this helper, the UI, the skills) and the user's data live in separate folders. The data folder
 // is --dir, else $DISCERNY_DIR, else the path in data-folder.txt in the app folder, which connect and new write.
@@ -708,5 +709,14 @@ if (!cmd || !CMD[cmd]) {
 if (cmd !== 'connect' && cmd !== 'new') {
   if (!DIR) fail(NOT_CONNECTED, 2);
   if (!isDataFolder(DIR)) fail(`${DIR} (from ${FROM}) has no TASKS.md, so it is not a Discerny data folder`);
+}
+// A folder in another Format is refused before any command reads or writes it, except those that show or fix that.
+if (!['connect', 'new', 'check', 'upgrade'].includes(cmd)) {
+  const { format, problem } = formatStanding(DIR);
+  if (problem) fail(`${problem}. ` + (format.is === 'older'
+    ? 'Tell the user, and offer to upgrade it: they can ask you to "upgrade my Discerny folder", or run: discern upgrade'
+    : format.folder === 'next'
+    ? 'An unreleased build of the app upgraded it, so no released app can read it. Tell the user to restore the backup the upgrade made beside the folder'
+    : 'Tell the user to get the newer app from https://github.com/StormSleeper/discerny-app before working on this folder'), 2);
 }
 CMD[cmd]();

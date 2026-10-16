@@ -99,6 +99,80 @@ test('check fails on a folder in an older or newer Format, or next', () => {
   }
 });
 
+const snapshot = (d) => Object.fromEntries(fs.readdirSync(d, { recursive: true }).sort()
+  .filter(f => fs.statSync(path.join(d, f)).isFile()).map(f => [f, read(d, f)]));
+
+test('state refuses a folder in an older Format with exit 2, says how to Upgrade, and writes nothing', () => {
+  const d = folderInFormat('0.0.1.5'), before = snapshot(d);
+  const r = run(d, ['state', 'outlook-mail']);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.json.error, /0\.0\.1\.5/);
+  assert.match(r.json.error, /0\.1\.0\.0/);
+  assert.match(r.json.error, /upgrade my Discerny folder/);
+  assert.match(r.json.error, /discern upgrade/);
+  assert.deepEqual(snapshot(d), before);
+});
+
+test('state refuses a folder in a newer Format with exit 2, says to get the newer app, and writes nothing', () => {
+  const d = folderInFormat('0.2.0.1'), before = snapshot(d);
+  const r = run(d, ['state', 'outlook-mail']);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.json.error, /0\.2\.0\.1/);
+  assert.match(r.json.error, /0\.1\.0\.0/);
+  assert.match(r.json.error, /newer app/i);
+  assert.doesNotMatch(r.json.error, /upgrade/i);
+  assert.deepEqual(snapshot(d), before);
+});
+
+test('state refuses a folder upgraded by an unreleased build (next) with exit 2, says to restore its backup, and writes nothing', () => {
+  const d = folderInFormat('next'), before = snapshot(d);
+  const r = run(d, ['state', 'outlook-mail']);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.json.error, /Format next/);
+  assert.match(r.json.error, /0\.1\.0\.0/);
+  assert.match(r.json.error, /backup/);
+  assert.doesNotMatch(r.json.error, /newer app/i);
+  assert.deepEqual(snapshot(d), before);
+});
+
+test('every source skill command refuses a folder in another Format with exit 2, and writes nothing', () => {
+  const calls = [
+    [['match'], [{ scheme: 'mail', subject: 'Review' }]],
+    [['who', 'ihartley']],
+    [['local', '2026-10-24T09:00:00Z']],
+    [['add'], [draft()]],
+    [['ignore'], [{ ref: 'mail|Bake-off Friday sign-up', reason: 'social' }]],
+    [['note', 'T-0028', 'Print order moved']],
+    [['ref', 'T-0020', 'cal|2026-10-23|fable range 2027 – go/no-go']],
+    [['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z']],
+    [['log'], 'outlook-mail · fetched 3'],
+    [['migrate', '--write']],
+  ];
+  for (const format of ['0.0.1.5', '0.2.0.1', 'next']) {
+    const d = folderInFormat(format), before = snapshot(d);
+    for (const [args, input] of calls) {
+      const r = run(d, args, input);
+      assert.equal(r.code, 2, `${args[0]} on ${format}: ${r.out}`);
+      assert.match(r.json.error, new RegExp(`Format ${format}`), `${args[0]} on ${format}`);
+    }
+    assert.deepEqual(snapshot(d), before, format);
+  }
+});
+
+test('check, connect and --version still work on a folder in another Format', () => {
+  for (const format of ['0.0.1.5', '0.2.0.1', 'next']) {
+    const d = folderInFormat(format);
+    const v = run(d, ['--version']);
+    assert.equal(v.code, 0, `--version on ${format}: ${v.out}`);
+    const c = run(d, ['connect']);
+    assert.equal(c.code, 0, `connect on ${format}: ${c.out}`);
+    assert.equal(c.json.ok, true);
+    const k = run(d, ['check']);
+    assert.equal(k.code, 1, `check on ${format}: ${k.out}`);
+    assert.equal(k.json.format.folder, format);
+  }
+});
+
 test('local converts to the user time zone across the clock change (E7, E22)', () => {
   const d = folder();
   const r = run(d, ['local'], ['2026-10-24T09:00:00Z', '2026-10-26T09:00:00Z',

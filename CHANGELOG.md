@@ -6,3 +6,4 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 
 - The folder page shows which version of Discerny you have, and `node tools/discern.mjs --version` prints it.
 - New data folders get a DISCERNY.md that records their Format, and `discern check` says whether a folder's Format matches the app's.
+- Discerny now refuses to open a data folder in a different Format, and tells you how to upgrade it or which app to use instead.
