@@ -39,6 +39,7 @@ Discerny comes with ready-made skills for Claude in `.claude/skills/` (a hidden 
 | `discern-outlook-calendar` | Prep tasks and unanswered invites for the coming days; cancelled or moved meetings you track; overlaps; optionally action items from transcripts |
 | `discern-refresh` | Runs every source skill that has a block in `SOURCES.md`, one after another |
 | `discern-ask-agent` | Works through the notes you leave with "Ask agent" in the UI |
+| `discern-upgrade` | Upgrades a data folder in an older Format, showing you each change before making it |
 
 The three Microsoft 365 skills need Claude's Microsoft 365 connector. They only read: they never send, move or mark anything.
 

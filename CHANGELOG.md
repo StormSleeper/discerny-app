@@ -9,3 +9,4 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - Discerny now refuses to open a data folder in a different Format, and tells you how to upgrade it or which app to use instead.
 - Discerny can now upgrade a data folder made by an older version to the current format, keeping a backup beside it first.
 - The Example's dates can be brought up to today with `node tools/refresh-dates.mjs` in its folder.
+- Ask your agent to "upgrade my Discerny folder" and it takes the folder through the Upgrade with you, showing each change before making it.

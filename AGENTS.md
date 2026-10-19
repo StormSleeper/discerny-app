@@ -17,7 +17,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 ## Start here
 
 1. Find the data folder: run `node tools/discern.mjs connect` in the app folder, which prints it as `folder`. Without Node, it is the path in `data-folder.txt` in the app folder. If none is connected (exit 2), ask the user which folder holds their Discerny data and run `node tools/discern.mjs connect <folder>`; to start a new one, `node tools/discern.mjs new <folder>` copies the starter files and connects to the copy. Never write data files into the app folder.
-2. If the helper refuses the data folder because of its Format (exit 2, naming the folder's Format and the app's), do no work on it. Tell the user what the message says. For an older folder, offer the Upgrade: they can ask you to "upgrade my Discerny folder". Never edit the folder by hand, `DISCERNY.md` included, to get past the refusal.
+2. If the helper refuses the data folder because of its Format (exit 2, naming the folder's Format and the app's), do no work on it. Tell the user what the message says. For an older folder, offer the Upgrade: they can ask you to "upgrade my Discerny folder", which the `discern-upgrade` skill does. Never edit the folder by hand, `DISCERNY.md` included, to get past the refusal.
 3. Read only what the request needs. Do not read every file. The tables below say when each file is needed.
 4. Find items by searching for their ID (`T-0012`, `P-0003`, `PRJ-0001`, `SYS-0002`), then read or edit only those lines.
 5. Ignore `new_discerny_repo/` in the app folder. It holds the blank starter files a new data folder is copied from. Never read or change it unless the user asks you to.
