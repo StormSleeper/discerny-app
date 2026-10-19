@@ -20,7 +20,7 @@ How the GTD steps map onto Discerny:
 | Clarify | You accept, correct or dismiss each inbox item in the UI |
 | Organise | Items carry a type, urgency, person, project and tags; people, projects and systems have their own records, linked to each other |
 | Reflect | Weekly review page |
-| Engage | Today, Next actions, Waiting for and Upcoming views |
+| Engage | Today, Next actions, Waiting for and Upcoming views, and an All items page that groups, sorts and searches everything open |
 
 ## Works with any agent and any connector
 
@@ -96,7 +96,7 @@ You can have more than one data folder, for example one to try things out in. Sw
 | `new_discerny_repo/` | The blank starter files a new data folder is copied from |
 | `data-folder.txt` | Where your data folder is, so your agent and the skills can find it. Written by `discern connect` and `discern new` |
 
-`discerny.html` is the UI: Today, Inbox, Next actions, Waiting for, Upcoming, FYI, Projects, People, Systems, Weekly review, Done and an Agent page, with search (Ctrl K), undo and dark mode. `discerny-old.html` is the earlier four-page version (Tasks, People, Projects, Systems). Both work on the same files, and the old one is kept for now while the new one is being tested.
+`discerny.html` is the UI: Today, Inbox, Next actions, Waiting for, Upcoming, FYI, All items, Projects, People, Systems, Weekly review, Done and an Agent page, with search (Ctrl K), undo and dark mode. `discerny-old.html` is the earlier four-page version (Tasks, People, Projects, Systems). Both work on the same files, and the old one is kept for now while the new one is being tested.
 
 ### Version
 

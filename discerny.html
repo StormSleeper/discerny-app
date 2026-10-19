@@ -231,6 +231,10 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .qa label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:0 0 6px}
 .qa-row{display:flex;gap:8px}
 .qa-row .in{flex:1;min-width:0;min-height:38px;font-size:15px}
+.qa-more{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;margin-top:8px}
+.qa-more .fl{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.qa-more .fl:last-child{flex:1;min-width:min(260px,100%)}
+.qa-more textarea{resize:vertical;font:inherit}
 .qa-prev{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
 .qa-type{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;border:1px solid var(--accent-bd);background:var(--info-bg);color:var(--accent-ink)}
 .qa-title{font-size:13px;color:var(--ink-2);margin-top:6px}
@@ -285,6 +289,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .entity{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:0 0 22px;display:flex;flex-direction:column;gap:12px}
 .pills{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .pills .sp{margin-left:auto}
+.row .pills{gap:4px;margin-top:4px}
+.row .pills .chipbtn{min-height:24px;padding:1px 8px;font-size:12px}
 .ent-note{font-size:15px;color:var(--ink-2);max-width:76ch}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px 22px}
 .fact .k{font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
@@ -386,7 +392,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.1.1.7'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.1.1.8'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Next 2 weeks',later:'Later',fyi:'FYI / awareness'};
 var URG_ORDER=['today','week','soon','later','fyi'];
@@ -547,6 +553,61 @@ function versionCmp(a,b){if(a===b)return 0;if(a==='next')return 1;if(b==='next')
 function formatOf(text){var m=/<!--\s*format:\s*(\S+?)\s*-->/.exec(String(text||''));return m?m[1]:'0.1.0.0';}
 // how a folder's Format version stands against this app's: 'same', 'older' or 'newer'
 function formatIs(v){var c=versionCmp(v,FORMAT);return c?(c<0?'older':'newer'):'same';}
+// the all-items workbench: items grouped and sorted as the User chooses -> [{key, label, items}]
+function workbench(items,o){
+  var by=o.group,groups={},keys=[];
+  function keysOf(i){if(by==='tag')return tagsOf(i).length?tagsOf(i):[''];if(by==='type')return [i.meta.ty||'Task'];
+    if(by==='project')return prjOf(i).length?prjOf(i):[''];
+    if(by==='person'){var w=i.meta.who||'';return [w==='Unassigned'?'':w];}return [i.meta.urg||'later'];}
+  if(o.tag)items=items.filter(function(i){return tagsOf(i).indexOf(o.tag)>=0;});
+  if(o.q)items=items.filter(function(i){return itemMatch(i,o.q,o.prjName)!==null;});
+  items.forEach(function(i){keysOf(i).forEach(function(k){if(!groups[k]){groups[k]=[];keys.push(k);}groups[k].push(i);});});
+  function label(k){if(by==='urg')return URG[k]||k;if(by==='type')return TYPE_LABEL[k]||k;
+    if(by==='project')return k?(o.prjName&&o.prjName(k))||k:'Not in a project';return k||(by==='person'?'Unassigned':'Untagged');}
+  var fixed=by==='urg'?URG_ORDER:by==='type'?TYPES:null;
+  function rank(k){var n=fixed.indexOf(k);return n<0?fixed.length:n;}
+  if(fixed)keys.sort(function(a,b){return rank(a)-rank(b)||a.localeCompare(b);});
+  else if(by==='project')keys.sort(function(a,b){return (a==='')-(b==='')||label(a).localeCompare(label(b));});
+  else keys.sort(function(a,b){return (a==='')-(b==='')||groups[b].length-groups[a].length||a.localeCompare(b);});
+  function urgRank(i){var n=URG_ORDER.indexOf(i.meta.urg||'later');return n<0?URG_ORDER.indexOf('later'):n;}
+  function byUrg(a,b){return urgRank(a)-urgRank(b);}
+  function byDue(a,b){return String(a.meta.due||'9999').localeCompare(String(b.meta.due||'9999'));}
+  function first(x,y){return function(a,b){return x(a,b)||y(a,b);};}
+  function byAsg(dir){return function(a,b){var x=String(a.meta.asg||''),y=String(b.meta.asg||'');return (!x)-(!y)||dir*x.localeCompare(y);};}
+  var lead=o.sort==='due'?first(byDue,byUrg):o.sort==='new'?byAsg(-1):o.sort==='old'?byAsg(1):first(byUrg,byDue);
+  function cmp(a,b){return lead(a,b)||((+a.meta.p||2)-(+b.meta.p||2))||(a.id<b.id?-1:a.id>b.id?1:0);}
+  return keys.map(function(k){return {key:k,label:label(k),items:groups[k].slice().sort(cmp)};});}
+// search: every word of the query must start a word in the item. Returns where it matched ('' for the ID, title, person
+// or tags) or null. Where is the first place holding every word, else the first holding a word the title line lacks.
+function tokensOf(hay){return String(hay).toLowerCase().split(/[^a-z0-9À-ɏ-]+/).filter(Boolean);}
+function itemMatch(i,q,prjName){
+  var words=tokensOf(q);if(!words.length)return '';
+  function sv(k){return getSub(i,k).map(function(b){return b.v;}).join(' ');}
+  var places=[['',i.id+' '+i.title+' '+(i.meta.who||'')+' '+tagsOf(i).join(' ')],
+    ['project',prjOf(i).map(function(p){return (prjName&&prjName(p))||p;}).join(' ')],
+    ['notes',sv('note')],['your notes',sv('my')],['sub-tasks',sv('sub')],['the source',sv('src')]]
+    .map(function(p){return {where:p[0],toks:tokensOf(p[1])};});
+  function has(p,w){return p.toks.some(function(t){return t.indexOf(w)===0;});}
+  if(!words.every(function(w){return places.some(function(p){return has(p,w);});}))return null;
+  var full=places.filter(function(p){return words.every(function(w){return has(p,w);});})[0];
+  if(full)return full.where;
+  var rest=words.filter(function(w){return !has(places[0],w);});
+  return places.filter(function(p){return rest.some(function(w){return has(p,w);});})[0].where;}
+// quick add: parseQuick's result plus what the User chose -> {title, meta, notes} for the new item
+function daysBetween(a,b){function t(s){var p=String(s).slice(0,10).split('-').map(Number);return Date.UTC(p[0],p[1]-1,p[2]);}return Math.round((t(b)-t(a))/86400000);}
+function urgForDue(due,today){var n=daysBetween(today,due);return n<=0?'today':(n<=7?'week':(n<=14?'soon':'later'));}
+function quickItem(q,o){
+  var due=q.date?q.date+(q.time?' '+q.time:''):'';
+  var meta={ty:q.ty};
+  if(q.who)meta.who=q.who;
+  if(q.prj.length)meta.prj=q.prj.join(',');
+  if(q.tags.length)meta.tg=q.tags.join(',');
+  meta.urg=o.urg||(q.ty==='FYI'?'fyi':(due?urgForDue(due,o.today):'week'));
+  meta.p=q.p||'2';
+  if(due)meta.due=due;
+  meta.asg=o.now;
+  var notes=String(o.description||'').split(/[\r\n\u2028\u2029\u0085]/).map(function(s){return s.trim();}).filter(Boolean);
+  return {title:q.title,meta:meta,notes:notes};}
 //</core>
 
 /* ===================== constants shared with discerny-old.html ===================== */
@@ -582,7 +643,8 @@ var S = {
   m: null, ver: 0, ready: false, lost: false, lastSync: 0, fresh: new Set(), folder: '',
   view: 'today', entity: null, sel: null, panel: false, tab: 'details',
   group: lsGet('discerny-group', 'project'), pf: 'all', pq: '', pgroup: lsGet('discerny-pgroup', 'none'),
-  qa: '', qaType: null, palette: false, palQ: '', palI: 0, dialog: null,
+  wb: Object.assign({ group: 'urg', sort: 'urg', tag: '' }, lsJson('discerny-wb', {})), wq: '',
+  qa: '', qaType: null, qaMore: false, qaUrg: '', qaDesc: '', palette: false, palQ: '', palI: 0, dialog: null,
   composer: {}, subDraft: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', suggestOn: {},
   dismissFor: null, confirm: null, editAsk: null, editAskText: '', adding: null, addName: '', addGrp: '', addType: '',
   linkLabel: '', linkUrl: '', toasts: [], doneLimit: 60, copied: null,
@@ -1446,7 +1508,7 @@ function when(i) {
   var u = URGW[i.meta.urg] || URGW.later;
   return { label: u[0], tone: u[1], bucket: u[2], key: '9999-' + u[2] };
 }
-function urgFor(due) { var n = dd(due); return n <= 0 ? 'today' : (n <= 7 ? 'week' : (n <= 14 ? 'soon' : 'later')); }
+function urgFor(due) { return urgForDue(due, todayStr()); }
 function sortItems(list) {
   return list.slice().sort(function (a, b) {
     var wa = when(a), wb = when(b);
@@ -1702,12 +1764,11 @@ function reviewSteps() {
 /* ===================== search everything ===================== */
 var CMDS = [
   ['Go to Today', 'go', 'today'], ['Go to Inbox', 'go', 'inbox'], ['Go to Next actions', 'go', 'next'], ['Go to Waiting for', 'go', 'waiting'],
-  ['Go to Upcoming', 'go', 'upcoming'], ['Go to FYI', 'go', 'fyi'], ['Go to Projects', 'go', 'projects'], ['Go to People', 'go', 'people'],
+  ['Go to Upcoming', 'go', 'upcoming'], ['Go to FYI', 'go', 'fyi'], ['Go to All items', 'go', 'all'], ['Go to Projects', 'go', 'projects'], ['Go to People', 'go', 'people'],
   ['Go to Systems', 'go', 'systems'], ['Start the weekly review', 'go', 'review'], ['Go to Done', 'go', 'done'], ['Open the agent queue', 'go', 'claude'],
   ['Add a task', 'cmd', 'quickadd'], ['Appearance: follow Windows', 'cmd', 'theme-system'], ['Appearance: light', 'cmd', 'theme-light'], ['Appearance: dark', 'cmd', 'theme-dark'],
   ['Sidebar: expand or collapse', 'cmd', 'side'], ['Keyboard shortcuts', 'cmd', 'keys'], ['Read the folder again', 'cmd', 'sync']
 ];
-function tokensOf(hay) { return String(hay).toLowerCase().split(/[^a-z0-9À-ɏ-]+/).filter(Boolean); }
 function search(qs) {
   var words = String(qs || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
   var groups = [];
@@ -1717,21 +1778,18 @@ function search(qs) {
   var tasks = [];
   [['open', S.m.tasks.items], ['inbox', S.m.inbox.items], ['done', S.m.done.items]].forEach(function (src) {
     src[1].forEach(function (i) {
+      var where = itemMatch(i, qs, prjName);
+      if (where === null) return;
       var lab = has(i.id + ' ' + i.title);
-      var fields = [['', i.id + ' ' + i.title + ' ' + (i.meta.who || '') + ' ' + tagsOf(i).join(' ')], ['notes', notesOf(i).join(' ')], ['your notes', myOf(i).join(' ')], ['sub-tasks', subsOf(i).map(function (x) { return x.v; }).join(' ')], ['the source', srcOf(i).join(' ')]];
-      if (!has(fields.map(function (f) { return f[1]; }).join(' '))) return;
-      var full = fields.filter(function (f) { return has(f[1]); })[0];
-      var part = fields.filter(function (f) { var t = tokensOf(f[1]); return words.some(function (w) { return t.some(function (x) { return x.indexOf(w) === 0; }); }); })[0];
-      var hit = full || part;
       var bits = [listName(i)];
       if (src[0] === 'open') bits.push(when(i).label);
       if (src[0] === 'done' && i.meta.done) bits.push('done ' + fmt(i.meta.done));
-      if (hit && hit[0]) bits.push('matched in ' + hit[0]);
+      if (where) bits.push('matched in ' + where);
       tasks.push({ label: i.title, sub: bits.join(' · '), id: i.id, act: 'open', arg: i.id, lab: lab, rank: (src[0] === 'open' ? 0 : src[0] === 'inbox' ? 1 : 2) + (lab ? 0 : 3) });
     });
   });
   tasks.sort(function (a, b) { return a.rank - b.rank || (a.id < b.id ? -1 : 1); });
-  if (tasks.length) groups.push({ title: 'Tasks', items: tasks.slice(0, 8), more: tasks.length - 8, lab: tasks[0].lab });
+  if (tasks.length) groups.push({ title: 'Tasks', items: tasks.slice(0, 8).concat(tasks.length > 8 ? [{ label: 'Show all ' + tasks.length + ' matching items', sub: 'On All items, with inbox and done', id: '', act: 'all', arg: String(qs).trim() }] : []), more: tasks.length - 8, lab: tasks[0].lab });
   var people = S.m.people.people.filter(function (p) { return has(p.name + ' ' + Object.keys(p.meta).map(function (k) { return p.meta[k]; }).join(' ') + ' ' + p.grp + ' ' + notesOf(p).join(' ')); })
     .map(function (p) { return { label: p.name, sub: [p.meta.title, p.meta.co, p.meta.st === 'Left' ? 'left' : ''].filter(Boolean).join(' · ') || 'Person', id: p.meta.id || '', act: 'person', arg: p.meta.id || '', lab: has(p.name) }; })
     .sort(function (a, b) { return (b.lab - a.lab) || a.label.localeCompare(b.label); });
@@ -1768,6 +1826,7 @@ var ICONS = {
   waiting: '<path d="M5 22h14M5 2h14M17 22v-4.2a2 2 0 0 0-.6-1.4L12 12l-4.4 4.4a2 2 0 0 0-.6 1.4V22M7 2v4.2a2 2 0 0 0 .6 1.4L12 12l4.4-4.4a2 2 0 0 0 .6-1.4V2"/>',
   upcoming: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   fyi: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/>',
+  all: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/>',
   projects: '<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
   people: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
   systems: '<rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/>',
@@ -1839,7 +1898,8 @@ function vRow(i, o) {
   return '<div class="row' + (sel ? ' sel' : '') + (S.cur === i.id ? ' cur' : '') + (done ? ' done' : '') + '" data-k="r-' + i.id + '" data-row="' + i.id + '">' +
     '<div class="lead">' + lead + '</div>' +
     '<div class="body"><button type="button" class="t" data-act="open" data-id="' + i.id + '"' + (sel ? ' aria-current="true"' : '') + '>' + (time ? '<span class="tm">' + time + '</span>' : '') + esc(title) + '</button>' +
-    (meta.length ? '<div class="meta">' + esc(meta.join(' · ')) + '</div>' : '') + reasons + '</div>' +
+    (meta.length ? '<div class="meta">' + esc(meta.join(' · ')) + '</div>' : '') +
+    (o.showTags && tagsOf(i).length ? '<div class="pills">' + tagsOf(i).map(function (t) { return '<button type="button" class="chipbtn" data-act="wb-tag" data-v="' + esc(t) + '"' + pressed(S.wb.tag === t) + ' title="Show only #' + esc(t) + '">#' + esc(t) + '</button>'; }).join('') + '</div>' : '') + reasons + '</div>' +
     '<div class="right">' + badges + (showWhen ? '<span class="b when' + (wh.tone ? ' ' + wh.tone : '') + '">' + esc(whenLabel) + '</span>' : '') + acts + '<span class="id">' + i.id + '</span></div></div>';
 }
 var REASONS = ['Not actionable', 'Already handled', 'Duplicate', 'Not mine'];
@@ -1903,9 +1963,15 @@ function vQuick() {
   var text = S.qa || '', q = text.trim() ? parseQuick(text, S.qaType) : null;
   var h = '<div class="qa" data-k="qa"><label for="qa-in">Add a task</label><div class="qa-row">' +
     '<input id="qa-in" class="in" type="text" autocomplete="off" spellcheck="true" data-in="qa" data-kd="qa" value="' + esc(text) + '" placeholder="Call @Sam about the budget +launch #finance mon 10:00 !high" aria-describedby="qa-help">' +
-    bt('Add', 'qa-add', { cls: 'primary' }) + '</div>';
+    bt('More', 'qa-more', { attrs: ' aria-expanded="' + S.qaMore + '" aria-controls="qa-more"' }) + bt('Add', 'qa-add', { cls: 'primary' }) + '</div>';
+  if (S.qaMore) {
+    h += '<div class="qa-more" id="qa-more" data-k="qa-more"><label class="fl" for="qa-urg">Urgency<select id="qa-urg" class="in" data-ch="qa-urg">' +
+      opts([['', 'From the due date']].concat(URG_ORDER.map(function (u) { return [u, URG[u]]; })), S.qaUrg) + '</select></label>' +
+      '<label class="fl" for="qa-desc">Description<textarea id="qa-desc" class="in" rows="3" data-in="qaDesc" placeholder="What it is and anything worth knowing (optional)">' + esc(S.qaDesc) + '</textarea></label></div>';
+  }
   if (q && q.title) {
     var chips = '';
+    if (S.qaUrg) chips += badge(URG[S.qaUrg]);
     if (q.date) chips += badge('Due ' + fmt(q.date) + (q.time ? ' ' + q.time : ''));
     if (q.who) chips += badge(q.who + (q.whoNew ? ' (not in People)' : ''), q.whoNew ? 'warn' : '');
     q.prj.forEach(function (p) { var e = entById(p); chips += badge(e ? e.name : p, 'info'); });
@@ -1991,6 +2057,34 @@ function viewUpcoming() {
 function viewFyi() {
   var l = sortItems(openList().filter(function (i) { return i.meta.ty === 'FYI'; }));
   return { title: 'FYI', sub: plural(l.length, 'thing') + ' to know. Acknowledge them to file them away.', body: '<div class="list">' + vSec('fyi', 'To read and file', rowsOf(l), { empty: 'Nothing to file.' }) + '</div>' };
+}
+function prjName(id) { return entById(id) ? entPath(id) : id; }
+function setWb(p) { for (var k in p) S.wb[k] = p[k]; lsSet('discerny-wb', JSON.stringify(S.wb)); render(); }
+var WB_GROUPS = [['urg', 'Urgency'], ['type', 'Type'], ['person', 'Person'], ['project', 'Project'], ['tag', 'Tag']];
+var WB_SORTS = [['urg', 'Sort: urgency'], ['due', 'Sort: due date'], ['new', 'Sort: assigned, newest first'], ['old', 'Sort: assigned, oldest first']];
+function viewAll() {
+  var o = { group: S.wb.group, sort: S.wb.sort, tag: S.wb.tag, q: S.wq.trim(), prjName: prjName };
+  var groups = workbench(openList(), o), ro = { showTags: true, hideProject: o.group === 'project', hidePerson: o.group === 'person' };
+  var seen = {}, n = 0, extra = [], b = '';
+  var also = function (key, title, list) {
+    var l = list.filter(function (i) { return (!o.tag || tagsOf(i).indexOf(o.tag) >= 0) && itemMatch(i, o.q, prjName) !== null; });
+    if (l.length) extra.push(l.length + ' ' + (key === 'wb-inbox' ? 'in the inbox' : 'done'));
+    return l.length ? vSec(key, title, rowsOf(l, { showTags: true })) : '';
+  };
+  /* a search also looks in the inbox and in done, so that no match is hidden */
+  if (o.q) b += also('wb-inbox', 'Inbox', inboxList());
+  groups.forEach(function (g) { g.items.forEach(function (i) { if (!seen[i.id]) { seen[i.id] = 1; n++; } }); b += vSec('wb-' + g.key, g.label, rowsOf(g.items, ro)); });
+  if (o.q) b += also('wb-done', 'Done', S.m.done.items.slice().reverse());
+  if (!b) b = '<div class="empty">' + (o.q || o.tag ? 'Nothing matches.' : 'No open items.') + '</div>';
+  var tags = allTags(); if (o.tag && tags.indexOf(o.tag) < 0) tags.push(o.tag);
+  var tools = '<div class="seg" role="group" aria-label="Group by">' + WB_GROUPS.map(function (g) {
+    return '<button type="button" data-act="wb-group" data-v="' + g[0] + '"' + pressed(o.group === g[0]) + '>' + g[1] + '</button>';
+  }).join('') + '</div>';
+  var bar = '<div class="toolbar" data-k="toolbar"><label class="sr" for="wb-q">Search items</label><input id="wb-q" class="in" type="search" autocomplete="off" data-in="wq" value="' + esc(S.wq) + '" placeholder="Search items, notes, people, projects…" style="min-width:min(320px,100%)">' +
+    '<label class="sr" for="wb-sort">Sort within each group</label><select id="wb-sort" class="in" data-ch="wb-sort">' + opts(WB_SORTS, o.sort) + '</select>' +
+    '<label class="sr" for="wb-tag">Show only one tag</label><select id="wb-tag" class="in" data-ch="wb-tag">' + opts([['', 'All tags']].concat(tags.map(function (t) { return [t, '#' + t]; })), o.tag) + '</select></div>';
+  var sub = o.q || o.tag ? [plural(n, 'open item') + ' match' + (n === 1 ? 'es' : '')].concat(extra).join(' · ') : plural(n, 'open item');
+  return { title: 'All items', sub: sub, tools: tools, qa: true, body: bar + '<div class="list">' + b + '</div>' };
 }
 function viewDone() {
   var list = S.m.done.items.slice().sort(function (a, b) { return String(b.meta.done || '').localeCompare(String(a.meta.done || '')) || (a.id < b.id ? 1 : -1); });
@@ -2464,7 +2558,7 @@ function vPanel() {
 
 /* ===================== shell ===================== */
 var NAV = [
-  ['Focus', [['today', 'Today'], ['inbox', 'Inbox'], ['next', 'Next actions'], ['waiting', 'Waiting for'], ['upcoming', 'Upcoming'], ['fyi', 'FYI']]],
+  ['Focus', [['today', 'Today'], ['inbox', 'Inbox'], ['next', 'Next actions'], ['waiting', 'Waiting for'], ['upcoming', 'Upcoming'], ['fyi', 'FYI'], ['all', 'All items']]],
   ['Knowledge', [['projects', 'Projects'], ['people', 'People'], ['systems', 'Systems']]],
   ['Reflect', [['review', 'Weekly review'], ['done', 'Done'], ['claude', 'Agent']]]
 ];
@@ -2511,6 +2605,7 @@ function viewFor() {
     case 'waiting': return viewWaiting();
     case 'upcoming': return viewUpcoming();
     case 'fyi': return viewFyi();
+    case 'all': return viewAll();
     case 'done': return viewDone();
     case 'projects': return viewProjects();
     case 'systems': return viewSystems();
@@ -2551,7 +2646,7 @@ function vPalette() {
     bt('Esc', 'dlg-close', { cls: 'sm', attrs: ' aria-label="Close search"' }) + '</div><div class="dlg-b" id="pal-list" role="listbox" aria-label="Results">' + body + '</div>' +
     '<div class="dlg-f" aria-hidden="true"><span>↑ ↓ to move</span><span>Enter to open</span><span>Esc to close</span></div></div></div>';
 }
-var KEYMAP = [['Ctrl K or /', 'Search everything and run commands'], ['N', 'Add a task (quick add)'], ['J  K', 'Move down and up the list'], ['Enter', 'Open the highlighted item'], ['X', 'Mark done or reopen (Undo appears)'], ['A  D', 'Accept or dismiss in the inbox'], ['C', 'Ask the agent about the open item'], ['G then T I N W U F', 'Go to Today, Inbox, Next, Waiting, Upcoming, FYI'], ['G then P E S R C', 'Go to Projects, People, Systems, Review, Agent'], ['Ctrl Z', 'Undo the last change (outside text boxes)'], ['Esc', 'Close the dialog, then the panel'], ['?', 'This list']];
+var KEYMAP = [['Ctrl K or /', 'Search everything and run commands'], ['N', 'Add a task (quick add)'], ['J  K', 'Move down and up the list'], ['Enter', 'Open the highlighted item'], ['X', 'Mark done or reopen (Undo appears)'], ['A  D', 'Accept or dismiss in the inbox'], ['C', 'Ask the agent about the open item'], ['G then T I N W U F A', 'Go to Today, Inbox, Next, Waiting, Upcoming, FYI, All items'], ['G then P E S R C', 'Go to Projects, People, Systems, Review, Agent'], ['Ctrl Z', 'Undo the last change (outside text boxes)'], ['Esc', 'Close the dialog, then the panel'], ['?', 'This list']];
 function vKeys() {
   return '<div class="dlg-scrim" data-k="dlg-keys" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="keys-h"><div class="dlg-h"><h2 id="keys-h" style="margin:0;flex:1;font-size:16px">Keyboard shortcuts</h2>' +
     '<button type="button" class="xbtn" data-act="dlg-close" aria-label="Close">' + ic('x') + '</button></div><div class="dlg-pad"><div class="kgrid">' +
@@ -2861,18 +2956,10 @@ function makeTask(id) {
 function addQuick() {
   var q = parseQuick(S.qa || '', S.qaType);
   if (!q.title) { focusLater('#qa-in'); return; }
-  var due = q.date ? q.date + (q.time ? ' ' + q.time : '') : '';
-  var meta = { ty: q.ty };
-  if (q.who) meta.who = q.who;
-  if (q.prj.length) meta.prj = q.prj.join(',');
-  if (q.tags.length) meta.tg = q.tags.join(',');
-  meta.urg = q.ty === 'FYI' ? 'fyi' : (due ? urgFor(due) : 'week');
-  meta.p = q.p || '2';
-  if (due) meta.due = due;
-  meta.asg = nowStamp();
+  var it0 = quickItem(q, { urg: S.qaUrg, description: S.qaDesc, today: todayStr(), now: nowStamp() });
   var out = {};
-  commit(OPS.addTask({ title: q.title, meta: meta, date: todayStr(), notes: [], newProjects: q.prjNew }, out));
-  S.qa = ''; S.qaType = null; forceClear('qa-in');
+  commit(OPS.addTask({ title: it0.title, meta: it0.meta, date: todayStr(), notes: it0.notes, newProjects: q.prjNew }, out));
+  S.qa = ''; S.qaType = null; S.qaUrg = ''; S.qaDesc = ''; S.qaMore = false; forceClear('qa-in'); forceClear('qa-desc');
   var it = out.id ? item(out.id) : null;
   if (it) toastShow('Added ' + out.id + ' to ' + listName(it) + ' · ' + when(it).label + (q.prjNew.length ? ' · new project ' + q.prjNew.join(', ') : ''), OPS.removeAdded(out.id));
   render();
@@ -2945,6 +3032,7 @@ function runResult(it) {
   S.dialog = null; S.dlgReturn = null;
   if (it.act === 'go') { if (it.arg === 'people-gaps') { go('people'); S.pf = 'gaps'; } else go(it.arg); return; }
   if (it.act === 'open') { select(it.arg); return; }
+  if (it.act === 'all') { S.wq = it.arg; forceClear('wb-q'); go('all'); return; }
   if (it.act === 'person' && it.arg) { go('person', it.arg); return; }
   if (it.act === 'ent') { goAny(it.arg); return; }
   if (it.act === 'cmd') {
@@ -3054,6 +3142,9 @@ var ACT = {
   'discard-yes': function () { S.confirm = null; discardPending(); toastShow('Unsaved changes discarded. Showing what is in your files.'); },
   'discard-no': function () { S.confirm = null; render(); },
   group: function (el) { S.group = dvv(el); lsSet('discerny-group', S.group); render(); },
+  'wb-group': function (el) { setWb({ group: dvv(el) }); },
+  'wb-tag': function (el) { var t = dvv(el); setWb({ tag: S.wb.tag === t ? '' : t }); if (S.view !== 'all') go('all'); },
+  'qa-more': function () { S.qaMore = !S.qaMore; render(); if (S.qaMore) focusLater('#qa-urg'); },
   pf: function (el) { S.pf = dvv(el); render(); },
   'add-open': function (el) { S.adding = dvv(el); S.addName = ''; S.addGrp = ''; S.addType = ''; focusLater('#add-name'); },
   'add-cancel': function () { S.adding = null; render(); },
@@ -3137,6 +3228,9 @@ var CH = {
   'e-grp': function (el) { var e = entById(did(el)), v = cleanName(el.value); if (e && v !== e.grp) commit(OPS.entGroup(kindOf(did(el)), did(el), v)); },
   'e-notes': function (el) { var id = did(el), e = entById(id), l = linesOf(el.value); if (e && !same(l, notesOf(e))) commit(OPS.entNotes(kindOf(id), id, l)); },
   pgroup: function (el) { S.pgroup = el.value; lsSet('discerny-pgroup', S.pgroup); render(); },
+  'wb-sort': function (el) { setWb({ sort: el.value }); },
+  'wb-tag': function (el) { setWb({ tag: el.value }); },
+  'qa-urg': function (el) { S.qaUrg = el.value; render(); },
   addType: function (el) { S.addType = el.value; }
 };
 function addPrjFrom(el, mayCreate) {
@@ -3165,6 +3259,8 @@ var IN = {
   linkQ: function (el) { S.linkQ = el.value; render(); },
   pq: function (el) { S.pq = el.value; render(); },
   eq: function (el) { S.eq = el.value; render(); },
+  wq: function (el) { S.wq = el.value; render(); },
+  qaDesc: function (el) { S.qaDesc = el.value; },
   composer: function (el) { if (S.sel) S.composer[S.sel] = el.value; },
   subDraft: function (el) { S.subDraft = el.value; },
   tagDraft: function (el, ev) { S.tagDraft = el.value; if (ev && ev.inputType === 'insertReplacementText') addTagFrom(el); },
@@ -3265,7 +3361,7 @@ function trapTab(ev) {
   if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
   else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
 }
-var GO_KEYS = { t: 'today', i: 'inbox', n: 'next', w: 'waiting', u: 'upcoming', f: 'fyi', p: 'projects', e: 'people', s: 'systems', r: 'review', c: 'claude', d: 'done' };
+var GO_KEYS = { t: 'today', i: 'inbox', n: 'next', w: 'waiting', u: 'upcoming', f: 'fyi', a: 'all', p: 'projects', e: 'people', s: 'systems', r: 'review', c: 'claude', d: 'done' };
 function onKey(ev) {
   var t = ev.target;
   var kd = t && t.closest ? t.closest('[data-kd]') : null;
