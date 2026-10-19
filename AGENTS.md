@@ -50,7 +50,8 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | File | Holds | Agent reads |
 |---|---|---|
 | `SOURCE-SKILLS.md` | The protocol every source skill follows | when running or writing a source skill |
-| `tools/discern.mjs` | The helper: `connect` and `new` for the data folder, and the IDs, times, dedupe and writes source skills need | run it; never read it |
+| `tools/discern.mjs` | The helper: `connect` and `new` for the data folder, `upgrade` for one in an older Format, and the IDs, times, dedupe and writes source skills need | run it; never read it |
+| `migrations/` | One folder per Format change, which `discern upgrade` runs. Its `README.md` says how to write one | when an Upgrade stops at a Migration's `INSTRUCTIONS.md`, or when changing the Format |
 | `tools/evals/` | Recorded connector responses and expected results for testing the skills | only when testing a skill |
 | `.claude/skills/` | The `discern-*` skills for Claude | when running one |
 | `data-folder.txt` | The path of the connected data folder, written by `discern connect` and `discern new` | when Node is missing |

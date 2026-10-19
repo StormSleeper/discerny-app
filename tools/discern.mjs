@@ -6,7 +6,7 @@
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
 //   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
-// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, migrate.
+// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, migrate, upgrade.
 // Input for match, add, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
@@ -17,16 +17,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
 const LINK = path.join(REPO, 'data-folder.txt');
+const MIGRATIONS = path.join(REPO, 'migrations');
 const STARTER = path.join(REPO, 'new_discerny_repo');
 const DAY = 864e5;
 
 // ---------------------------------------------------------------- arguments and output
 const argv = process.argv.slice(2);
-const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '' };
+const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '' };
 const ARGS = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -35,6 +37,8 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--zone') OPT.zone = argv[++i];
   else if (a === '--write') OPT.write = true;
   else if (a === '--dry-run') OPT.dry = true;
+  else if (a === '--one') OPT.one = true;
+  else if (a === '--done') OPT.done = argv[++i] || '';
   else ARGS.push(a);
 }
 function linked() { try { return fs.readFileSync(LINK, 'utf8').trim(); } catch (e) { return ''; } }
@@ -61,7 +65,7 @@ function loadCore() {
     const html = fs.readFileSync(p, 'utf8');
     const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
     if (a < 0 || b < a) continue;
-    const names = ['VERSION', 'FORMAT', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS'];
+    const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS'];
     const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
     try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
     catch (e) { fail(`the //<core> block in ${name} did not load: ${e.message}`); }
@@ -304,6 +308,20 @@ function formatStanding(dir) {
   const problem = is === 'same' ? null : `the data folder is in Format ${folder}, ${is} than this app's ${C.FORMAT}`;
   return { format: { folder, app: C.FORMAT, is }, problem };
 }
+// What to do about a folder in a newer Format than this app's, which no Upgrade can fix.
+function newerAdvice(format) {
+  return format.folder === 'next'
+    ? 'An unreleased build of the app upgraded it, so no released app can read it. Tell the user to restore the backup the upgrade made beside the folder'
+    : 'Tell the user to get the newer app from https://github.com/StormSleeper/discerny-app before working on this folder';
+}
+// Records a Format version in a data folder's DISCERNY.md, making the file if it is missing.
+function recordFormat(dir, version) {
+  const f = path.join(dir, 'DISCERNY.md'), t = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+  const comment = `<!-- format: ${version} -->`;
+  fs.writeFileSync(f, !t ? `# Discerny data folder\n\n${comment}\n\nThis folder holds one person's Discerny data, a task tracker kept as Markdown files whose app lives at https://github.com/StormSleeper/discerny-app.\n`
+    : /<!--\s*format:\s*\S+?\s*-->/.test(t) ? t.replace(/<!--\s*format:\s*\S+?\s*-->/, comment)
+    : t.replace(/^(#.*\r?\n)?/, `$1\n${comment}\n`));
+}
 
 // ---------------------------------------------------------------- commands
 const CMD = {};
@@ -331,7 +349,7 @@ CMD.new = function () {
   if (fs.existsSync(d) && fs.readdirSync(d).length) fail(`${d} is not empty: choose a new or empty folder, or run discern connect ${want} if it already holds Discerny data`);
   if (!isDataFolder(STARTER)) fail(`the starter folder ${STARTER} is missing`);
   fs.cpSync(STARTER, d, { recursive: true });
-  fs.writeFileSync(path.join(d, 'DISCERNY.md'), `# Discerny data folder\n\n<!-- format: ${C.FORMAT} -->\n\nThis folder holds one person's Discerny data, a task tracker kept as Markdown files whose app lives at https://github.com/StormSleeper/discerny-app.\n`);
+  recordFormat(d, C.FORMAT);
   fs.writeFileSync(LINK, d + '\n');
   out({ created: d, connected: d });
 };
@@ -697,13 +715,71 @@ CMD.migrate = function () {
   out({ written: OPT.write, changes, next: OPT.write || !changes.length ? undefined : 'run again with --write to apply' });
 };
 
+// ---------------------------------------------------------------- the Upgrade (see migrations/README.md)
+// The Migrations newer than a Format version, oldest first, with next last, and what each one holds.
+function pendingMigrations(format) {
+  const names = fs.existsSync(MIGRATIONS) ? fs.readdirSync(MIGRATIONS).filter(n => (n === 'next' || /^\d+(\.\d+)*$/.test(n)) && fs.statSync(path.join(MIGRATIONS, n)).isDirectory()) : [];
+  return names.filter(n => C.versionCmp(n, format) > 0).sort(C.versionCmp).map(version => {
+    const d = path.join(MIGRATIONS, version), ins = path.join(d, 'INSTRUCTIONS.md');
+    let instructions = null;
+    if (fs.existsSync(ins)) {
+      const m = /^Optional:\s*(yes|no)\s*$/mi.exec(fs.readFileSync(ins, 'utf8'));
+      if (!m) fail(`migrations/${version}/INSTRUCTIONS.md does not say at the top whether it is optional (Optional: yes, or Optional: no)`);
+      instructions = m[1].toLowerCase() === 'yes' ? 'optional' : 'required';
+    }
+    return { version, script: fs.existsSync(path.join(d, 'migrate.mjs')), instructions };
+  });
+}
+// Runs a Migration's script on the data folder: a preview, or the changes themselves with write.
+function runMigration(version, write) {
+  const r = spawnSync(process.execPath, [path.join(MIGRATIONS, version, 'migrate.mjs'), DIR, ...(write ? ['--write'] : [])], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: (r.stdout || '') + (r.stderr || '') };
+}
+
+CMD.upgrade = function () {
+  const { format, problem } = formatStanding(DIR);
+  if (format.is === 'newer') fail(`${problem}. ${newerAdvice(format)}`, 2);
+  const pending = pendingMigrations(format.folder);
+  if (format.is === 'same') { out({ folder: format.folder, app: format.app, pending, message: `the data folder is up to date: it is in Format ${format.app}, the same as this app` }); return; }
+  if (OPT.done) {
+    if (!pending.length || pending[0].version !== OPT.done) fail(`${OPT.done} is not the next pending Migration: ${pending.length ? pending[0].version + ' is' : 'none is pending'}`);
+    recordFormat(DIR, OPT.done);
+    out({ folder: format.folder, app: format.app, recorded: OPT.done, pending: pending.slice(1) });
+    return;
+  }
+  if (!OPT.write) {
+    out({ folder: format.folder, app: format.app, pending, preview: pending[0] && pending[0].script ? runMigration(pending[0].version, false).out : null });
+    return;
+  }
+  if (!pending.length) { out({ folder: format.folder, app: format.app, pending, applied: [] }); return; }
+  const backup = path.join(path.dirname(DIR), `${path.basename(DIR)}.backup-${format.folder}`);
+  if (!fs.existsSync(backup)) fs.cpSync(DIR, backup, { recursive: true });
+  const res = { folder: format.folder, app: format.app, backup, applied: [], declined: [] };
+  for (const m of OPT.one ? pending.slice(0, 1) : pending) {
+    const r = m.script ? runMigration(m.version, true) : { ok: true };
+    if (!r.ok) fail(`migrations/${m.version}/migrate.mjs failed, so the Upgrade stopped with the folder recorded as Format ${res.applied.at(-1) || format.folder}. Its backup is ${backup}. It said: ${r.out.trim()}`);
+    if (OPT.one && m.instructions) {
+      out({ ...res, ran: m.version, next: `carry out migrations/${m.version}/INSTRUCTIONS.md with the user${m.instructions === 'optional' ? ' (they may decline it)' : ''}, then run: discern upgrade --done ${m.version}` });
+      return;
+    }
+    if (m.instructions === 'required') {
+      out({ ...res, stopped: m.version, next: `Migration ${m.version} needs judgement: carry out migrations/${m.version}/INSTRUCTIONS.md with the user, then run: discern upgrade --done ${m.version}` });
+      process.exit(2);
+    }
+    recordFormat(DIR, m.version);
+    res.applied.push(m.version);
+    if (m.instructions === 'optional') res.declined.push(m.version);
+  }
+  out(res);
+};
+
 const cmd = ARGS[0];
 if (cmd === '--version' || cmd === 'version') {
   process.stdout.write((C.VERSION || 'unknown') + '\n');
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|ignore|note|ref|commit|log|check|migrate> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|ignore|note|ref|commit|log|check|migrate|upgrade> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
 if (cmd !== 'connect' && cmd !== 'new') {
@@ -715,8 +791,6 @@ if (!['connect', 'new', 'check', 'upgrade'].includes(cmd)) {
   const { format, problem } = formatStanding(DIR);
   if (problem) fail(`${problem}. ` + (format.is === 'older'
     ? 'Tell the user, and offer to upgrade it: they can ask you to "upgrade my Discerny folder", or run: discern upgrade'
-    : format.folder === 'next'
-    ? 'An unreleased build of the app upgraded it, so no released app can read it. Tell the user to restore the backup the upgrade made beside the folder'
-    : 'Tell the user to get the newer app from https://github.com/StormSleeper/discerny-app before working on this folder'), 2);
+    : newerAdvice(format)), 2);
 }
 CMD[cmd]();

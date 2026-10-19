@@ -416,6 +416,175 @@ test('connect connects to a folder in another Format, and warns', () => {
   assert.deepEqual(runApp(a, ['connect', folder()]).json.warnings, []);
 });
 
+// A made-up Migration script: it adds its version as a line of MIGRATED.txt, so the order they ran in shows.
+const script = (v, extra = '') => `import fs from 'node:fs';
+import path from 'node:path';
+const dir = process.argv.slice(2).find(a => a !== '--write'), f = path.join(dir, 'MIGRATED.txt');
+const had = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+${extra}
+if (had.split('\\n').includes('${v}')) console.log('nothing to change');
+else if (process.argv.includes('--write')) fs.writeFileSync(f, had + '${v}\\n');
+else console.log('would add ${v} to MIGRATED.txt');
+`;
+const failing = 'console.error("broken"); process.exit(1);';
+
+// A throwaway app whose migrations folder holds the given made-up Migrations, { version: { script, instructions } },
+// and whose Format version is the newest of them, as the release helper would leave it.
+function appWith(migrations) {
+  const a = app(), names = Object.keys(migrations);
+  for (const [v, m] of Object.entries(migrations)) {
+    const d = path.join(a, 'migrations', v);
+    fs.mkdirSync(d, { recursive: true });
+    if (m.script !== undefined) fs.writeFileSync(path.join(d, 'migrate.mjs'), m.script);
+    if (m.instructions !== undefined) fs.writeFileSync(path.join(d, 'INSTRUCTIONS.md'), m.instructions);
+  }
+  const newest = names.includes('next') ? 'next' : names.sort((x, y) => x.localeCompare(y, 'en', { numeric: true })).at(-1);
+  const html = path.join(a, 'discerny.html');
+  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(/var FORMAT='[^']*'/, `var FORMAT='${newest}'`));
+  return a;
+}
+
+test('upgrade lists the pending Migrations and previews the next, and changes nothing', () => {
+  const a = appWith({
+    '0.1.0.0': { script: script('0.1.0.0') },
+    '0.1.0.7': { script: script('0.1.0.7') },
+    '0.2.0.1': { script: script('0.2.0.1'), instructions: '# Fill in urgency\n\nOptional: yes\n\nSet urg on open Items.\n' },
+    '0.2.0.4': { instructions: '# Split owners\n\nOptional: no\n\nSplit each owner.\n' },
+  });
+  const d = folder(), before = snapshot(d);
+  const r = runApp(a, ['upgrade', '--dir', d]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.json.folder, '0.1.0.0');
+  assert.equal(r.json.app, '0.2.0.4');
+  assert.deepEqual(r.json.pending, [
+    { version: '0.1.0.7', script: true, instructions: null },
+    { version: '0.2.0.1', script: true, instructions: 'optional' },
+    { version: '0.2.0.4', script: false, instructions: 'required' },
+  ]);
+  assert.match(r.json.preview, /would add 0\.1\.0\.7 to MIGRATED\.txt/);
+  assert.deepEqual(snapshot(d), before);
+});
+
+// A copy of the test data folder alone in a fresh folder, so the backups an Upgrade makes beside it can be seen.
+function lone() {
+  const d = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-up-')), 'mine');
+  fs.cpSync(BASE, d, { recursive: true });
+  return d;
+}
+const beside = (d) => fs.readdirSync(path.dirname(d)).sort();
+
+test('upgrade --write backs the folder up, runs the Migrations oldest first and records the newest; again, it does nothing', () => {
+  const a = appWith({ '0.1.0.7': { script: script('0.1.0.7') }, '0.2.0.1': { script: script('0.2.0.1') }, '0.10.0.1': { script: script('0.10.0.1') } });
+  const d = lone(), before = snapshot(d);
+  const r = runApp(a, ['upgrade', '--write', '--dir', d]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(beside(d), ['mine', 'mine.backup-0.1.0.0']);
+  assert.deepEqual(snapshot(path.join(path.dirname(d), 'mine.backup-0.1.0.0')), before);
+  assert.equal(read(d, 'MIGRATED.txt'), '0.1.0.7\n0.2.0.1\n0.10.0.1\n');
+  assert.match(read(d, 'DISCERNY.md'), /<!-- format: 0\.10\.0\.1 -->/);
+  assert.equal(runApp(a, ['check', '--dir', d]).code, 0);
+  const again = runApp(a, ['upgrade', '--write', '--dir', d]);
+  assert.equal(again.code, 0, again.out);
+  assert.deepEqual(again.json.pending, []);
+  assert.deepEqual(beside(d), ['mine', 'mine.backup-0.1.0.0']);
+  assert.equal(read(d, 'MIGRATED.txt'), '0.1.0.7\n0.2.0.1\n0.10.0.1\n');
+});
+
+test('upgrade --write never overwrites an existing backup', () => {
+  const a = appWith({ '0.1.0.7': { script: script('0.1.0.7') } });
+  const d = lone(), old = path.join(path.dirname(d), 'mine.backup-0.1.0.0');
+  fs.mkdirSync(old);
+  fs.writeFileSync(path.join(old, 'TASKS.md'), 'an older backup\n');
+  assert.equal(runApp(a, ['upgrade', '--write', '--dir', d]).code, 0);
+  assert.deepEqual(snapshot(old), { 'TASKS.md': 'an older backup\n' });
+  assert.equal(read(d, 'MIGRATED.txt'), '0.1.0.7\n');
+});
+
+const OPTIONAL = '# Fill in urgency\n\nOptional: yes\n\nSet urg on open Items from what they say.\n';
+const REQUIRED = '# Split owners\n\nOptional: no\n\nSplit each shared owner into one person.\n';
+
+test('upgrade --write declines optional instructions and records them, and stops with exit 2 at required ones after their script', () => {
+  const a = appWith({
+    '0.1.0.7': { script: script('0.1.0.7') },
+    '0.2.0.1': { script: script('0.2.0.1'), instructions: OPTIONAL },
+    '0.2.0.4': { script: script('0.2.0.4'), instructions: REQUIRED },
+    '0.3.0.1': { script: script('0.3.0.1') },
+  });
+  const d = lone();
+  const r = runApp(a, ['upgrade', '--write', '--dir', d]);
+  assert.equal(r.code, 2, r.out);
+  assert.deepEqual(r.json.declined, ['0.2.0.1']);
+  assert.equal(r.json.stopped, '0.2.0.4');
+  assert.match(r.json.next, /migrations\/0\.2\.0\.4\/INSTRUCTIONS\.md/);
+  assert.match(r.json.next, /discern upgrade --done 0\.2\.0\.4/);
+  assert.equal(read(d, 'MIGRATED.txt'), '0.1.0.7\n0.2.0.1\n0.2.0.4\n');
+  assert.match(read(d, 'DISCERNY.md'), /<!-- format: 0\.2\.0\.1 -->/);
+});
+
+test('upgrade --write stops with exit 1 at a failing script, names it, and keeps what is already recorded', () => {
+  const a = appWith({ '0.1.0.7': { script: script('0.1.0.7') }, '0.2.0.1': { script: script('0.2.0.1', failing) }, '0.3.0.1': { script: script('0.3.0.1') } });
+  const d = lone();
+  const r = runApp(a, ['upgrade', '--write', '--dir', d]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.json.error, /migrations\/0\.2\.0\.1\/migrate\.mjs/);
+  assert.match(r.json.error, /broken/);
+  assert.equal(read(d, 'MIGRATED.txt'), '0.1.0.7\n');
+  assert.match(read(d, 'DISCERNY.md'), /<!-- format: 0\.1\.0\.7 -->/);
+});
+
+test('an Upgrade taken one Migration at a time with --one and --done ends as --write does, with a backup per step', () => {
+  const a = appWith({ '0.1.0.7': { script: script('0.1.0.7') }, '0.2.0.1': { script: script('0.2.0.1'), instructions: OPTIONAL }, '0.3.0.1': { script: script('0.3.0.1') } });
+  const whole = lone();
+  assert.equal(runApp(a, ['upgrade', '--write', '--dir', whole]).code, 0);
+  const d = lone();
+  assert.equal(runApp(a, ['upgrade', '--write', '--one', '--dir', d]).code, 0);
+  assert.match(read(d, 'DISCERNY.md'), /<!-- format: 0\.1\.0\.7 -->/);
+  const step = runApp(a, ['upgrade', '--write', '--one', '--dir', d]);
+  assert.equal(step.code, 0, step.out);
+  assert.match(step.json.next, /discern upgrade --done 0\.2\.0\.1/);
+  assert.match(read(d, 'DISCERNY.md'), /<!-- format: 0\.1\.0\.7 -->/);
+  assert.equal(runApp(a, ['upgrade', '--done', '0.3.0.1', '--dir', d]).code, 1);
+  assert.equal(runApp(a, ['upgrade', '--done', '0.2.0.1', '--dir', d]).code, 0);
+  assert.match(read(d, 'DISCERNY.md'), /<!-- format: 0\.2\.0\.1 -->/);
+  assert.equal(runApp(a, ['upgrade', '--write', '--one', '--dir', d]).code, 0);
+  assert.deepEqual(runApp(a, ['upgrade', '--dir', d]).json.pending, []);
+  assert.deepEqual(snapshot(d), snapshot(whole));
+  assert.deepEqual(beside(d), ['mine', 'mine.backup-0.1.0.0', 'mine.backup-0.1.0.7', 'mine.backup-0.2.0.1']);
+});
+
+test('upgrade --write runs next after every numbered Migration, and the folder then records next', () => {
+  const a = appWith({ next: { script: script('next') }, '0.1.0.7': { script: script('0.1.0.7') }, '0.2.0.1': { script: script('0.2.0.1') } });
+  const d = lone();
+  assert.deepEqual(runApp(a, ['upgrade', '--dir', d]).json.pending.map(m => m.version), ['0.1.0.7', '0.2.0.1', 'next']);
+  assert.equal(runApp(a, ['upgrade', '--write', '--dir', d]).code, 0);
+  assert.equal(read(d, 'MIGRATED.txt'), '0.1.0.7\n0.2.0.1\nnext\n');
+  assert.match(read(d, 'DISCERNY.md'), /<!-- format: next -->/);
+  assert.equal(runApp(a, ['check', '--dir', d]).code, 0);
+});
+
+test('upgrade on a folder already in the app\'s Format says it is up to date, and --write changes nothing', () => {
+  const d = lone(), before = snapshot(d);
+  const r = run(d, ['upgrade']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.pending, []);
+  assert.match(r.json.message, /up to date/);
+  assert.equal(run(d, ['upgrade', '--write']).code, 0);
+  assert.deepEqual(snapshot(d), before);
+  assert.deepEqual(beside(d), ['mine']);
+});
+
+test('upgrade on a folder in a newer Format, or next, refuses with exit 2 and says what to do instead', () => {
+  for (const [format, says] of [['0.2.0.1', /newer app/], ['next', /backup/]]) {
+    const d = folderInFormat(format), before = snapshot(d);
+    for (const args of [['upgrade'], ['upgrade', '--write']]) {
+      const r = run(d, args);
+      assert.equal(r.code, 2, `${args} on ${format}: ${r.out}`);
+      assert.match(r.json.error, says);
+    }
+    assert.deepEqual(snapshot(d), before);
+  }
+});
+
 test('transcript items share an event but not a calid ref', () => {
   const d = folder();
   const m = run(d, ['match'], [{ scheme: 'cal', subject: 'QA weekly', date: '2026-10-12', event_id: 'ev1', suffix: 'transcript-1' }]).json[0];

@@ -90,7 +90,8 @@ You can have more than one data folder, for example one to try things out in. Sw
 | `AGENTS.md` | Instructions for AI agents (`CLAUDE.md` points Claude to it) |
 | `SOURCE-SKILLS.md` | The rules every source skill follows |
 | `.claude/skills/` | The Discerny skills for Claude (a hidden folder) |
-| `tools/` | `discern.mjs`, the helper: it connects the app to a data folder (`connect`, `new`) and does the fiddly parts for source skills. Also its tests (`node --test tools/test/discern.test.mjs`) and `evals/`, test data for the skills. Both run on a copy of the test data folder, a fictional company called Pennywhistle Puppet Works: [discerny-example](https://github.com/StormSleeper/discerny-example), cloned beside the app folder and read as of its last commit, or the folder named in `DISCERNY_TEST_DATA` |
+| `tools/` | `discern.mjs`, the helper: it connects the app to a data folder (`connect`, `new`), upgrades one written by an older app (`upgrade`) and does the fiddly parts for source skills. Also its tests (`node --test tools/test/discern.test.mjs`) and `evals/`, test data for the skills. Both run on a copy of the test data folder, a fictional company called Pennywhistle Puppet Works: [discerny-example](https://github.com/StormSleeper/discerny-example), cloned beside the app folder and read as of its last commit, or the folder named in `DISCERNY_TEST_DATA` |
+| `migrations/` | One folder per change to the way a data folder is written, which `discern upgrade` runs in order. Its `README.md` is for whoever writes one |
 | `new_discerny_repo/` | The blank starter files a new data folder is copied from |
 | `data-folder.txt` | Where your data folder is, so your agent and the skills can find it. Written by `discern connect` and `discern new` |
 
@@ -105,7 +106,7 @@ The UI shows the app's version on the folder page, and `node tools/discern.mjs -
 - **PATCH** goes up with the first change after each release.
 - **BUILD** goes up with every change, and never goes back down.
 
-If the first two numbers differ from the last release you had, your data folders need an Upgrade before the new app will work on them. If only the last two differ, just pull.
+If the first two numbers differ from the last release you had, your data folders need an Upgrade before the new app will work on them. Ask your agent to "upgrade my Discerny folder", or run `node tools/discern.mjs upgrade` to see what it would change and `node tools/discern.mjs upgrade --write` to make the changes. Either way, a copy of the folder is first made beside it, named `<folder>.backup-<format>`. If only the last two differ, just pull.
 
 The `main` branch holds only releases, and each one is tagged `v<version>`, such as `v0.1.1.1`. The `dev` branch holds every change as it's made, each with its own build number. Stay on `main` unless you want to try changes before they're released. Each version number is set when a change is made, never by hand. `CHANGELOG.md` says what each release changed.
 
