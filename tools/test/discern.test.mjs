@@ -13,7 +13,8 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const CLI = path.join(REPO, 'tools', 'discern.mjs');
 const DATA = path.resolve(process.env.DISCERNY_TEST_DATA || path.join(REPO, '..', 'discerny-example'));
 const NOW = '2026-10-12T15:00:00Z';
-const BASE = committed();
+const DATES = path.join('tools', 'refresh-dates.mjs');
+const BASE = pinned(committed());
 
 // The example folder doubles as a data folder the app can be connected to, so using the app
 // changes it. The tests expect exact results (next IDs, inbox contents), so they read it as of
@@ -30,6 +31,20 @@ function committed() {
   const x = spawnSync('tar', ['-xf', tar, '-C', d], { encoding: 'utf8' });
   fs.rmSync(tar, { force: true });
   if (x.status !== 0) throw new Error(`tar failed: ${x.stderr}`);
+  return d;
+}
+
+// The tests expect the dates the Example had on Monday 12 October 2026, so its date tool shifts
+// their copy back there first, however far the Example itself has been refreshed.
+function pinned(d) {
+  if (!fs.existsSync(path.join(d, DATES))) return d;
+  if (d === DATA) {
+    const c = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-base-'));
+    fs.cpSync(d, c, { recursive: true, filter: (f) => path.basename(f) !== '.git' });
+    d = c;
+  }
+  const r = spawnSync(process.execPath, [path.join(d, DATES), '--to', '2026-10-12', d], { encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`the date tool failed on ${d}: ${r.stderr}`);
   return d;
 }
 
@@ -593,3 +608,80 @@ test('transcript items share an event but not a calid ref', () => {
   assert.equal(run(d, ['add'], [t(1), t(2)]).code, 0);
 });
 
+
+// The Example's date tool, run from the copy it shifts. A folder without the tool skips these.
+const hasDates = fs.existsSync(path.join(BASE, DATES));
+function shift(d, ...args) {
+  const r = spawnSync(process.execPath, [path.join(d, DATES), ...args, d], { encoding: 'utf8' });
+  return { code: r.status, out: r.stdout + r.stderr };
+}
+
+test('refresh-dates --to a week later moves the dates and records the new as-of date', { skip: !hasDates }, () => {
+  const d = folder();
+  const r = shift(d, '--to', '2026-10-19');
+  assert.equal(r.code, 0, r.out);
+  assert.match(read(d, 'TASKS.md'), /T-0001 .*due:2026-10-21; st:In progress; asg:2026-08-10 09:12\}/);
+  assert.match(read(d, 'README.md'), /\*\*As of:\*\* Monday 19 October 2026/);
+});
+
+test('refresh-dates moves every kind of date, in prose too, and leaves times of day as written', { skip: !hasDates }, () => {
+  const d = folder();
+  assert.equal(shift(d, '--to', '2026-11-02').code, 0);
+  const tasks = read(d, 'TASKS.md'), inbox = read(d, 'INBOX.md');
+  assert.match(tasks, /due:2026-12-08 09:30; asg:2026-09-02 14:20\}/);
+  assert.match(tasks, /from Meera Ilangovan \(24 Aug\)/);
+  assert.match(tasks, /the ISO 9001 audit on 8 Dec\./);
+  assert.match(tasks, /Three-day recertification audit, 8–10 Dec,/);
+  assert.match(tasks, /ref: cal\|2026-12-08\|pennywhistle recertification audit/);
+  assert.match(inbox, /"Mk4 FAI – Tue 10 Nov"/);
+  assert.match(inbox, /ref: cal\|2026-11-10\|mk4 fai – tue 10 nov/);
+  assert.match(read(d, 'PEOPLE.md'), /hist: 2026-07-22 \| Job title/);
+  assert.match(read(d, 'PEOPLE.md'), /Left Pennywhistle on 3 Oct 2026\./);
+  assert.match(read(d, 'PROJECTS.md'), /Current certificate expires 21 Jan 2027\./);
+  assert.match(read(d, 'SOURCES.md'), /watermark: 2026-10-29T15:05:41Z/);
+  assert.match(read(d, 'ASK-AGENT-LOG.md'), /- 2026-10-23 09:05 \| T-0007 \| queued 2026-10-22 16:48 \|.*promised for 6 Nov/);
+  assert.match(read(d, 'IGNORED.md'), /scheduled maintenance Sat 3 Oct \| 2026-09-29 \|/);
+  const draft = read(d, path.join('drafts', 'T-0007-scar-031-chaser.md'));
+  assert.match(draft, /Requested: 2026-10-22 16:48/);
+  assert.match(draft, /by 6 November\./);
+});
+
+test('refresh-dates forward and back with --to gives byte-identical files', { skip: !hasDates }, () => {
+  const d = folder(), before = snapshot(d);
+  assert.equal(shift(d, '--to', '2027-01-11').code, 0);
+  assert.match(read(d, 'TASKS.md'), /load tests were run on 31 Dec–2 Jan/);
+  const back = shift(d, '--to', '2026-10-12');
+  assert.equal(back.code, 0, back.out);
+  assert.deepEqual(snapshot(d), before);
+});
+
+test('refresh-dates run a second time changes nothing', { skip: !hasDates }, () => {
+  for (const args of [[], ['--to', '2026-11-30']]) {
+    const d = folder();
+    assert.equal(shift(d, ...args).code, 0);
+    const once = snapshot(d);
+    const again = shift(d, ...args);
+    assert.equal(again.code, 0, again.out);
+    assert.deepEqual(snapshot(d), once, args.join(' '));
+  }
+});
+
+test('refresh-dates refuses a --to date that is not a whole number of weeks away, and changes nothing', { skip: !hasDates }, () => {
+  const d = folder(), before = snapshot(d);
+  const r = shift(d, '--to', '2026-10-15');
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /whole number of weeks/);
+  assert.deepEqual(snapshot(d), before);
+});
+
+test('a copy shifted by refresh-dates passes check', { skip: !hasDates }, () => {
+  const d = folder();
+  assert.equal(shift(d, '--to', '2026-12-07').code, 0);
+  const r = run(d, ['check']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.json.ok, true);
+});
+
+test('the test data folder is as of Monday 12 October 2026, however far the Example has been refreshed', { skip: !hasDates }, () => {
+  assert.match(read(folder(), 'README.md'), /\*\*As of:\*\* Monday 12 October 2026/);
+});

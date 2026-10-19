@@ -8,3 +8,4 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - New data folders get a DISCERNY.md that records their Format, and `discern check` says whether a folder's Format matches the app's.
 - Discerny now refuses to open a data folder in a different Format, and tells you how to upgrade it or which app to use instead.
 - Discerny can now upgrade a data folder made by an older version to the current format, keeping a backup beside it first.
+- The Example's dates can be brought up to today with `node tools/refresh-dates.mjs` in its folder.

@@ -8,7 +8,7 @@ Every eval runs over the test data folder: a fictional company, Pennywhistle Pup
 
 ## Running one
 
-1. Make a scratch data folder outside the app folder from the test data folder's last commit: `mkdir <scratch folder>`, then `git -C ../discerny-example archive HEAD | tar -x -C <scratch folder>`.
+1. Make a scratch data folder outside the app folder from the test data folder's last commit: `mkdir <scratch folder>`, then `git -C ../discerny-example archive HEAD | tar -x -C <scratch folder>`. Then move its dates back to the ones the fixtures expect: `node <scratch folder>/tools/refresh-dates.mjs --to 2026-10-12 <scratch folder>`. The test data folder may have been refreshed since, and each eval's "now" is in the week of 12 October 2026, so this keeps the evals across the 25 October 2026 clock change working.
 2. Follow the `setup` steps in `<source>.basic.expected.json`; the main one adds `fixture: <absolute path to the fixture folder>` to the source's block in the scratch folder's `SOURCES.md`.
 3. In the app folder, run `node tools/discern.mjs connect <scratch folder>`. Start Claude in the app folder with `claude --add-dir <scratch folder>` and ask it to run the skill, such as "check my mail for Discerny". Tell it not to open anything outside the app, scratch and fixture folders.
 4. Compare the scratch folder's `INBOX.md`, `IGNORED.md` and `SOURCES.md`, and the run's report, with `expect` in the same file.
