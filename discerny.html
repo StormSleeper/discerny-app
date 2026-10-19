@@ -113,6 +113,7 @@ svg.i.s{width:13px;height:13px;stroke-width:2.1}
 .dot.err{background:var(--danger)}
 .foot-btn{display:flex;align-items:center;gap:8px;border:0;background:none;color:var(--ink-2);padding:6px;border-radius:7px;font-size:13px;text-align:left;min-height:32px}
 .foot-btn:hover{background:var(--hover)}
+.side-foot .ver{padding:6px 6px 0}
 .app.rail .side{padding:12px 6px;align-items:center}
 .app.rail .hide-rail{display:none}
 .app.rail .brand{padding:2px 0 10px}
@@ -392,7 +393,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.1.1.8'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.1.1.9'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Next 2 weeks',later:'Later',fyi:'FYI / awareness'};
 var URG_ORDER=['today','week','soon','later','fyi'];
@@ -2573,7 +2574,7 @@ function saveState() {
 var THEME_WORD = { system: 'System', light: 'Light', dark: 'Dark' };
 function vSide(c) {
   var rail = isRail();
-  var h = '<nav class="side" data-k="side" aria-label="Lists and pages"><div class="brand"><span class="logo" aria-hidden="true">' + ic('check') + '</span><span class="brand-t hide-rail"><b>Discerny</b><span title="' + esc(S.folder) + '">' + esc(S.folder) + '</span></span></div>' +
+  var h = '<nav class="side" data-k="side" aria-label="Lists and pages"><div class="brand"><span class="logo" aria-hidden="true"' + (rail ? ' title="Discerny, version ' + VERSION + '"' : '') + '>' + ic('check') + '</span><span class="brand-t hide-rail"><b>Discerny</b><span title="' + esc(S.folder) + '">' + esc(S.folder) + '</span></span></div>' +
     '<button type="button" class="searchbtn" data-act="palette" aria-label="Search or jump to (Ctrl K)"' + (rail ? ' title="Search or jump to (Ctrl K)"' : '') + '>' + ic('search') + '<span class="hide-rail st" aria-hidden="true">Search…</span><span class="kbd hide-rail" aria-hidden="true">Ctrl K</span></button>';
   NAV.forEach(function (g) {
     h += '<div class="navh">' + g[0] + '</div>';
@@ -2587,7 +2588,8 @@ function vSide(c) {
     '<button type="button" class="foot-btn" data-act="folder" aria-label="Change folder"' + (rail ? ' title="Change folder"' : '') + '>' + ic('folder') + '<span class="hide-rail" aria-hidden="true">Change folder</span></button>' +
     '<button type="button" class="foot-btn" data-act="theme" aria-label="Theme: ' + THEME_WORD[S.theme] + '. Click to change"' + (rail ? ' title="Theme: ' + THEME_WORD[S.theme] + '"' : '') + '>' + ic(S.theme === 'dark' ? 'moon' : S.theme === 'light' ? 'sun' : 'auto') + '<span class="hide-rail" aria-hidden="true">Theme: ' + THEME_WORD[S.theme] + '</span></button>' +
     '<button type="button" class="foot-btn" data-act="side" aria-label="' + (rail ? 'Expand sidebar' : 'Collapse sidebar') + '"' + (rail ? ' title="Expand sidebar"' : '') + '>' + ic(rail ? 'sideOpen' : 'sideClose') + '<span class="hide-rail" aria-hidden="true">Collapse sidebar</span></button>' +
-    '<button type="button" class="foot-btn" data-act="keys" aria-label="Keyboard shortcuts"' + (rail ? ' title="Keyboard shortcuts (?)"' : '') + '>' + ic('keys') + '<span class="hide-rail" aria-hidden="true">Keyboard shortcuts</span></button></div></nav>';
+    '<button type="button" class="foot-btn" data-act="keys" aria-label="Keyboard shortcuts"' + (rail ? ' title="Keyboard shortcuts (?)"' : '') + '>' + ic('keys') + '<span class="hide-rail" aria-hidden="true">Keyboard shortcuts</span></button>' +
+    '<span class="ver hide-rail">Version ' + VERSION + '</span></div></nav>';
   return h;
 }
 function vBanner() {
