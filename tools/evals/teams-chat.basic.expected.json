@@ -1,8 +1,8 @@
 {
   "scenario": "fixtures/teams-chat/basic",
-  "description": "One Teams run over the test data folder covering E18 and E19, the mention filter, priority people, files, commitments, asks with a shared reply pool, a watched channel and an out-of-scope chat.",
+  "description": "One Teams run over the Example covering E18 and E19, the mention filter, priority people, files, commitments, asks with a shared reply pool, a watched channel and an out-of-scope chat.",
   "setup": [
-    "Make a scratch data folder as README.md in this folder describes (a copy of the test data folder, discerny-example, as of its last commit), and connect the helper to it.",
+    "Make a scratch data folder as README.md in this folder describes (a copy of the Example, discerny-example, as of its last commit), and connect the helper to it.",
     "In its SOURCES.md teams-chat block, add \"- fixture: <absolute path to tools/evals/fixtures/teams-chat/basic>\" and change mention_read_cap to 2 (E18)."
   ],
   "expect": [
@@ -19,7 +19,7 @@
     {
       "eval": "E18",
       "message": "1760101200000, 1760169600000, 1760184000000, 1760261400000",
-      "result": "Four truncated group-chat summaries without the name: at most 2 full-text reads; the unread ones are kept as candidates, none dropped."
+      "result": "Four truncated group-chat summaries without the name: at most 2 full-text reads; the unread ones are proposed from their summaries, none dropped."
     },
     {
       "eval": "-",

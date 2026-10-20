@@ -1,4 +1,4 @@
-// Tests for tools/discern.mjs, run against a fresh copy of the test data folder for each test:
+// Tests for tools/discern.mjs, run against a fresh copy of the Example for each test:
 // discerny-example beside the app folder, or the folder in $DISCERNY_TEST_DATA.
 //   node --test tools/test/discern.test.mjs
 import { test } from 'node:test';
@@ -35,7 +35,7 @@ function committed() {
 }
 
 // The tests expect the dates the Example had on Monday 12 October 2026, so its date tool shifts
-// their copy back there first, however far the Example itself has been refreshed.
+// their copy back there first, however far the Example's own dates have been moved on.
 function pinned(d) {
   if (!fs.existsSync(path.join(d, DATES))) return d;
   if (d === DATA) {
@@ -69,7 +69,7 @@ test('--version prints the version from discerny.html', () => {
   assert.equal(r.stdout.trim(), m[1]);
 });
 
-test('check passes on the test data folder', () => {
+test('check passes on the Example', () => {
   const r = run(folder(), ['check']);
   assert.equal(r.code, 0, r.out);
   assert.equal(r.json.ok, true);
@@ -311,6 +311,18 @@ test('ignore refuses containers unless asked and skips repeats', () => {
   const r = run(d, ['ignore'], [{ ref: 'teams|lunchclub|*', reason: 'personal', container: true }, { ref: 'mail|Bake-off Friday sign-up', reason: 'social' }]);
   assert.equal(r.json.ignored, 1);
   assert.match(read(d, 'IGNORED.md'), /teams\|lunchclub\|\* \| 2026-10-12 \| personal/);
+});
+
+test('add and ignore create a missing INBOX.md or IGNORED.md with the starter file\'s header', () => {
+  const header = (t) => t.split(/\r?\n/).slice(0, t.split(/\r?\n/).findIndex(l => !l.trim())).join('\n');
+  const starter = (f) => header(fs.readFileSync(path.join(REPO, 'new_discerny_repo', f), 'utf8'));
+  const d = folder();
+  fs.rmSync(path.join(d, 'INBOX.md'));
+  fs.rmSync(path.join(d, 'IGNORED.md'));
+  assert.equal(run(d, ['add'], [draft()]).code, 0);
+  assert.equal(run(d, ['ignore'], [{ ref: 'mail|Bake-off Friday sign-up', reason: 'social' }]).code, 0);
+  assert.equal(header(read(d, 'INBOX.md')), starter('INBOX.md'));
+  assert.equal(header(read(d, 'IGNORED.md')), starter('IGNORED.md'));
 });
 
 test('state: day windows from the cursor minus overlap, ask window, horizon and backfill (E9, E17)', () => {
@@ -564,7 +576,7 @@ test('upgrade lists the pending Migrations and previews the next, and changes no
   assert.deepEqual(snapshot(d), before);
 });
 
-// A copy of the test data folder alone in a fresh folder, so the backups an Upgrade makes beside it can be seen.
+// A copy of the Example alone in a fresh folder, so the backups an Upgrade makes beside it can be seen.
 function lone() {
   const d = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-up-')), 'mine');
   fs.cpSync(BASE, d, { recursive: true });
@@ -766,7 +778,7 @@ test('a copy shifted by refresh-dates passes check', { skip: !hasDates }, () => 
   assert.equal(r.json.ok, true);
 });
 
-test('the test data folder is as of Monday 12 October 2026, however far the Example has been refreshed', { skip: !hasDates }, () => {
+test('the tests\' copy of the Example is as of Monday 12 October 2026, however far its dates have been moved on', { skip: !hasDates }, () => {
   assert.match(read(folder(), 'README.md'), /\*\*As of:\*\* Monday 12 October 2026/);
 });
 

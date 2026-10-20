@@ -17,3 +17,4 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - The app folder now records the connected data folder as `data_folder` in `config.toml` instead of `data-folder.txt`, and moves an existing `data-folder.txt` over the next time you connect.
 - In a page opened with `discern serve`, Change folder now opens another data folder from inside the page, in any browser, and `serve` starts even before a folder is connected.
 - The earlier four-page version of the UI, discerny-old.html, has been removed; discerny.html is now the only page.
+- The instructions, skills, README and file headers now use one name for each thing throughout, and the README describes the Agent tab and the Ask agent button as the UI has them.

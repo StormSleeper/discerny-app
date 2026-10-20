@@ -351,18 +351,18 @@ function actionFor(res, pass, c) {
   const ask = pass === 'ask';
   switch (res.outcome) {
     case 'drop': return 'drop';
-    case 'new': return ask ? 'classify: ask, commitment or neither' : 'clarify: capture it if actionable or FYI, otherwise ignore it';
+    case 'new': return ask ? 'classify: ask, commitment or neither' : 'assess: capture it if actionable or FYI, otherwise ignore it';
     case 'ignored': return 'drop';
     case 'done': return ask ? 'drop' : `drop, unless it reopens the work: then capture it with reopen:true and name ${id} in a note`;
     case 'inbox': return ask ? 'drop' : `drop, unless it adds an ask or a date: then propose an update to ${id}`;
     case 'open': return ask ? `report: you replied ${c.when || '<date>'}, consider closing ${id}` : `drop, unless it adds an ask, a date or an answer: then propose an update to ${id}`;
-    case 'waiting': return ask ? `report: ${id} chased ${c.when || '<date>'}` : `if it is from the person ${id} waits on: report "reply received, consider closing ${id}"; otherwise treat it as an update to an open task`;
-    case 'related': return ask ? (res.waiting ? `drop: ${id} already waits on this chat` : 'classify: ask, commitment or neither') : `same topic as ${id}: propose an update; another topic: clarify as new`;
-    case 'ambiguous': return ask ? 'classify: ask, commitment or neither' : `if it plainly continues one of ${id}, propose an update to that item; otherwise clarify it as new and name ${id} in a note`;
+    case 'waiting': return ask ? `report: ${id} chased ${c.when || '<date>'}` : `if it is from the person ${id} waits on: report "reply received, consider closing ${id}"; otherwise treat it as an update to an open item`;
+    case 'related': return ask ? (res.waiting ? `drop: ${id} already waits on this chat` : 'classify: ask, commitment or neither') : `same topic as ${id}: propose an update; another topic: assess it as new`;
+    case 'ambiguous': return ask ? 'classify: ask, commitment or neither' : `if it plainly continues one of ${id}, propose an update to that item; otherwise assess it as new and name ${id} in a note`;
     case 'moved': return `report: ${id} moved to ${res.to}; propose that due; then run: discern ref ${res.ids[0]} "${res.newRef}"`;
     case 'cancelled': return `report: ${id} cancelled, consider closing`;
     case 'notice': return `propose an update to ${id}: ${res.notice}`;
-    default: return 'clarify';
+    default: return 'assess';
   }
 }
 
@@ -658,7 +658,7 @@ CMD.add = function () {
   write('TASKS.md', tasks);
   const added = built.map((b, k) => ({ id: 'T-' + String(start + k).padStart(4, '0'), ...b }));
   appendLines('INBOX.md', added.map(a => C.serItem({ id: a.id, done: false, title: a.title, meta: a.meta, subs: a.subs })),
-    '# Inbox\n<!-- Candidates proposed by the discern-* source skills. Accept moves an item to TASKS.md; Dismiss logs it in IGNORED.md. IDs come from the next-id counter in TASKS.md. -->\n');
+    '# Inbox\n<!-- Proposals for new items from the discern-* source skills, waiting for the user to clarify them. Accept moves an item to TASKS.md; Dismiss logs it in IGNORED.md. IDs come from the next-id counter in TASKS.md. -->\n');
   out({ added: added.map(a => ({ id: a.id, title: a.title, refs: a.subs.filter(s => s.k === 'ref').map(s => s.v) })), counter: next });
 };
 
@@ -674,7 +674,7 @@ CMD.ignore = function () {
     have.add(ref.toLowerCase());
     lines.push(`${ref} | ${date} | ${String(r.reason || 'not actionable').replace(/\|/g, '/').replace(/[\r\n]+/g, ' ').trim()}`);
   });
-  if (lines.length) appendLines('IGNORED.md', lines, '# Ignored\n<!-- One line per thread judged non-actionable: ref | YYYY-MM-DD | reason. Parse from the right (the ref may contain " | "). -->\n');
+  if (lines.length) appendLines('IGNORED.md', lines, '# Ignored\n<!-- One line per source key never to be proposed again, ignored by a source skill or dismissed by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). -->\n');
   out({ ignored: lines.length, skipped });
 };
 

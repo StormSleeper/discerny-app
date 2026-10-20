@@ -1,8 +1,8 @@
 {
   "scenario": "fixtures/outlook-mail/basic",
-  "description": "One mail run over the test data folder: 14 inbound and 7 sent messages covering evals E1-E6, E8, E11, E13, E15 and E16.",
+  "description": "One mail run over the Example: 14 inbound and 7 sent messages covering evals E1-E6, E8, E11, E13, E15 and E16.",
   "setup": [
-    "Make a scratch data folder as README.md in this folder describes (a copy of the test data folder, discerny-example, as of its last commit), and connect the helper to it.",
+    "Make a scratch data folder as README.md in this folder describes (a copy of the Example, discerny-example, as of its last commit), and connect the helper to it.",
     "In its SOURCES.md, add \"- fixture: <absolute path to tools/evals/fixtures/outlook-mail/basic>\" to the outlook-mail block.",
     "Delete the \"## outlook-calendar\" block, so mail handles invitations itself (E8)."
   ],
@@ -40,7 +40,7 @@
     {
       "eval": "E8",
       "message": "m-106",
-      "result": "New ty:Meeting item with due:2026-11-03 14:00 and a ref cal|2026-11-03|supplier review – feltcraft beside the mail ref."
+      "result": "New ty:Meeting item with due:2026-11-03 14:00 and a source key cal|2026-11-03|supplier review – feltcraft beside the mail one."
     },
     {
       "eval": "E11",

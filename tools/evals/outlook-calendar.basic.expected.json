@@ -1,20 +1,20 @@
 {
   "scenario": "fixtures/outlook-calendar/basic",
-  "description": "One calendar run over the test data folder covering E20-E23, prep, invites, a cancellation, an overlap and the transcript pass.",
+  "description": "One calendar run over the Example covering E20-E23, prep, invites, a cancellation, an overlap and the transcript pass.",
   "setup": [
-    "Make a scratch data folder as README.md in this folder describes (a copy of the test data folder, discerny-example, as of its last commit), and connect the helper to it.",
+    "Make a scratch data folder as README.md in this folder describes (a copy of the Example, discerny-example, as of its last commit), and connect the helper to it.",
     "In its SOURCES.md outlook-calendar block, add \"- fixture: <absolute path to tools/evals/fixtures/outlook-calendar/basic>\" and set transcripts to organizer-only (E23)."
   ],
   "expect": [
     {
       "eval": "E20",
       "event": "AAMkAGI-mk4-fai-1020",
-      "result": "Tracked through T-0029 (cal ref): nothing new."
+      "result": "Tracked through T-0029 (its cal source key): nothing new."
     },
     {
       "eval": "E21",
       "event": "AAMkAGI-fable-gonogo-1021",
-      "result": "Report \"T-0020 moved to 23 Oct\", proposing due 2026-10-23 14:00; T-0020 gains the ref cal|2026-10-23|fable range 2027 – go/no-go; no new item."
+      "result": "Report \"T-0020 moved to 23 Oct\", proposing due 2026-10-23 14:00; T-0020 gains the source key cal|2026-10-23|fable range 2027 – go/no-go; no new item."
     },
     {
       "eval": "E22",

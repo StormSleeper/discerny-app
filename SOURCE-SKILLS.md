@@ -1,6 +1,6 @@
 # Source skills: the shared protocol
 
-A source skill reads one outside source (mail, chat, a calendar, an export) and proposes items into `INBOX.md`. Every `discern-<source>` skill follows this file and adds only what is specific to its connector. `AGENTS.md` comes first; it is normally in context already.
+A source skill reads one source (a mailbox, Teams chat, a calendar, an export) and puts proposals to the user: new items into `INBOX.md`, and changes to existing items and records in its run report. One source skill reading its source once is a run; running every source skill in turn is a refresh. Every `discern-<source>` skill follows this file and adds only what is specific to its connector. `AGENTS.md` comes first; it is normally in context already.
 
 ## Ground rules
 
@@ -13,46 +13,46 @@ A source skill reads one outside source (mail, chat, a calendar, an export) and 
 
 `## defaults` in `SOURCES.md` holds `timezone`, `priority_people` (P-IDs; the user's manager always counts), `personal_domains`, `apply_task_updates`, `page_cap` and `log_runs`. Each skill keeps its own `## <source-name>` block. `discern state <source>` returns both, plus the user's record with its `em:` addresses and `handle:` IDs.
 
-- **Stream** sources (mail, chat) are read forward from a cursor: `watermark` for new items, `waiting_checked_through` for ask passes. Capture starts `overlap` before the watermark, to cover indexing lag, in day-long windows. A `gap: <start>/<end>` line asks for a one-off backfill; it skips ask passes and leaves the cursors alone.
-- **Horizon** sources (a calendar) hold items scheduled ahead. Each run re-reads now to now plus `lookahead`; refs make re-runs harmless. `last_run` only starts a look-back window, for passes such as transcripts.
+- **Stream sources** (a mailbox, Teams chat) are read forward from a cursor: `watermark` for new messages, `waiting_checked_through` for ask passes. Capture starts `overlap` before the watermark, to cover indexing lag, in day-long windows. A `gap: <start>/<end>` line asks for a one-off backfill; it skips ask passes and leaves the cursors alone.
+- **Horizon sources** (a calendar) hold events scheduled ahead. Each run re-reads now to now plus `lookahead`; source keys make re-runs harmless. `last_run` only starts a look-back window, for passes such as transcripts.
 
 ## The loop
 
 1. **State.** `discern state <source>` gives `windows` (stream), `window` (horizon), `ask_window`, and `cutoff` for a pass with no date filter. Exit 2 means no block or watermark: ask the user how far back to start, since a full scan is never wanted, then `discern commit <source> watermark=<ISO time>`. Done when every pass has its window.
 2. **Capture.** Run the passes, independent ones together, oldest window first. Every call that returns results is one page, so a quiet window costs one page per pass. `page_cap` is each pass's page budget for the run: once a pass has spent it, open no new window, but finish the one you are in. Merge results by the source's own message or event ID. Done when every opened window is exhausted and you know the end of the last window every pass finished.
-3. **Filter.** Drop what the block's exclude rules and the skill's filters catch, and the user's own messages outside ask and commitment passes. These aren't logged. Done when only unfiltered items remain.
-4. **Dedupe.** Pipe the items to `discern match`. Each result has an `outcome` and an `action`; follow the action. Done when every item has one.
-5. **Clarify.** Decide what the action leaves open, by the policy below. Body and event reads count against the skill's read budget. Once it is spent, capture the remaining inbound candidates from their summaries (unsure means capture) and count them under "Not yet checked"; in an ask pass, leave them uncaptured behind the ask cursor and count them the same way. Done when every item has a decision.
-6. **Write.** `discern add --dry-run` first, then `discern add` for new items, `discern ignore` for judged noise, `discern ref` where an action asks for it, then `discern check`. Done when the check passes.
+3. **Filter.** Drop what the block's exclude rules and the skill's filters catch, and the user's own messages outside ask and commitment passes. These aren't logged. Done when only unfiltered candidates remain. Everything left is a candidate: something the skill has found and is still assessing.
+4. **Match.** Pipe the candidates to `discern match`, which compares their source keys with what is already tracked. Each result has an `outcome` and an `action`; follow the action. Done when every candidate has one.
+5. **Assess.** Decide what the action leaves open, by the policy below: already tracked, noise to ignore, or worth a proposal, and how to word it. Body and event reads count against the skill's read budget. Once it is spent, capture the remaining inbound candidates from their summaries (unsure means capture) and count them under "Not yet checked"; in an ask pass, leave them uncaptured behind the ask cursor and count them the same way. Done when every candidate has a decision.
+6. **Write.** `discern add --dry-run` first, then `discern add` for new items, `discern ignore` for noise, `discern ref` where an action asks for a source key, then `discern check`. Done when the check passes.
 7. **Commit.** `discern commit <source>` with `last_run=` the `run_start` and `last_result=` the report's first line. A stream source also sends `watermark=` the end of the last window every pass finished and `waiting_checked_through=` the ask cursor (one second before the oldest ask left unclassified, otherwise the ask window's end); a horizon source sends nothing else. A failed pass commits nothing; a finished backfill sends `gap=`. Done when `SOURCES.md` shows this run.
 8. **Report.** The template below; when `log_runs` is true, also pipe it to `discern log`. Done when every proposal names its item ID.
 
 ## Matching
 
-`discern match` takes a JSON array: each item has `key`, `scheme`, `pass`, `sender` (address) and `sender_name`, plus the scheme's fields below. `pass` is `ask` for everything the user sent (asks and commitments alike), with `recipient` (address) and `recipient_name` when known; anything else is `inbound`.
+`discern match` takes a JSON array: each candidate has `key`, `scheme`, `pass`, `sender` (address) and `sender_name`, plus the scheme's fields below. `pass` is `ask` for everything the user sent (asks and commitments alike), with `recipient` (address) and `recipient_name` when known; anything else is `inbound`.
 
 | Scheme | Fields | Matches |
 |---|---|---|
 | `mail` | `subject`, `when`, optional `meeting_date` | Normalised subject. Exact wins; otherwise containment when the shorter string has 15+ characters; several hits are `ambiguous` |
-| `teams` | `chat`, `message`, `when` | Exact on chat and message. A whole-chat ref (`teams\|<chat>\|*`) makes it `related` on a task, `ignored` in `IGNORED.md` |
+| `teams` | `chat`, `message`, `when` | Exact on chat and message. A whole-chat source key (`teams\|<chat>\|*`) makes it `related` on an item, `ignored` in `IGNORED.md` |
 | `cal` | `subject`, `date` or `start` (`{dateTime, timeZone}`), optional `event_id`, `suffix`, `cancelled` | Exact on local date and subject; the same `event_id` on a new date is `moved` |
 
-Each result has `key`, `outcome`, `ids` (the items it matched), `action`, and `refs` to write. `who` is the sender on an inbound item and the recipient on an ask, when they are in `PEOPLE.md` (`null` when not). An inbound item from one of the user's own addresses comes back `from_user: true` with the action `drop`. `notice`, `to` and `newRef` appear where they apply. Every `ty:Meeting` item with a date carries a `cal` ref, whichever source wrote it, so all sources recognise the same meeting.
+Each result has `key`, `outcome`, `ids` (the items it matched), `action`, and `refs` (source keys) to write. `who` is the sender on an inbound candidate and the recipient on an ask, when they are in `PEOPLE.md` (`null` when not). An inbound candidate from one of the user's own addresses comes back `from_user: true` with the action `drop`. `notice`, `to` and `newRef` appear where they apply. Every `ty:Meeting` item with a date carries a `cal` source key, whichever source wrote it, so all sources recognise the same meeting.
 
-## Clarify policy
+## Assess policy
 
-- **Actionable**: asks the user to do, answer, decide, read or prepare something, or carries a deadline. Title: the next action, imperative. Within a pass, one item per topic, with every ref that contributed; `received` is the earliest message carrying the ask. Someone's ask and the user's own commitment stay separate items, proposed as related.
+- **Actionable**: asks the user to do, answer, decide, read or prepare something, or carries a due date. Title: the next action, imperative. Within a pass, one item per topic, with every source key that contributed; `received` is the earliest message carrying the ask. Someone's ask and the user's own commitment stay separate items, proposed as related.
 - **Always captured**: anything from a priority person or marked high importance, as FYI at least.
 - **FYI**: copied or informed, nothing asked: `ty:FYI`, `urg:fyi`, `p:3`; `ty:Process` for a lasting how-to.
-- **Waiting for**: the user asked and nobody replied. "Waiting: <what> from <person>", `st:Waiting`, `urg:soon` if over 5 days old or it had a deadline, else `later` (this replaces the urgency rule below); `p:2` or `3`; note ends "no reply seen as of <date>". An action someone else agreed to in a meeting is written the same way.
+- **Waiting for**: the user asked and nobody replied. "Waiting: <what> from <person>", `st:Waiting`, `urg:soon` if over 5 days old or it had a due date, else `later` (this replaces the urgency rule below); `p:2` or `3`; note ends "no reply seen as of <date>". An action someone else agreed to in a meeting is written the same way.
 - **Commitment**: the user promised something. The promised next action, `p:2`, `due` if they gave a date; `ty:Meeting` for attending or holding a meeting.
 - **Derived**: made from a schedule ("Prepare for …", "Respond to invite: …"); `derived: true`; `due` is the start with its time; prep `p:2`, invite replies `p:3`.
 - **Noise**: newsletters, and notices or automated messages that ask nothing of the user: `discern ignore` with a reason, at the grain the skill names (a thread, an event; some skills log none). `discern ignore` takes `[{"ref", "reason"}]`, plus `"container": true` for a whole chat or thread.
 - **Out of scope**: personal, religious or social. Never named in a report; may be ignored with the reason "personal". Exclude rules are the user's to add.
-- **Unsure** whether it's noise: capture it. A wrong dismissal is invisible; a wrong capture costs one click.
-- **Urgency**: `today` due today or overdue; `week` within 7 days or from the manager; `soon` 1 to 2 weeks; else `later`. **Priority** of inbound asks: `p:1` from the manager or a priority person, or with a deadline; else `p:2`.
+- **Unsure** whether it's noise: capture it. A wrong ignore is invisible; a wrong proposal costs the user one Dismiss.
+- **Urgency**: `today` due today or overdue; `week` within 7 days or from the manager; `soon` 1 to 2 weeks; else `later`. **Priority** of inbound asks: `p:1` from the manager or a priority person, or with a due date; else `p:2`.
 - **who**: from `match`, or `discern who <address, handle or name>`. Unknown: leave `who` out, name the person in a note, and propose them under "People and settings proposed".
-- **prj, tg**: reuse what `PROJECTS.md` and the `tg:` values in `TASKS.md` already hold; never create a project. Links to other items are proposals.
+- **prj, tg**: reuse what `PROJECTS.md` and the `tg:` values in `TASKS.md` already hold; never create a project. Relationships to other items and records are proposals.
 
 ## Writing
 
@@ -62,11 +62,11 @@ Each result has `key`, `outcome`, `ids` (the items it matched), `action`, and `r
 |---|---|---|
 | `INBOX.md` | New items | `discern add` |
 | `IGNORED.md` | Noise; a whole out-of-scope chat with `"container": true` | `discern ignore` |
-| `TASKS.md` | The counter; hidden `ref:` lines; a `note:` only if `apply_task_updates` is true | `discern add`, `ref`, `note` |
+| `TASKS.md` | The counter; hidden `ref:` lines (source keys); a `note:` only if `apply_task_updates` is true | `discern add`, `ref`, `note` |
 | `SOURCES.md` | Its own block's state | `discern commit` |
 | `REFRESH-LOG.md` | The report | `discern log` |
 
-Everything else (people, relationships, changes to tasks) is a proposal in the report: the user triages in the UI, and a proposal costs one read where an unwanted edit costs a search.
+Everything else (people, relationships, changes to items) is a proposal in the run report, and appears only there: the UI does not show these proposals. A proposal costs the user one read where an unwanted edit costs a search.
 
 ## Report
 
@@ -76,7 +76,7 @@ New: T-#### <title> (<who>, <urg>) · …
 Updates proposed: T-#### <what changed> (from <who>, <date>)
 Replies: T-#### reply received, consider closing · T-#### you replied <date> · T-#### chased <date>
 Meetings: T-#### cancelled, consider closing · T-#### moved to <date> · overlap: <meeting> and <meeting>
-Links proposed: relate T-#### ~ T-#### · T-#### concerns SYS-####
+Relationships proposed: relate T-#### ~ T-#### · T-#### concerns SYS-####
 People and settings proposed: <name> (<address>) as a new person · em:<address> for <name> · add <name> to priority_people
 Not yet checked: n items, oldest <date>
 ```
@@ -85,4 +85,4 @@ Leave out empty lines. `fetched` counts every result of every pass; `answered` c
 
 ## Writing a new source skill
 
-Name it `discern-<source>` and, for Claude, save it in the app folder as `.claude/skills/discern-<source>/SKILL.md`. Keep it near 700 words and use these headings: **Start** (read this file; stop with every file untouched if no data folder is connected or the connector is missing), **Tools**, **Connector behaviour** (with the date it was verified), **Block**, **Passes** (parameters, window, page cap, read budget), **Filters**, **Refs**, **Clarify cues**, **Item specifics**, **Known limits** and **Fixtures**. Recorded connector responses go in `tools/evals/fixtures/<source>/<scenario>/`, with the expected results beside them in `tools/evals/`. With `fixture: <folder>` in its block, a skill reads `<pass>.json` and `resources.json` from that folder instead of the connector, and `discern state` takes the run time from `scenario.json` there. Each fixture file counts as one page per window, so fixtures never hit `page_cap`.
+Name it `discern-<source>` and, for Claude, save it in the app folder as `.claude/skills/discern-<source>/SKILL.md`. Keep it near 700 words and use these headings: **Start** (read this file; stop with every file untouched if no data folder is connected or the connector is missing), **Tools**, **Connector behaviour** (with the date it was verified), **Block**, **Passes** (parameters, window, page cap, read budget), **Filters**, **Source keys**, **Assess cues**, **Item specifics**, **Known limits** and **Fixtures**. Recorded connector responses go in `tools/evals/fixtures/<source>/<scenario>/`, with the expected results beside them in `tools/evals/`. With `fixture: <folder>` in its block, a skill reads `<pass>.json` and `resources.json` from that folder instead of the connector, and `discern state` takes the run time from `scenario.json` there. Each fixture file counts as one page per window, so fixtures never hit `page_cap`.

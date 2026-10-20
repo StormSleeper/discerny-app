@@ -1,6 +1,6 @@
 ---
 name: discern-outlook-mail
-description: Captures new Outlook mail, and sent mail still waiting for a reply or recording a commitment, into the Discerny inbox as proposals for triage. Use when asked to check, refresh or sync mail or Outlook for Discerny, or as part of a Discerny refresh.
+description: Captures new Outlook mail, and sent mail still waiting for a reply or recording a commitment, into the Discerny inbox as proposals for the user to clarify. Use when asked to check or sync mail or Outlook for Discerny, or as part of a Discerny refresh.
 ---
 
 # discern-outlook-mail
@@ -36,15 +36,15 @@ Microsoft 365 connector: `outlook_email_search` for message metadata, and the ho
 
 ## Filters
 
-- Inbound: the block's exclude rules; anything `match` marks `from_user`; senders such as `no-reply@`; mail from `personal_domains` (out of scope). Other notices that ask nothing of the user are noise: `discern ignore` their `mail` ref with a reason, so they are logged and skipped on later runs.
+- Inbound: the block's exclude rules; anything `match` marks `from_user`; senders such as `no-reply@`; mail from `personal_domains` (out of scope). Other notices that ask nothing of the user are noise: `discern ignore` their `mail` source key with a reason, so they are logged and skipped on later runs.
 - Sent: invitations the user sent (the summary is only a Teams join block), forwards with no comment, mail only to the user, the exclude rules, and mail only to `personal_domains` (out of scope).
 - `match` handles calendar replies: Accepted and Tentative are dropped, and a decline or cancellation becomes a proposal only when it matches an item.
 
-## Refs
+## Source keys
 
-`mail` scheme. Each `discern match` item: `{"key": <id>, "scheme": "mail", "pass": "inbound" or "ask", "subject": ..., "sender": <from address>, "sender_name": <from name>, "when": <receivedDateTime or sentDateTime>}`; on the ask pass add `"recipient": <the first address in recipients>`. Add `"meeting_date": "YYYY-MM-DD"` (local, via `discern local`) for an invitation with a known date.
+`mail` scheme. Each `discern match` candidate: `{"key": <id>, "scheme": "mail", "pass": "inbound" or "ask", "subject": ..., "sender": <from address>, "sender_name": <from name>, "when": <receivedDateTime or sentDateTime>}`; on the ask pass add `"recipient": <the first address in recipients>`. Add `"meeting_date": "YYYY-MM-DD"` (local, via `discern local`) for an invitation with a known date.
 
-## Clarify cues
+## Assess cues
 
 - `importance: high` is always captured.
 - The user only on Cc: FYI. Use the recipients when the result has them; otherwise read the body only if it decides.
@@ -60,7 +60,7 @@ Microsoft 365 connector: `outlook_email_search` for message metadata, and the ho
 
 ## Known limits
 
-Sent mail older than `waiting_max_age` is never checked for replies. Two threads with the same short subject share a ref; `match` reports the longer collisions as ambiguous.
+Sent mail older than `waiting_max_age` is never checked for replies. Two threads with the same short subject share a source key; `match` reports the longer collisions as ambiguous.
 
 ## Fixtures
 
