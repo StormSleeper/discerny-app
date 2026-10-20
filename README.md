@@ -60,7 +60,9 @@ On the first run, a source has no block in `SOURCES.md` yet, so its skill asks h
 
 In the app folder, run `node tools/discern.mjs serve`. It prints an address such as `http://127.0.0.1:4790/`: open it in any browser, Firefox and Safari included, and the page opens straight on your connected data folder, with no folder to choose and nothing to allow. Leave the command running while you use the page, and stop it with Ctrl C. If the page says the server isn't running, start it again and click *Retry*; nothing you changed on screen is lost.
 
-The server answers only this computer (127.0.0.1), and only for the files the page itself uses. `--port <n>` picks another port, and `--dir <folder>` serves a different data folder without changing the connected one. To switch folders, stop the server, run `node tools/discern.mjs connect <folder>`, and start it again; *Change folder* in a served page says the same.
+The server answers only this computer (127.0.0.1), and only for the files the page itself uses. `--port <n>` picks another port, and `--dir <folder>` serves a different data folder without changing the connected one.
+
+To switch folders, use *Change folder* in the page: type the folder's path, or pick a suggestion, and the page reopens on it. The server connects to the new folder as `connect` does, so your agent works on it too. You can start `serve` before any folder is connected, or on a folder that needs an upgrade: the page says what's wrong and offers *Change folder*. A server started with `--dir` keeps to that folder; to switch, stop it, run `node tools/discern.mjs connect <folder>`, and start it again.
 
 Serve the page when you want a browser other than Chrome or Edge, or when your agent should open the UI itself. Opening the file needs no Node and works the same in Chrome and Edge.
 4. **Work through the starter project.** Your data folder starts with one project, *Discerny Setup*, and three tasks:

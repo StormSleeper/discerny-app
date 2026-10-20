@@ -20,6 +20,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
@@ -88,15 +89,13 @@ function parseConfig(text) {
   return { top, tables, firstTable, lines, eol };
 }
 function configText() { try { return fs.readFileSync(CONFIG, 'utf8'); } catch (e) { return ''; } }
-function readConfig() {
-  try { return parseConfig(configText()); } catch (e) { fail(e.message); }
-}
 // A TOML string: literal ('...') so Windows paths need no escaping, or basic ("...") when it holds a '.
 function tomlString(s) { return s.includes("'") ? `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : `'${s}'`; }
 // Sets data_folder in config.toml, changing no other line and making the file if it is missing, and retires data-folder.txt.
+// Throws, writing nothing, when config.toml can't be read.
 function connectTo(d) {
   const text = configText();
-  const cfg = text ? readConfig() : parseConfig('# Settings for this Discerny app folder. discern connect and discern new write data_folder; the rest is yours to edit.\n');
+  const cfg = parseConfig(text ||'# Settings for this Discerny app folder. discern connect and discern new write data_folder; the rest is yours to edit.\n');
   const { lines, eol } = cfg, line = `data_folder = ${tomlString(d)}`, had = cfg.top.data_folder;
   if (had) lines[had.line] = line;
   else if (cfg.firstTable >= 0) lines.splice(cfg.firstTable, 0, line);
@@ -105,13 +104,19 @@ function connectTo(d) {
   fs.rmSync(LINK, { force: true });
 }
 function linked() { try { return fs.readFileSync(LINK, 'utf8').trim(); } catch (e) { return ''; } }
-const CONFIGURED = (readConfig().top.data_folder || {}).value;
+// The folder connect and new last recorded, and where: [folder, 'config.toml' | 'data-folder.txt'], or ['', ''].
+// Throws, as parseConfig does, when config.toml can't be read.
+function connected() {
+  const configured = (parseConfig(configText()).top.data_folder || {}).value;
+  return configured ? [path.resolve(REPO, configured), 'config.toml']
+    : linked() ? [path.resolve(REPO, linked()), 'data-folder.txt'] : ['', ''];
+}
 const [DIR, FROM] = OPT.dir ? [path.resolve(OPT.dir), '--dir']
   : process.env.DISCERNY_DIR ? [path.resolve(process.env.DISCERNY_DIR), 'DISCERNY_DIR']
-  : CONFIGURED ? [path.resolve(REPO, CONFIGURED), 'config.toml']
-  : linked() ? [path.resolve(REPO, linked()), 'data-folder.txt'] : ['', ''];
+  : (() => { try { return connected(); } catch (e) { fail(e.message); } })();
 const NOT_CONNECTED = 'no data folder is connected. Ask the user which folder holds their Discerny data, then run: discern connect <folder>; or start one with: discern new <folder>';
 function isDataFolder(d) { return fs.existsSync(path.join(d, 'TASKS.md')); }
+function notDataFolder(d, want) { return `${d} has no TASKS.md, so it is not a Discerny data folder. To start a new one there, run: discern new ${want}`; }
 
 function out(obj) { process.stdout.write(JSON.stringify(obj, null, 2) + '\n'); }
 function fail(msg, code = 1) { out({ error: msg }); process.exit(code); }
@@ -379,6 +384,14 @@ function newerAdvice(format) {
     ? 'An unreleased build of the app upgraded it, so no released app can read it. Tell the user to restore the backup the upgrade made beside the folder'
     : 'Tell the user to get the newer app from https://github.com/StormSleeper/discerny-app before working on this folder';
 }
+// Why a command refuses a data folder in another Format, and what to do about it (null when it is in this app's).
+function formatRefusal(dir) {
+  const { format, problem } = formatStanding(dir);
+  if (!problem) return null;
+  return `${problem}. ` + (format.is === 'older'
+    ? 'Tell the user, and offer to upgrade it: they can ask you to "upgrade my Discerny folder", or run: discern upgrade'
+    : newerAdvice(format));
+}
 // Records a Format version in a data folder's DISCERNY.md, making the file if it is missing.
 function recordFormat(dir, version) {
   const f = path.join(dir, 'DISCERNY.md'), t = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
@@ -399,7 +412,7 @@ CMD.connect = function () {
     return;
   }
   const d = path.resolve(want);
-  if (!isDataFolder(d)) fail(`${d} has no TASKS.md, so it is not a Discerny data folder. To start a new one there, run: discern new ${want}`);
+  if (!isDataFolder(d)) fail(notDataFolder(d, want));
   connectTo(d);
   const warnings = process.env.DISCERNY_DIR ? ['DISCERNY_DIR is set, and it overrides config.toml until it is unset'] : [];
   const { problem } = formatStanding(d);
@@ -839,7 +852,8 @@ CMD.upgrade = function () {
 };
 
 // Serves the UI and the data folder to it on 127.0.0.1 until it is stopped, so the page works in any
-// browser and an Agent can open it. Prints {url, folder} once listening.
+// browser and an Agent can open it. Prints {url, folder, problem} once listening. It starts with no usable
+// folder too, when it can switch to one, and then serves no data files until it has one.
 CMD.serve = function () {
   const send = (res, code, body, headers = {}) => {
     res.writeHead(code, { 'Content-Type': typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json', ...headers });
@@ -849,12 +863,50 @@ CMD.serve = function () {
   const NAMES = new Set([...Object.values(C.FILES), ...C.WATCH]);
   const mtime = (f) => Math.floor(fs.statSync(f).mtimeMs);
   const MAX_PUT = 10 * 1024 * 1024;
+  const bodyText = async (req) => { const chunks = []; let size = 0; for await (const c of req) { size += c.length; if (size <= 64e3) chunks.push(c); } return Buffer.concat(chunks).toString('utf8'); };
+  // The folder being served, null when there is none, and the session the page must name so that a tab
+  // still open on an earlier folder can't read or write this one. A new session each time a folder is opened.
+  const open = { dir: null, session: null };
+  const openFolder = (d) => { open.dir = d; open.session = d ? randomUUID() : null; };
+  openFolder(SERVE_WITHOUT_FOLDER ? null : DIR);
+  const fp = (f) => path.join(open.dir, f);
+  // What stops the page using the folder: 'none', 'format', or undefined when nothing does.
+  const problem = () => !open.dir ? 'none' : formatRefusal(open.dir) ? 'format' : undefined;
   const server = http.createServer(async (req, res) => {
     // A web page can reach 127.0.0.1 through DNS rebinding, but its requests then carry its own Host.
     const port = server.address().port;
     if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(req.headers.host)) return send(res, 403, 'forbidden');
+    // A same-origin fetch always names the page's origin, so a PUT without it came from somewhere else.
+    if (req.method === 'PUT' && ![`http://127.0.0.1:${port}`, `http://localhost:${port}`].includes(req.headers.origin)) return send(res, 403, 'forbidden');
     if (req.method === 'GET' && req.url === '/') return send(res, 200, fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'), { 'Content-Type': 'text/html; charset=utf-8' });
-    if (req.method === 'GET' && req.url === '/api/info') return send(res, 200, { folder: DIR, name: path.basename(DIR), version: C.VERSION });
+    if (req.method === 'GET' && req.url === '/api/info') {
+      return send(res, 200, { folder: open.dir, name: open.dir && path.basename(open.dir), version: C.VERSION, session: open.session, problem: problem(), canSwitch: CAN_SWITCH });
+    }
+    // Suggestions for Change folder: the connected folder and the Example beside the App folder, when each is a data folder.
+    if (req.method === 'GET' && req.url === '/api/folders') {
+      let mine = '';
+      try { [mine] = connected(); } catch (e) { /* a config.toml edited into something unreadable suggests nothing */ }
+      const found = [...new Set([mine, path.resolve(REPO, '..', 'discerny-example')])].filter(d => d && isDataFolder(d));
+      return send(res, 200, found.map(d => ({ folder: d, name: path.basename(d) })));
+    }
+    if (req.method === 'PUT' && req.url === '/api/folder') {
+      let want;
+      try { want = JSON.parse(await bodyText(req)).path; } catch (e) { /* answered below */ }
+      if (!CAN_SWITCH) return send(res, 409, `this server was started with ${FROM === '--dir' ? '--dir' : 'DISCERNY_DIR set'}, which overrides config.toml, so it can't switch folders: stop it, run discern connect <folder>, and start it again${FROM === 'DISCERNY_DIR' ? ' with DISCERNY_DIR unset' : ''}`);
+      if (typeof want !== 'string' || !want.trim()) return send(res, 400, 'send {"path": "<folder>"} as JSON');
+      const d = path.resolve(REPO, want.trim());
+      if (!isDataFolder(d)) return send(res, 400, notDataFolder(d, want.trim()));
+      const refusal = formatRefusal(d);
+      if (refusal) return send(res, 409, refusal);
+      try { connectTo(d); } catch (e) { return send(res, 409, e.message); }
+      openFolder(d);
+      return send(res, 200, { folder: d, name: path.basename(d) });
+    }
+    // While the folder can't be used, nothing in it is read or written but DISCERNY.md, which the page's Format gate reads.
+    const stop = problem();
+    if (stop === 'none') return send(res, 409, 'no data folder is open: choose one with Change folder');
+    if (stop === 'format' && !(req.method === 'GET' && req.url === '/api/file/DISCERNY.md')) return send(res, 409, formatRefusal(open.dir));
+    if (req.headers['x-discerny-session'] !== open.session) return send(res, 412, 'the server now serves another folder: reload the page');
     if (req.method === 'GET' && req.url === '/api/mtimes') return send(res, 200, Object.fromEntries([...NAMES].map(n => [n, fs.existsSync(fp(n)) ? mtime(fp(n)) : 0])));
     if (req.method === 'GET' && req.url === '/api/drafts') {
       const dr = fp('drafts');
@@ -888,7 +940,8 @@ CMD.serve = function () {
     send(res, 405, 'method not allowed');
   });
   server.listen(Number(OPT.port), '127.0.0.1', () => {
-    process.stdout.write(JSON.stringify({ url: `http://127.0.0.1:${server.address().port}/`, folder: DIR }) + '\n');
+    process.stdout.write(JSON.stringify({ url: `http://127.0.0.1:${server.address().port}/`, folder: open.dir,
+      problem: problem() === 'none' ? `${NOT_CONNECTED}; or open the page and use Change folder` : formatRefusal(open.dir) || undefined }) + '\n');
   });
 };
 
@@ -901,15 +954,18 @@ if (!cmd || !CMD[cmd]) {
   process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|ignore|note|ref|commit|log|check|migrate|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
-if (cmd !== 'connect' && cmd !== 'new') {
+// serve starts with no usable folder when it can switch to one, so the page can offer Change folder.
+const CAN_SWITCH = FROM !== '--dir' && FROM !== 'DISCERNY_DIR';
+const SERVE_WITHOUT_FOLDER = cmd === 'serve' && CAN_SWITCH && !(DIR && isDataFolder(DIR));
+if (cmd === 'serve' && !CAN_SWITCH && !isDataFolder(DIR)) fail(`${DIR} (from ${FROM}) has no TASKS.md, so it is not a Discerny data folder`, 2);
+if (cmd !== 'connect' && cmd !== 'new' && !SERVE_WITHOUT_FOLDER) {
   if (!DIR) fail(NOT_CONNECTED, 2);
   if (!isDataFolder(DIR)) fail(`${DIR} (from ${FROM}) has no TASKS.md, so it is not a Discerny data folder`);
 }
 // A folder in another Format is refused before any command reads or writes it, except those that show or fix that.
-if (!['connect', 'new', 'check', 'upgrade'].includes(cmd)) {
-  const { format, problem } = formatStanding(DIR);
-  if (problem) fail(`${problem}. ` + (format.is === 'older'
-    ? 'Tell the user, and offer to upgrade it: they can ask you to "upgrade my Discerny folder", or run: discern upgrade'
-    : newerAdvice(format)), 2);
+// serve starts on one too, and its page shows the Format gate.
+if (!['connect', 'new', 'check', 'upgrade', 'serve'].includes(cmd)) {
+  const refusal = formatRefusal(DIR);
+  if (refusal) fail(refusal, 2);
 }
 CMD[cmd]();

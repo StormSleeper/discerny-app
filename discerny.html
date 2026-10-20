@@ -170,6 +170,11 @@ textarea.in{resize:vertical;width:100%;line-height:1.45}
 select.in{padding-right:28px}
 input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);flex:none;cursor:pointer}
 .err-t{font-size:12.5px;color:var(--danger);margin-top:4px}
+.fform{display:flex;flex-direction:column;gap:12px}
+.fform .fl{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.fform .in{width:100%}
+.fsugs{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.fsugs .hint{margin-right:4px}
 .hint{font-size:12.5px;color:var(--muted)}
 
 /* ---------- badges ---------- */
@@ -393,7 +398,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.1.1.11'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.1.1.12'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Next 2 weeks',later:'Later',fyi:'FYI / awareness'};
 var URG_ORDER=['today','week','soon','later','fyi'];
@@ -642,7 +647,8 @@ function lsJson(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.p
 
 /* ===================== app state ===================== */
 var S = {
-  m: null, ver: 0, ready: false, lost: false, lastSync: 0, fresh: new Set(), folder: '',
+  m: null, ver: 0, ready: false, lost: false, moved: false, lastSync: 0, fresh: new Set(), folder: '',
+  folderPath: '', folderErr: '', folderSugs: [], folderBusy: false,
   view: 'today', entity: null, sel: null, panel: false, tab: 'details',
   group: lsGet('discerny-group', 'project'), pf: 'all', pq: '', pgroup: lsGet('discerny-pgroup', 'none'),
   wb: Object.assign({ group: 'urg', sort: 'urg', tag: '' }, lsJson('discerny-wb', {})), wq: '',
@@ -679,16 +685,19 @@ async function idbSet(k, v) {
 
 /* ===================== file input/output ===================== */
 var lastMod = {};
-// Set when the page is served by node tools/discern.mjs serve: {folder, name, version} from /api/info.
-// The four functions below then go through the server instead of the folder handle.
+// Set when the page is served by node tools/discern.mjs serve: {folder, name, version, session, problem, canSwitch}
+// from /api/info. The four functions below then go through the server instead of the folder handle.
 var srv = null;
+// Every request names the folder this page opened, so a server since switched to another folder refuses it (412).
 async function api(path, opts) {
+  opts = Object.assign({}, opts);
+  if (srv && srv.session) opts.headers = Object.assign({ 'X-Discerny-Session': srv.session }, opts.headers);
   try { return await fetch(path, opts); }
   catch (e) { var err = new Error('the Discerny server isn’t running'); err.name = 'ServerDown'; throw err; }
 }
 async function apiError(r) {
   var e = new Error((await r.text()) || 'the server answered ' + r.status);
-  e.name = r.status === 409 ? 'ConflictError' : 'ServerError';
+  e.name = r.status === 409 ? 'ConflictError' : r.status === 412 ? 'FolderChanged' : 'ServerError';
   return e;
 }
 async function serverInfo() {
@@ -1258,6 +1267,8 @@ async function persist(job) {
 }
 // Lost access to the folder: the browser's permission, or the server that was serving it.
 function isPermErr(e) { return !!e && (e.name === 'NotAllowedError' || e.name === 'SecurityError' || e.name === 'ServerDown'); }
+// The server now serves another folder than the one this page opened: nothing more is read or saved, and the page offers to reload.
+function isMoved(e) { return !!e && e.name === 'FolderChanged'; }
 function errText(e) { return (e && (e.message || e.name)) || 'unknown error'; }
 // The gate for a folder whose DISCERNY.md records a Format other than this app's, or null when they match.
 async function formatGate() {
@@ -1284,7 +1295,8 @@ async function kick() {
       applyAliasNews();
     } catch (e) {
       console.error(e);
-      if (isPermErr(e)) { S.lost = true; Q.blocked = { job: job, msg: 'The browser no longer has permission to use the folder.' }; }
+      if (isMoved(e)) { S.moved = true; Q.blocked = { job: job, msg: errText(e) }; }
+      else if (isPermErr(e)) { S.lost = true; Q.blocked = { job: job, msg: 'The browser no longer has permission to use the folder.' }; }
       else if (job.sync) { Q.jobs.shift(); toastShow('Couldn’t read the folder: ' + errText(e)); }
       else Q.blocked = { job: job, msg: errText(e) };
     }
@@ -1348,14 +1360,14 @@ function applyLoaded(m) {
   applyAliasNews();
 }
 async function poll() {
-  if (!S.ready || Q.running || Q.jobs.length || Q.blocked || document.hidden) return;
+  if (!S.ready || S.moved || Q.running || Q.jobs.length || Q.blocked || document.hidden) return;
   try {
     var changed = false;
     var mt = srv ? await serverMtimes() : null;
     for (var i = 0; i < WATCH.length; i++) { var t = mt ? mt[WATCH[i]] || 0 : await modOf(WATCH[i]); if (t !== (lastMod[WATCH[i]] || 0)) { changed = true; break; } }
     if (changed) requestSync(true);
     else if (Date.now() - (S.lastSync || 0) > 30000) requestSync(false);
-  } catch (e) { if (isPermErr(e)) { S.lost = true; render(); } }
+  } catch (e) { if (isMoved(e)) { S.moved = true; render(); } else if (isPermErr(e)) { S.lost = true; render(); } }
 }
 
 /* A record saved under a different number than the screen showed: rename it on screen and follow it. */
@@ -2616,6 +2628,7 @@ var NAV = [
 var NAV_COUNTS = { today: 1, inbox: 1, next: 1, waiting: 1, fyi: 1, review: 1, claude: 1 };
 function navOn(k) { var v = S.view; return v === k || (k === 'projects' && v === 'project') || (k === 'people' && v === 'person') || (k === 'systems' && v === 'system'); }
 function saveState() {
+  if (S.moved) return { cls: 'err', text: 'Folder changed' };
   if (Q.blocked || S.lost) return { cls: 'err', text: S.lost ? (srv ? 'Server not running' : 'No folder access') : 'Not saved' };
   var n = Q.jobs.filter(function (j) { return !j.sync; }).length;
   if (n) return { cls: 'busy', text: 'Saving…' };
@@ -2643,6 +2656,7 @@ function vSide(c) {
   return h;
 }
 function vBanner() {
+  if (S.moved) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The Discerny server now serves another folder, so this page no longer reads or saves “' + esc(S.folder) + '”. ' + (Q.jobs.filter(function (j) { return !j.sync; }).length ? 'Your unsaved changes are kept on screen, and were not written to the other folder. ' : '') + 'Reload to open the folder it serves now.</span>' + bt('Reload', 'reload', { cls: 'primary sm' }) + '</div>';
   if (S.lost && srv) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The Discerny server isn’t running. Nothing is lost. ' + (Q.jobs.filter(function (j) { return !j.sync; }).length ? 'Your unsaved changes are kept on screen. ' : '') + 'Start it again with node tools/discern.mjs serve, then retry.</span>' + bt('Retry', 'reconnect', { cls: 'primary sm' }) + '</div>';
   if (S.lost) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The browser no longer has permission to use the folder. Nothing is lost: ' + (Q.jobs.filter(function (j) { return !j.sync; }).length ? 'your unsaved changes are kept on screen until you reconnect.' : 'reconnect to carry on.') + '</span>' + bt('Reconnect', 'reconnect', { cls: 'primary sm' }) + '</div>';
   if (!Q.blocked) return '';
@@ -2705,11 +2719,26 @@ function vKeys() {
     '<button type="button" class="xbtn" data-act="dlg-close" aria-label="Close">' + ic('x') + '</button></div><div class="dlg-pad"><div class="kgrid">' +
     KEYMAP.map(function (k) { return '<span class="mono">' + esc(k[0]) + '</span><span>' + esc(k[1]) + '</span>'; }).join('') + '</div><p class="hint" style="margin:14px 0 0">Single-letter keys work when you are not typing in a box.</p></div></div></div>';
 }
-// When served, the folder is the server's: say how to switch it rather than open a picker.
-function srvSwitch() { return 'To open another folder, stop the server (Ctrl C where it runs), run node tools/discern.mjs connect <folder> in the Discerny app folder, and start it again with node tools/discern.mjs serve.'; }
+// When served, the folder is the server's. A server started on a folder of its own (--dir or DISCERNY_DIR) can't
+// switch, so say how to restart it; otherwise the Change folder form asks the server to switch.
+function srvSwitch() { return 'This server was started on a folder of its own, so it can’t switch. To open another folder, stop the server (Ctrl C where it runs), run node tools/discern.mjs connect <folder> in the Discerny app folder, and start it again with node tools/discern.mjs serve.'; }
+function vFolderForm() {
+  var sugs = S.folderSugs.filter(function (s) { return s.folder !== srv.folder; });
+  return '<form class="fform" data-sub="folder-switch" data-k="fform">' +
+    (srv.folder ? '<div><span class="hint">Open now</span><p class="mono" style="margin:2px 0 0;overflow-wrap:anywhere">' + esc(srv.folder) + '</p></div>' : '') +
+    '<label class="fl" for="folder-path">Folder to open<input id="folder-path" class="in mono" type="text" autocomplete="off" spellcheck="false" data-in="folderPath" value="' + esc(S.folderPath) + '" placeholder="The full path of a folder with TASKS.md in it" required' + (S.folderErr ? ' aria-describedby="folder-err" aria-invalid="true"' : '') + '></label>' +
+    (S.folderErr ? '<p class="err-t" id="folder-err" role="alert" style="margin:0">' + esc(S.folderErr) + '</p>' : '') +
+    (sugs.length ? '<div class="fsugs"><span class="hint">Suggestions</span>' + sugs.map(function (s) { return '<button type="button" class="chipbtn" data-act="folder-sug" data-v="' + esc(s.folder) + '" title="' + esc(s.folder) + '">' + esc(s.name) + '</button>'; }).join('') + '</div>' : '') +
+    '<p class="hint" style="margin:0">Your agent works on the folder you open here too.</p>' +
+    '<div class="acts"><button type="submit" class="btn primary"' + (S.folderBusy ? ' disabled' : '') + '>' + (S.folderBusy ? 'Opening…' : 'Open folder') + '</button></div></form>';
+}
 function vFolder() {
-  return '<div class="dlg-scrim" data-k="dlg-folder" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="folder-h"><div class="dlg-h"><h2 id="folder-h" style="margin:0;flex:1;font-size:16px">Your data folder</h2>' +
-    '<button type="button" class="xbtn" data-act="dlg-close" aria-label="Close">' + ic('x') + '</button></div><div class="dlg-pad"><p class="mono" style="margin:0 0 12px;overflow-wrap:anywhere">' + esc(srv.folder) + '</p><p class="hint" style="margin:0">' + esc(srvSwitch()) + '</p></div></div></div>';
+  return '<div class="dlg-scrim" data-k="dlg-folder" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="folder-h"><div class="dlg-h"><h2 id="folder-h" style="margin:0;flex:1;font-size:16px">' + (srv.canSwitch ? 'Change folder' : 'Your data folder') + '</h2>' +
+    '<button type="button" class="xbtn" data-act="dlg-close" aria-label="Close">' + ic('x') + '</button></div><div class="dlg-pad">' +
+    (srv.canSwitch ? vFolderForm() : '<p class="mono" style="margin:0 0 12px;overflow-wrap:anywhere">' + esc(srv.folder) + '</p><p class="hint" style="margin:0">' + esc(srvSwitch()) + '</p>') + '</div></div></div>';
+}
+async function loadFolderSugs() {
+  try { var r = await fetch('/api/folders'); if (r.ok) { S.folderSugs = await r.json(); render(); } } catch (e) { /* no suggestions */ }
 }
 function vDatalists() {
   var uniq = function (arr) { var o = {}, out = []; arr.forEach(function (v) { if (v && !o[v]) { o[v] = 1; out.push(v); } }); return out.sort(function (a, b) { return a.localeCompare(b); }); };
@@ -2728,6 +2757,7 @@ var GATE = {
   fmtold: ['This folder needs an upgrade', '“%s” is in Format %f, older than the Format %a this version of Discerny reads and writes. Ask your agent to “upgrade my Discerny folder”, or run node tools/discern.mjs upgrade in the Discerny app folder. Then reload this page.', 'Choose a different folder', 'refolder'],
   fmtnew: ['This folder needs a newer Discerny', '“%s” is in Format %f, newer than the Format %a this version of Discerny reads and writes. Get the newer Discerny from github.com/StormSleeper/discerny-app and open the folder with that.', 'Choose a different folder', 'refolder'],
   fmtnext: ['This folder was upgraded by an unreleased Discerny', '“%s” is in Format next: a test build of Discerny upgraded it, so no released version can read it. This version reads and writes Format %a. Restore the backup copy the upgrade made beside the folder.', 'Choose a different folder', 'refolder'],
+  nofolder: ['No folder connected', 'Choose the Discerny data folder to open: the one with TASKS.md and PEOPLE.md in it.', '', ''],
   srvdown: ['The Discerny server isn’t running', 'Start it again with node tools/discern.mjs serve in the Discerny app folder, then retry.', 'Retry', 'srvretry'],
   nosupport: ['Open this file in Chrome or Edge', 'This browser can’t edit files in a folder. Discerny needs Google Chrome or Microsoft Edge.', '', ''],
   loading: ['Opening your folder…', 'Reading your files.', '', '']
@@ -2736,7 +2766,7 @@ function vGate() {
   var g = GATE[S.gate.mode] || GATE.pick, msg = g[1].replace('%s', S.gate.mode === 'error' ? (S.gate.msg || 'Unknown error') : S.folder).replace('%f', S.gate.format).replace('%a', FORMAT);
   var h = '<div class="gate" data-k="gate"><main class="gate-c" aria-labelledby="gate-h"><div class="brand" style="padding:0"><span class="logo" aria-hidden="true">' + ic('check') + '</span><span class="brand-t"><b>Discerny</b><span>Version ' + VERSION + '</span></span></div>' +
     '<h1 id="gate-h">' + esc(g[0]) + '</h1><p>' + esc(msg) + '</p>' + (S.gate.msg && S.gate.mode !== 'error' ? '<p class="err-t">' + esc(S.gate.msg) + '</p>' : '');
-  if (srv && g[3] === 'refolder') h += '<p class="hint">' + esc(srvSwitch()) + '</p>';
+  if (srv && (g[3] === 'refolder' || S.gate.mode === 'nofolder')) h += srv.canSwitch ? vFolderForm() : '<p class="hint">' + esc(srvSwitch()) + '</p>';
   else if (g[2]) h += '<div class="acts">' + bt(g[2], g[3], { cls: 'primary lg' }) + (S.gate.mode === 'reconnect' || S.gate.mode === 'denied' ? bt('Choose a different folder', 'pick', { cls: 'lg' }) : '') + '</div>';
   if (S.gate.mode === 'pick' || S.gate.mode === 'reconnect') h += '<p class="hint">Your browser will ask to let this page view and edit files in the folder. If it offers <strong>Allow on every visit</strong>, choose that and Discerny will open straight in next time.</p>';
   return h + '</main></div>' + vToasts();
@@ -3248,6 +3278,8 @@ var ACT = {
   // From a folder refused after it was open, switching reloads the page so nothing of it carries over.
   refolder: function () { if (S.m || srv) changeFolder(); else pickFolder(); },
   folder: function () { changeFolder(); },
+  'folder-sug': function (el) { S.folderPath = dvv(el); S.folderErr = ''; render(); focusLater('#folder-path'); },
+  reload: function () { location.reload(); },
   srvretry: function () { openFolder(); },
   regrant: function () { regrant(); }
 };
@@ -3331,9 +3363,23 @@ var IN = {
   addGrp: function (el) { S.addGrp = el.value; },
   linkLabel: function (el) { S.linkLabel = el.value; },
   linkUrl: function (el) { S.linkUrl = el.value; },
-  editAskText: function (el) { S.editAskText = el.value; }
+  editAskText: function (el) { S.editAskText = el.value; },
+  folderPath: function (el) { S.folderPath = el.value; }
 };
 var SUB = {
+  // Asks the server to open another folder, which it also records for the agent, then reloads on it.
+  'folder-switch': async function () {
+    if (S.folderBusy) return;
+    if (Q.jobs.some(function (j) { return !j.sync; })) { S.folderErr = 'Wait until your changes are saved, then change folder.'; render(); return; }
+    var p = S.folderPath.trim();
+    if (!p) { focusLater('#folder-path'); return; }
+    S.folderErr = ''; S.folderBusy = true; render();
+    var r;
+    try { r = await api('/api/folder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) }); }
+    catch (e) { S.folderBusy = false; S.folderErr = 'The Discerny server isn’t running. Start it again with node tools/discern.mjs serve, then try again.'; render(); return; }
+    if (r.ok) { location.reload(); return; }
+    S.folderBusy = false; S.folderErr = (await r.text()) || 'The server answered ' + r.status + '.'; render(); focusLater('#folder-path');
+  },
   'add-ent': function (f) {
     var kind = f.getAttribute('data-v'), D = EDEF[kind], name = cleanName(S.addName);
     if (!name) { focusLater('#add-name'); return; }
@@ -3476,7 +3522,12 @@ async function pickFolder() {
 }
 // Switching data folders reloads the page, so nothing from the old folder (undo, selection, timestamps) carries over.
 async function changeFolder() {
-  if (srv) { if (S.dialog !== 'folder') S.dlgReturn = document.activeElement; S.dialog = 'folder'; render(); focusLater('.dlg .xbtn'); return; }
+  if (srv) {
+    if (S.dialog !== 'folder') { S.dlgReturn = document.activeElement; S.folderPath = ''; S.folderErr = ''; }
+    S.dialog = 'folder'; render();
+    if (srv.canSwitch) { loadFolderSugs(); focusLater('#folder-path'); } else focusLater('.dlg .xbtn');
+    return;
+  }
   if (Q.jobs.some(function (j) { return !j.sync; })) { toastShow('Wait until your changes are saved, then change folder.'); return; }
   var h;
   try { h = await window.showDirectoryPicker({ id: 'discerny', mode: 'readwrite' }); }
@@ -3496,6 +3547,8 @@ async function regrant() {
   render();
 }
 async function openFolder() {
+  if (srv && srv.problem === 'none') { S.gate = { mode: 'nofolder', msg: '' }; render(); loadFolderSugs(); focusLater('#folder-path'); return; }
+  if (srv && srv.canSwitch) loadFolderSugs();
   S.folder = srv ? srv.name : dir.name;
   if (!srv) try { await dir.getFileHandle('TASKS.md'); }
   catch (e) {
@@ -3512,7 +3565,12 @@ async function openFolder() {
     if (g) { S.gate = g; render(); return; }
     var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now();
   }
-  catch (e) { console.error(e); S.gate = isPermErr(e) ? { mode: srv ? 'srvdown' : 'reconnect', msg: '' } : { mode: 'error', msg: errText(e) }; render(); return; }
+  catch (e) {
+    console.error(e);
+    // The server switched folders between /api/info and these reads: open the folder it serves now.
+    if (isMoved(e)) { location.reload(); return; }
+    S.gate = isPermErr(e) ? { mode: srv ? 'srvdown' : 'reconnect', msg: '' } : { mode: 'error', msg: errText(e) }; render(); return;
+  }
   S.ready = true;
   if (S.view === 'inbox') go('inbox');
   startTimers();
