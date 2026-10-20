@@ -156,6 +156,7 @@ test('every source skill command refuses a folder in another Format with exit 2,
     [['who', 'ihartley']],
     [['local', '2026-10-24T09:00:00Z']],
     [['add'], [draft()]],
+    [['meetings'], [event()]],
     [['ignore'], [{ ref: 'mail|Bake-off Friday sign-up', reason: 'social' }]],
     [['note', 'T-0028', 'Print order moved']],
     [['ref', 'T-0020', 'cal|2026-10-23|fable range 2027 – go/no-go']],
@@ -217,8 +218,7 @@ test('mail matching: short subjects, ambiguity, notices, waiting and replies (E1
   assert.equal(by.E1.who, null);
   assert.equal(by.E2.outcome, 'ambiguous');
   assert.deepEqual(by.E2.ids.sort(), ['T-0013', 'T-0030']);
-  assert.equal(by.E3.outcome, 'notice');
-  assert.deepEqual(by.E3.ids, ['T-0031']);
+  assert.equal(by.E3.outcome, 'drop');
   assert.equal(by.E4.outcome, 'waiting');
   assert.deepEqual(by.E4.ids, ['T-0022']);
   assert.equal(by.E4.who, 'Helena Sørensen');
@@ -232,6 +232,68 @@ test('mail matching: short subjects, ambiguity, notices, waiting and replies (E1
   assert.equal(by.askto.from_user, undefined);
   assert.equal(by.askto.who, 'Helena Sørensen');
   assert.equal(by.askto.outcome, 'new');
+});
+
+test('a decline for a Meeting with 4 people invited is a Task to reply to the sender, due a day after it was received', () => {
+  const r = run(folder(), ['match'], [
+    { key: 'dec', scheme: 'mail', subject: 'Declined: Goods-in walkthrough', sender: 'meera.ilangovan@pennywhistle.example',
+      when: '2026-10-13T12:00:00Z', invited: 4, meeting_start: { dateTime: '2026-10-20T10:00:00', timeZone: 'Europe/London' } },
+  ]);
+  assert.equal(r.code, 0, r.out);
+  const [dec] = r.json;
+  assert.equal(dec.outcome, 'reply');
+  assert.equal(dec.title, 'Reply to Meera Ilangovan: Goods-in walkthrough');
+  assert.equal(dec.who, 'Meera Ilangovan');
+  assert.equal(dec.due, '2026-10-14 13:00');
+});
+
+test('a decline for a Meeting with 5 people invited, and a cancellation, are dropped even when they match a tracked Item', () => {
+  const r = run(folder(), ['match'], [
+    { key: 'dec5', scheme: 'mail', subject: 'Declined: Weekly QA sync', sender: 'meera.ilangovan@pennywhistle.example', when: '2026-10-13T12:00:00Z', invited: 5 },
+    { key: 'cxl', scheme: 'mail', subject: 'Cancelled: Weekly QA sync', sender: 'meera.ilangovan@pennywhistle.example', when: '2026-10-13T12:00:00Z' },
+  ]);
+  assert.equal(r.code, 0, r.out);
+  const by = Object.fromEntries(r.json.map(x => [x.key, x]));
+  assert.equal(by.dec5.outcome, 'drop');
+  assert.equal(by.cxl.outcome, 'drop');
+});
+
+test('a decline whose event the agent could not find, a tentative proposing a new time and a reply that asks something are Tasks; an Accepted reply and an invitation are dropped', () => {
+  const from = { sender: 'declan.moss@pennywhistle.example', when: '2026-10-13T12:00:00Z' };
+  const r = run(folder(), ['match'], [
+    { key: 'unknown', scheme: 'mail', subject: 'Declined: Rig design review', ...from },
+    { key: 'newtime', scheme: 'mail', subject: 'Tentative: Rig design review', new_time: true, invited: 9, ...from },
+    { key: 'tent', scheme: 'mail', subject: 'Tentative: Rig design review', invited: 9, ...from },
+    { key: 'asks', scheme: 'mail', subject: 'Accepted: Rig design review', asks: true, invited: 9, ...from },
+    { key: 'acc', scheme: 'mail', subject: 'Accepted: Rig design review', invited: 2, ...from },
+    { key: 'plainasks', scheme: 'mail', subject: 'RE: Rig design review', invite: 'reply', asks: true, ...from },
+    { key: 'req', scheme: 'mail', subject: 'Rig design review', invite: 'request', ...from },
+    { key: 'upd', scheme: 'mail', subject: 'Updated: Rig design review', asks: true, ...from },
+  ]);
+  assert.equal(r.code, 0, r.out);
+  const by = Object.fromEntries(r.json.map(x => [x.key, x]));
+  for (const k of ['unknown', 'newtime', 'asks', 'plainasks']) {
+    assert.equal(by[k].outcome, 'reply', k);
+    assert.equal(by[k].title, 'Reply to Declan Moss: Rig design review', k);
+    assert.equal(by[k].who, 'Declan Moss', k);
+  }
+  for (const k of ['tent', 'acc', 'req', 'upd']) assert.equal(by[k].outcome, 'drop', k);
+});
+
+test('a reply Task due on a Saturday or Sunday is due on the Monday at the same time instead', () => {
+  const dec = when => ({ key: when, scheme: 'mail', subject: 'Declined: Goods-in walkthrough', sender: 'meera.ilangovan@pennywhistle.example', when, invited: 3 });
+  const r = run(folder(), ['match'], [dec('2026-10-15T12:00:00Z'), dec('2026-10-16T12:00:00Z'), dec('2026-10-17T08:30:00Z')]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.map(x => x.due), ['2026-10-16 13:00', '2026-10-19 13:00', '2026-10-19 09:30']);
+});
+
+test('a reply Task is due at the Meeting\'s start when the Meeting starts before the day is up', () => {
+  const r = run(folder(), ['match'], [
+    { key: 'soon', scheme: 'mail', subject: 'Declined: Goods-in walkthrough', sender: 'meera.ilangovan@pennywhistle.example',
+      when: '2026-10-16T12:00:00Z', invited: 3, meeting_start: { dateTime: '2026-10-19T08:00:00', timeZone: 'UTC' } },
+  ]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.json[0].due, '2026-10-19 09:00');
 });
 
 test('teams matching: legacy and new refs, containers by prefix (E19)', () => {
@@ -268,6 +330,87 @@ test('calendar matching: tracked, moved, cancelled (E20, E21)', () => {
   assert.equal(by.cancel.outcome, 'cancelled');
   assert.deepEqual(by.cancel.ids, ['T-0013']);
   assert.equal(by.new.outcome, 'new');
+});
+
+const event = (o = {}) => ({ subject: 'Calibration review', start: { dateTime: '2026-10-14T09:00:00', timeZone: 'UTC' },
+  event_id: 'AAMkAGI-calibration-1014', organizer: 'declan.moss@pennywhistle.example', organizer_name: 'Declan Moss', ...o });
+
+test('meetings puts a new event straight into TASKS.md as an open Meeting, due at its local start', () => {
+  const d = folder();
+  const r = run(d, ['meetings'], [event()]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.added, [{ id: 'T-0032', title: 'Calibration review', due: '2026-10-14 10:00' }]);
+  const tasks = read(d, 'TASKS.md');
+  assert.match(tasks, /^- \[ \] T-0032 Calibration review \{ty:Meeting; who:Declan Moss; urg:week; p:2; due:2026-10-14 10:00; asg:2026-10-12 16:00\}\r?$/m);
+  assert.match(tasks, /  - ref: cal\|2026-10-14\|calibration review\r?\n  - ref: calid\|AAMkAGI-calibration-1014/);
+  assert.match(tasks, /<!-- next-id: 33 -->/);
+  assert.doesNotMatch(read(d, 'INBOX.md'), /Calibration review/);
+  assert.equal(run(d, ['check']).code, 0);
+});
+
+test('meetings matches a Meeting already tracked by its cal source key, and a second run adds and changes nothing', () => {
+  const d = folder();
+  const qa = event({ subject: 'Weekly QA sync', start: { dateTime: '2026-10-15T09:00:00', timeZone: 'GMT Standard Time' }, event_id: 'AAMkAGI-weekly-qa-sync-1015' });
+  const first = run(d, ['meetings'], [event(), qa]);
+  assert.equal(first.code, 0, first.out);
+  assert.deepEqual(first.json.added.map(a => a.id), ['T-0032']);
+  assert.deepEqual(first.json.unchanged, ['T-0031']);
+  const after = read(d, 'TASKS.md');
+  const again = run(d, ['meetings'], [event(), qa]);
+  assert.equal(again.code, 0, again.out);
+  assert.deepEqual(again.json, { added: [], moved: [], cancelled: [], unchanged: ['T-0032', 'T-0031'] });
+  assert.equal(read(d, 'TASKS.md'), after);
+});
+
+test('meetings gives a moved Meeting its new Due date and title, and a second run leaves it be', () => {
+  const d = folder();
+  const moved = event({ subject: 'Fable Range 2027 – go/no-go', start: { dateTime: '2026-10-23T14:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-fable-gonogo-1021' });
+  const r = run(d, ['meetings'], [moved]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.moved, [{ id: 'T-0020', title: 'Fable Range 2027 – go/no-go', from: '2026-10-21 14:00', to: '2026-10-23 14:00' }]);
+  assert.deepEqual(r.json.added, []);
+  const tasks = read(d, 'TASKS.md');
+  assert.match(tasks, /^- \[ \] T-0020 Fable Range 2027 – go\/no-go \{ty:Meeting; who:Hattie Lindqvist; prj:PRJ-0001; tg:Product Safety; urg:soon; p:1; due:2026-10-23 14:00; dep:T-0019; asg:2026-10-05 09:10\}\r?$/m);
+  assert.match(tasks, /  - ref: cal\|2026-10-23\|fable range 2027 – go\/no-go/);
+  const again = run(d, ['meetings'], [moved]);
+  assert.deepEqual(again.json.unchanged, ['T-0020']);
+  assert.equal(read(d, 'TASKS.md'), tasks);
+  assert.equal(run(d, ['check']).code, 0);
+});
+
+test('meetings keeps a cancelled or declined Meeting open, retitled "Cancelled: …" with a note of when, and adds no untracked cancelled one', () => {
+  const d = folder();
+  const evs = [
+    event({ subject: 'Canceled: Weekly QA sync', start: { dateTime: '2026-10-15T09:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-weekly-qa-sync-1015', cancelled: true }),
+    event({ subject: 'Imogen / Oliver 1:1', start: { dateTime: '2026-10-13T16:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-imogen-oliver-1013', declined: true }),
+    event({ cancelled: true }),
+  ];
+  const r = run(d, ['meetings'], evs);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.cancelled, [{ id: 'T-0031', title: 'Cancelled: Weekly QA sync' }, { id: 'T-0018', title: 'Cancelled: 1:1 with Oliver' }]);
+  assert.deepEqual(r.json.added, []);
+  const tasks = read(d, 'TASKS.md');
+  assert.match(tasks, /^- \[ \] T-0031 Cancelled: Weekly QA sync \{ty:Meeting; [^}]*due:2026-10-15 09:00;/m);
+  assert.match(tasks, /^- \[ \] T-0018 Cancelled: 1:1 with Oliver \{/m);
+  assert.equal(tasks.match(/  - note: Found cancelled by the calendar Run on 2026-10-12 16:00/g).length, 2);
+  assert.doesNotMatch(tasks, /Calibration review/);
+  assert.doesNotMatch(read(d, 'DONE.md'), /T-0031|T-0018/);
+  const again = run(d, ['meetings'], evs);
+  assert.deepEqual(again.json, { added: [], moved: [], cancelled: [], unchanged: ['T-0031', 'T-0018'] });
+  assert.equal(read(d, 'TASKS.md'), tasks);
+});
+
+test('meetings never takes an older prep item carrying the Meeting\'s plain cal source key for the Meeting itself', () => {
+  const d = folder();
+  const prep = { title: 'Prepare for Calibration review (14 Oct 10:00)', ty: 'Meeting', urg: 'week', p: 2, due: '2026-10-14 10:00', derived: true,
+    src: 'Calendar "Calibration review" organised by Declan Moss', refs: ['cal|2026-10-14|calibration review'] };
+  assert.equal(run(d, ['add'], [prep]).code, 0);
+  const r = run(d, ['meetings'], [event({ event_id: undefined })]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.added.map(a => a.title), ['Calibration review']);
+  assert.deepEqual(r.json.unchanged, []);
+  assert.match(read(d, 'INBOX.md'), /T-0032 Prepare for Calibration review \(14 Oct 10:00\) \{/);
+  assert.equal(run(d, ['check']).code, 0);
 });
 
 const draft = (o = {}) => ({ title: 'Review the supplier sampling plan', ty: 'Task', who: 'Meera Ilangovan', urg: 'week', p: 2,

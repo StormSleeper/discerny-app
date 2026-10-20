@@ -13,7 +13,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 - **The user**: the one person the data folder belongs to. Their record in `PEOPLE.md` is the one whose note says "The user of Discerny" (normally `P-0001`).
 - **The agent**: you, an AI working on the data folder from outside Discerny by following these instructions.
 - **Skill**: a named set of instructions (`discern-<name>`) that ships with the app and that an agent runs on request.
-- **Source skill**: a skill that reads one source (a mailbox, Teams chat, a calendar, an export) and puts proposals to the user, new items in `INBOX.md` among them.
+- **Source skill**: a skill that reads one source (a mailbox, Teams chat, a calendar, an export) and puts proposals to the user, new items in `INBOX.md` among them. The calendar's Meetings are the exception: they go straight into `TASKS.md`.
 - **Item**: one tracked thing (a task, meeting, process, document or FYI), proposed, open or done. **Record**: a person, project or system that items are about.
 
 ## Start here
@@ -179,7 +179,7 @@ A source is anything outside Discerny that a source skill reads: a mailbox, Team
 
 1. A `discern-<source>` skill reads the shared `## defaults` block and its own `## <source-name>` block in `SOURCES.md`. For a stream source, such as a mailbox or Teams chat, it asks its connector only for messages after its cursor (`watermark` less `overlap`), in day-long windows. A horizon source, such as a calendar, re-reads a window ahead of now on every run instead.
 2. Each thing it finds is a candidate, which the skill assesses. A candidate whose source key already appears in `TASKS.md`, `INBOX.md`, `DONE.md` or `IGNORED.md` is already tracked: it is skipped, or becomes a proposed change to the existing item, which appears only in the run report.
-3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `src:`, `ref:` and `asg:`. Then the cursor moves past the last window fully processed.
+3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `src:`, `ref:` and `asg:`. Then the cursor moves past the last window fully processed. Meetings come from the calendar: a horizon source writes each Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item and keeps it in step with the calendar, but never marks one done; the mail skill leaves invitations to it.
 4. The user clarifies each proposal in the UI's inbox: Accept moves the item to `TASKS.md`; Dismiss logs its source key in `IGNORED.md`.
 
 `SOURCES.md` starts with `## defaults`, then one block per source; each skill adds keys of its own:
@@ -223,5 +223,5 @@ Every `discern-*` skill, whoever writes it, must:
 - Read this file when it runs (and `SOURCE-SKILLS.md`, for a source skill), rather than copying the formats into the skill, so the skill keeps working when the formats change. Find the data folder as "Start here" says; never hard-code its path.
 - Follow "Rules for every edit" above.
 - Be read-only towards outside systems. Anything that would act outside the data folder becomes a draft in `drafts/`.
-- If it is a source skill: follow `SOURCE-SKILLS.md`. New items go only to `INBOX.md`, never straight to `TASKS.md`; its other writes are the bookkeeping that file lists, made through `tools/discern.mjs`.
+- If it is a source skill: follow `SOURCE-SKILLS.md`. New items go only to `INBOX.md`, never straight to `TASKS.md`, except a horizon source's Meetings, which `discern meetings` writes there; its other writes are the bookkeeping that file lists, made through `tools/discern.mjs`.
 - End with a one-line result in the style of `last_result` (what was read, skipped and proposed), and record it in `SOURCES.md` if it is a source skill.

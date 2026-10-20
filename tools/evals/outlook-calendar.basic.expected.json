@@ -1,6 +1,6 @@
 {
   "scenario": "fixtures/outlook-calendar/basic",
-  "description": "One calendar run over the Example covering E20-E23, prep, invites, a cancellation, an overlap and the transcript pass.",
+  "description": "One calendar run over the Example covering E20-E24, the Meetings it writes straight in, prep, invites, a cancellation, an overlap and the transcript pass.",
   "setup": [
     "Make a scratch data folder as README.md in this folder describes (a copy of the Example, discerny-example, as of its last commit), and connect the helper to it.",
     "In its SOURCES.md outlook-calendar block, add \"- fixture: <absolute path to tools/evals/fixtures/outlook-calendar/basic>\" and set transcripts to organizer-only (E23)."
@@ -9,17 +9,17 @@
     {
       "eval": "E20",
       "event": "AAMkAGI-mk4-fai-1020",
-      "result": "Tracked through T-0029 (its cal source key): nothing new."
+      "result": "Tracked through T-0029 (its cal source key), which stays in the inbox: no new item."
     },
     {
       "eval": "E21",
       "event": "AAMkAGI-fable-gonogo-1021",
-      "result": "Report \"T-0020 moved to 23 Oct\", proposing due 2026-10-23 14:00; T-0020 gains the source key cal|2026-10-23|fable range 2027 – go/no-go; no new item."
+      "result": "T-0020 in TASKS.md now has due:2026-10-23 14:00, the title \"Fable Range 2027 – go/no-go\" and the source key cal|2026-10-23|fable range 2027 – go/no-go; the report's Meetings line says it moved; no proposal and no new item."
     },
     {
       "eval": "E22",
       "event": "AAMkAGI-calderbrook-1026, AAMkAGI-open-day-1024",
-      "result": "Prep items with due:2026-10-26 09:00 (user organises, needs an agenda) and due:2026-10-24 09:00 (please bring)."
+      "result": "Meeting items T-0036 (due:2026-10-26 09:00, no who: the user organises) and T-0035 (due:2026-10-24 09:00) in TASKS.md; prep Task proposals with the same due times (user organises, needs an agenda; please bring), each proposed as related to its Meeting."
     },
     {
       "eval": "E23",
@@ -27,14 +27,24 @@
       "result": "Transcript items: a waiting-for item on Declan Moss (rig date, due 2026-10-14), one on Meera Ilangovan (tension-test results), and the user's own CAPA log update (an item, or an update proposal on T-0001)."
     },
     {
+      "eval": "E24",
+      "event": "the whole scenario run twice",
+      "result": "The second run adds no Meeting and changes no Meeting item: discern meetings reports every Meeting unchanged; only last_run, last_result and the log change."
+    },
+    {
+      "eval": "-",
+      "event": "AAMkAGI-feltcraft-call-1014",
+      "result": "Meeting item T-0034 in TASKS.md, who:Tomasz Kowalczyk, due:2026-10-14 11:30."
+    },
+    {
       "eval": "-",
       "event": "AAMkAGI-owl-redesign-1014",
-      "result": "One prep item (priority organiser, pre-read), due:2026-10-14 11:00, whose note also says no response recorded; no separate invite item."
+      "result": "Meeting item T-0033 in TASKS.md; one prep Task proposal (priority organiser, pre-read), due:2026-10-14 11:00, whose note also says no response recorded; no separate invite item."
     },
     {
       "eval": "-",
       "event": "AAMkAGI-weekly-qa-sync-1015",
-      "result": "Report \"T-0031 cancelled, consider closing\"; no item."
+      "result": "T-0031 stays open in TASKS.md, retitled \"Cancelled: Weekly QA sync\", with a note \"Found cancelled by the calendar Run on 2026-10-12 17:00\"; the report's Meetings line says it was cancelled; no new item."
     },
     {
       "eval": "-",
@@ -44,12 +54,12 @@
     {
       "eval": "-",
       "event": "AAMkAGI-imogen-oliver-1013, AAMkAGI-mgmt-review-1022",
-      "result": "Tracked (T-0018, T-0013): nothing new; the 1:1 invite was accepted."
+      "result": "Tracked (T-0018, T-0013): unchanged, titles kept; the 1:1 invite was accepted."
     },
     {
       "eval": "-",
       "event": "AAMkAGI-stageworks-standup-1013",
-      "result": "No prep signal; invite accepted: nothing."
+      "result": "Meeting item T-0032 in TASKS.md, who:Declan Moss, due:2026-10-13 08:30; no prep signal and the invite was accepted, so no proposal."
     },
     {
       "eval": "-",
@@ -64,7 +74,7 @@
     {
       "eval": "-",
       "event": "state",
-      "result": "last_run 2026-10-12T16:00:00Z and a last_result line; no watermark; discern check passes."
+      "result": "last_run 2026-10-12T16:00:00Z and a last_result line with meetings +5; no watermark; discern check passes."
     }
   ]
 }

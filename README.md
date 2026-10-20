@@ -36,7 +36,7 @@ Discerny comes with ready-made skills for Claude in `.claude/skills/` (a hidden 
 |---|---|
 | `discern-outlook-mail` | New Outlook mail, and sent mail still waiting for a reply or recording a promise, into your inbox |
 | `discern-teams` | Teams messages that mention or are addressed to you, files shared with you, your own commitments and unanswered asks, and watched channels |
-| `discern-outlook-calendar` | Prep items and unanswered invites for the coming days; cancelled or moved meetings you track; overlaps; optionally action items from transcripts |
+| `discern-outlook-calendar` | Every meeting in the coming days, straight into your open items and kept in step when it moves or is cancelled; prep items and unanswered invites into your inbox; overlaps; optionally action items from transcripts |
 | `discern-refresh` | A refresh: runs every source skill that has a block in `SOURCES.md`, one after another |
 | `discern-ask-agent` | Works through the agent requests you leave in the UI |
 | `discern-upgrade` | Upgrades a data folder in an older Format, showing you each change before making it |

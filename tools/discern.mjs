@@ -284,7 +284,7 @@ function loadIndex() {
   const recs = [];
   const add = (store, it) => {
     const st = it.meta.st || '';
-    C.getSub(it, 'ref').forEach(b => recs.push({ store, id: it.id, st, ty: it.meta.ty || '', due: it.meta.due || '', ref: b.v.trim() }));
+    C.getSub(it, 'ref').forEach(b => recs.push({ store, id: it.id, title: it.title, st, ty: it.meta.ty || '', due: it.meta.due || '', ref: b.v.trim() }));
   };
   C.parse(read('TASKS.md')).items.forEach(it => add(it.done ? 'done' : 'tasks', it));
   C.parse(read('INBOX.md')).items.forEach(it => add('inbox', it));
@@ -346,6 +346,25 @@ function matchTeams(c, recs) {
   return null;
 }
 
+// The calendar source skill tracks Meetings, so invitations and the replies to them are dropped, except
+// the replies the user has to answer: a decline for a small Meeting (4 or fewer invited, or a count the
+// agent couldn't find), a tentative proposing a new time, and any reply that asks something.
+function needsReply(invite, it) {
+  if (!['accepted', 'tentative', 'declined', 'reply'].includes(invite)) return false;
+  return !!it.asks || (invite === 'declined' && !(it.invited > 4)) || (invite === 'tentative' && !!it.new_time);
+}
+// When a reply to an invitation is due: a day after it was received, in the user's time zone, moving a
+// Saturday or Sunday to the Monday at the same time, and never after the Meeting starts. Bank holidays are ignored.
+function replyDue(received, start, tz) {
+  const l = local(toInstant(received), tz);
+  const next = new Date(Date.UTC(+l.slice(0, 4), +l.slice(5, 7) - 1, +l.slice(8, 10) + 1));
+  const wd = next.getUTCDay();
+  if (wd === 6 || wd === 0) next.setUTCDate(next.getUTCDate() + (wd === 6 ? 2 : 1));
+  const due = next.toISOString().slice(0, 10) + l.slice(10);
+  const starts = start ? local(toInstant(start), tz) : '';
+  return starts && starts < due ? starts : due;
+}
+
 function actionFor(res, pass, c) {
   const id = res.ids && res.ids.length ? res.ids.join(', ') : '';
   const ask = pass === 'ask';
@@ -361,7 +380,7 @@ function actionFor(res, pass, c) {
     case 'ambiguous': return ask ? 'classify: ask, commitment or neither' : `if it plainly continues one of ${id}, propose an update to that item; otherwise assess it as new and name ${id} in a note`;
     case 'moved': return `report: ${id} moved to ${res.to}; propose that due; then run: discern ref ${res.ids[0]} "${res.newRef}"`;
     case 'cancelled': return `report: ${id} cancelled, consider closing`;
-    case 'notice': return `propose an update to ${id}: ${res.notice}`;
+    case 'reply': return `propose a Task "${res.title}" due ${res.due}`;
     default: return 'assess';
   }
 }
@@ -523,11 +542,11 @@ CMD.match = function () {
       c.norm = n.subject; r.ref = 'mail|' + n.subject; r.refs = [r.ref];
       if (n.notice) r.notice = n.notice;
       if (it.meeting_date) r.refs.push(calRef(it.meeting_date, n.subject));
-      if (n.notice === 'Accepted' || n.notice === 'Tentative') res = { outcome: 'drop', ids: [] };
+      const invite = String(it.invite || n.notice || '').toLowerCase().replace('canceled', 'cancelled');
+      if (invite) res = needsReply(invite, it) ? { outcome: 'reply', ids: [], title: `Reply to ${r.who || it.sender_name}: ${n.subject}`, due: replyDue(it.when, it.meeting_start, tz) } : { outcome: 'drop', ids: [] };
       else {
         res = matchMail(c, recs);
         if (!res && it.meeting_date) res = matchExact(r.refs[1], recs);
-        if (n.notice === 'Declined' || n.notice === 'Canceled') res = res && res.outcome !== 'ignored' && res.ids.length ? { outcome: 'notice', ids: res.ids, notice: n.notice } : { outcome: 'drop', ids: [] };
       }
     } else if (scheme === 'teams') {
       if (!it.chat || !it.message) fail(`item ${r.key}: a teams item needs chat and message`);
@@ -573,6 +592,21 @@ function insertSub(id, kind, text, after) {
     lines.splice((at >= 0 ? at : i) + 1, 0, `  - ${kind}: ${text.replace(/[\r\n]+/g, ' ')}`);
     write(f, lines.join(eol));
     return { file: f };
+  }
+  fail(`${id} is not in TASKS.md or INBOX.md`);
+}
+
+// Rewrites one item's line in TASKS.md or INBOX.md in place, keeping its sub-lines as they are.
+function rewriteItem(id, change) {
+  for (const f of ['TASKS.md', 'INBOX.md']) {
+    const t = read(f); if (!t) continue;
+    const eol = eolOf(t), lines = t.split(/\r?\n/);
+    const i = itemLine(lines, id); if (i < 0) continue;
+    const it = C.parse(lines[i]).items[0];
+    if (change(it) === false) return;
+    lines[i] = C.serItem({ ...it, subs: [] });
+    write(f, lines.join(eol));
+    return;
   }
   fail(`${id} is not in TASKS.md or INBOX.md`);
 }
@@ -647,19 +681,78 @@ CMD.add = function () {
   if (errors.length) fail('nothing was written. ' + errors.join(' | '));
   if (!built.length) { out({ added: [] }); return; }
   if (OPT.dry) { out({ dry_run: true, would_add: built.map(b => C.serItem({ id: 'T-????', done: false, title: b.title, meta: b.meta, subs: b.subs })) }); return; }
-  // Raise the counter first, so an interrupted run leaves a gap, never a duplicate ID.
-  let tasks = read('TASKS.md');
-  if (!tasks.trim()) fail('TASKS.md is missing or empty');
-  const maxId = t => C.parse(t).items.reduce((m, it) => Math.max(m, parseInt(it.id.slice(2), 10) + 1), 0);
-  const start = Math.max(C.nextId(C.parse(tasks)), maxId(read('INBOX.md')), maxId(read('DONE.md')));
-  const next = start + built.length, eol = eolOf(tasks);
-  if (/<!-- next-id: \d+ -->/.test(tasks)) tasks = tasks.replace(/<!-- next-id: \d+ -->/, `<!-- next-id: ${next} -->`);
-  else { const ls = tasks.split(/\r?\n/); ls.splice(1, 0, `<!-- next-id: ${next} -->`); tasks = ls.join(eol); }
-  write('TASKS.md', tasks);
+  const { start, next } = raiseCounter(built.length);
   const added = built.map((b, k) => ({ id: 'T-' + String(start + k).padStart(4, '0'), ...b }));
   appendLines('INBOX.md', added.map(a => C.serItem({ id: a.id, done: false, title: a.title, meta: a.meta, subs: a.subs })),
     '# Inbox\n<!-- Proposals for new items from the discern-* source skills, waiting for the user to clarify them. Accept moves an item to TASKS.md; Dismiss logs it in IGNORED.md. IDs come from the next-id counter in TASKS.md. -->\n');
   out({ added: added.map(a => ({ id: a.id, title: a.title, refs: a.subs.filter(s => s.k === 'ref').map(s => s.v) })), counter: next });
+};
+
+// Raise the counter first, so an interrupted run leaves a gap, never a duplicate ID.
+function raiseCounter(count) {
+  let tasks = read('TASKS.md');
+  if (!tasks.trim()) fail('TASKS.md is missing or empty');
+  const maxId = t => C.parse(t).items.reduce((m, it) => Math.max(m, parseInt(it.id.slice(2), 10) + 1), 0);
+  const start = Math.max(C.nextId(C.parse(tasks)), maxId(read('INBOX.md')), maxId(read('DONE.md')));
+  const next = start + count, eol = eolOf(tasks);
+  if (/<!-- next-id: \d+ -->/.test(tasks)) tasks = tasks.replace(/<!-- next-id: \d+ -->/, `<!-- next-id: ${next} -->`);
+  else { const ls = tasks.split(/\r?\n/); ls.splice(1, 0, `<!-- next-id: ${next} -->`); tasks = ls.join(eol); }
+  write('TASKS.md', tasks);
+  return { start, next };
+}
+
+// The calendar source skill mirrors every Meeting in its window: one not yet tracked goes straight into
+// TASKS.md as an open Meeting Item, keyed on its cal and calid source keys.
+CMD.meetings = function () {
+  const events = stdinJson(), tz = timezone(), now = nowDate(), today = local(now, tz).slice(0, 10);
+  // Prep items once carried the Meeting's own cal source key, so they are never taken for the Meeting.
+  const P = people(), u = userRecord(P), recs = loadIndex().filter(x => !/^Prepare for /.test(x.title || ''));
+  const built = [], unchanged = [], moved = [], cancelled = [];
+  events.forEach((ev, i) => {
+    if (!ev.subject || !ev.start) fail(`event ${i}: an event needs subject and start`);
+    const title = String(ev.subject).replace(/[\r\n]+/g, ' ').replace(/[{}]/g, '').trim();
+    const due = local(toInstant(ev.start), tz), date = due.slice(0, 10);
+    const cal = calRef(date, title), calid = ev.event_id ? `calid|${ev.event_id}` : '';
+    const gone = !!(ev.cancelled || ev.declined);
+    const hits = recs.filter(x => x.ref.toLowerCase() === cal.toLowerCase() || (calid && x.ref === calid));
+    if (hits.length) {
+      const hit = hits.find(x => x.id);
+      if (!hit) return;
+      const id = hit.id, open = hit.store === 'tasks' || hit.store === 'inbox';
+      if (calid && open && !hits.some(x => x.ref === calid)) insertSub(id, 'ref', calid, [['ref'], ['link', 'note', 'src']]);
+      // A cancelled or declined Meeting stays open for the user to deal with, and no Run closes it.
+      if (open && gone) {
+        let retitled = '';
+        rewriteItem(id, it => { if (/^Cancelled: /.test(it.title)) return false; retitled = it.title = `Cancelled: ${it.title}`; });
+        if (retitled) { insertSub(id, 'note', `Found cancelled by the calendar Run on ${local(now, tz)}`, [['note'], ['src']]); cancelled.push({ id, title: retitled }); }
+        else unchanged.push(id);
+      // The calendar is the record for a mirrored Meeting's time and title: one moved or renamed takes both.
+      } else if (open && (hit.due !== due || !hits.some(x => x.ref.toLowerCase() === cal.toLowerCase()))) {
+        rewriteItem(id, it => { it.title = title; it.meta.due = due; });
+        insertSub(id, 'ref', cal, [['ref'], ['link', 'note', 'src']]);
+        moved.push({ id, title, from: hit.due, to: due });
+      } else unchanged.push(id);
+      return;
+    }
+    if (gone) return;
+    const days = Math.round((Date.parse(date) - Date.parse(today)) / DAY);
+    const p = findPerson(ev.organizer, P) || findPerson(ev.organizer_name, P);
+    const meta = { ty: 'Meeting', who: p && p !== u ? p.name : undefined, urg: days <= 0 ? 'today' : days <= 7 ? 'week' : days <= 14 ? 'soon' : 'later',
+      p: '2', due, asg: local(now, tz) };
+    Object.keys(meta).forEach(k => { if (meta[k] === undefined) delete meta[k]; });
+    const subs = [{ k: 'src', v: `Calendar "${title}" organised by ${ev.organizer_name || (p && p.name) || ev.organizer || 'unknown'}` }];
+    if (ev.web_link) subs.push({ k: 'link', v: `[Outlook event](${ev.web_link})` });
+    subs.push({ k: 'ref', v: cal });
+    if (calid) subs.push({ k: 'ref', v: calid });
+    built.push({ title, meta, subs });
+  });
+  const added = [];
+  if (built.length) {
+    const { start } = raiseCounter(built.length);
+    built.forEach((b, k) => added.push({ id: 'T-' + String(start + k).padStart(4, '0'), ...b }));
+    appendLines('TASKS.md', added.map(a => C.serItem({ id: a.id, done: false, title: a.title, meta: a.meta, subs: a.subs })));
+  }
+  out({ added: added.map(a => ({ id: a.id, title: a.title, due: a.meta.due })), moved, cancelled, unchanged });
 };
 
 CMD.ignore = function () {
@@ -947,7 +1040,7 @@ if (cmd === '--version' || cmd === 'version') {
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|ignore|note|ref|commit|log|check|migrate|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|meetings|ignore|note|ref|commit|log|check|migrate|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
 // serve starts with no usable folder when it can switch to one, so the page can offer Change folder.

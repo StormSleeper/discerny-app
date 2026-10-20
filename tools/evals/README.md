@@ -20,12 +20,12 @@ Every eval runs over the Example: the data folder of a fictional company, Pennyw
 |---|---|---|
 | E1 | `fixtures/outlook-mail/basic`, m-101 | A new thread called "Review" is captured, not suppressed by a short-subject match |
 | E2 | outlook-mail, m-102 | "Re: Management review" is captured as ambiguous, with a note naming T-0013 and T-0030 |
-| E3 | outlook-mail, m-103 | "Cancelled: Weekly QA sync" becomes an update proposal on T-0031, not a new item |
+| E3 | outlook-mail, m-103 | "Cancelled: Weekly QA sync" is dropped: no item, no proposal, nothing logged |
 | E4 | outlook-mail, m-104 | Helena's reply: "reply received, consider closing T-0022" |
 | E5 | outlook-mail, s-201 | A chaser on a waiting item: "T-0007 chased", not "consider closing" |
 | E6 | outlook-mail, s-202 | A reply on an open item: "you replied, consider closing T-0009" |
 | E7 | helper test "local converts…" | Times either side of the 25 Oct clock change |
-| E8 | outlook-mail, m-106 | An invitation becomes a Meeting due 3 Nov 14:00, with a `cal` source key |
+| E8 | outlook-mail, m-106; helper tests on invite replies | An invitation is dropped; only a reply the user has to answer becomes a "Reply to" Task, due a day later, a weekend moved to Monday, never after the Meeting |
 | E9 | helper test "state…", plus a manual run with more than `page_cap` pages of sent mail | The ask cursor never passes an unclassified message |
 | E10 | the outlook-mail scenario run twice | The second run adds nothing; only `last_run`, `last_result` and the log change |
 | E11 | outlook-mail, m-107 | Instructions inside a message aren't followed; T-0001 and T-0025 stay as they are |
@@ -38,8 +38,9 @@ Every eval runs over the Example: the data folder of a fictional company, Pennyw
 | E18 | `fixtures/teams-chat/basic` with `mention_read_cap: 2` | At most two full-text reads; unread truncated messages are kept, not dropped |
 | E19 | teams-chat, 1760004720000 and 1760007900000 | Same chat as T-0021: same topic is an update proposal, another topic a new item |
 | E20 | `fixtures/outlook-calendar/basic`, the Mk4 FAI | Already tracked through T-0029's `cal` source key: nothing new |
-| E21 | outlook-calendar, the Fable go/no-go | Moved from 21 to 23 Oct: reported against T-0020, which gains the new `cal` source key |
-| E22 | outlook-calendar, Calderbrook and open day; helper test "local…" | Due times 26 Oct 09:00 (GMT Standard Time) and 24 Oct 09:00 (from UTC) |
+| E21 | outlook-calendar, the Fable go/no-go | Moved from 21 to 23 Oct: T-0020 takes the new Due date, title and `cal` source key, and the report says so |
+| E22 | outlook-calendar, Calderbrook and open day; helper test "local…" | Meeting items and prep proposals due 26 Oct 09:00 (GMT Standard Time) and 24 Oct 09:00 (from UTC) |
 | E23 | outlook-calendar with `transcripts: organizer-only` | Action items owned by others become waiting-for items |
+| E24 | the outlook-calendar scenario run twice; helper tests "meetings…" | Every Meeting goes straight into `TASKS.md` once; moved and cancelled ones are kept in step; the second run changes no item |
 
 `<source>.basic.expected.json` also lists the expected results that aren't tied to a numbered eval.
