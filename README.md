@@ -97,7 +97,7 @@ You can have more than one data folder, for example one to try things out in. Sw
 
 | File | What it is |
 |---|---|
-| `discerny.html`, `discerny-old.html` | The UI, and the previous version of it |
+| `discerny.html` | The UI |
 | `AGENTS.md` | Instructions for AI agents (`CLAUDE.md` points Claude to it) |
 | `SOURCE-SKILLS.md` | The rules every source skill follows |
 | `.claude/skills/` | The Discerny skills for Claude (a hidden folder) |
@@ -106,7 +106,7 @@ You can have more than one data folder, for example one to try things out in. Sw
 | `new_discerny_repo/` | The blank starter files a new data folder is copied from |
 | `config.toml` | The app folder's settings. `data_folder` says where your data folder is, so your agent and the skills can find it; `discern connect` and `discern new` write it, and leave the rest of the file as you wrote it |
 
-`discerny.html` is the UI: Today, Inbox, Next actions, Waiting for, Upcoming, FYI, All items, Projects, People, Systems, Weekly review, Done and an Agent page, with search (Ctrl K), undo and dark mode. `discerny-old.html` is the earlier four-page version (Tasks, People, Projects, Systems). Both work on the same files, and the old one is kept for now while the new one is being tested.
+`discerny.html` is the UI: Today, Inbox, Next actions, Waiting for, Upcoming, FYI, All items, Projects, People, Systems, Weekly review, Done and an Agent page, with search (Ctrl K), undo and dark mode.
 
 ### Version
 

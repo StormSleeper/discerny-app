@@ -16,3 +16,4 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - Run `node tools/discern.mjs serve` and open the address it prints to use Discerny in any browser, Firefox and Safari included, with no folder to choose; opening `discerny.html` in Chrome or Edge works as before.
 - The app folder now records the connected data folder as `data_folder` in `config.toml` instead of `data-folder.txt`, and moves an existing `data-folder.txt` over the next time you connect.
 - In a page opened with `discern serve`, Change folder now opens another data folder from inside the page, in any browser, and `serve` starts even before a folder is connected.
+- The earlier four-page version of the UI, discerny-old.html, has been removed; discerny.html is now the only page.

@@ -398,7 +398,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.1.1.12'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.1.1.13'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Next 2 weeks',later:'Later',fyi:'FYI / awareness'};
 var URG_ORDER=['today','week','soon','later','fyi'];
@@ -619,7 +619,7 @@ var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PE
 var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
 //</core>
 
-/* ===================== constants shared with discerny-old.html ===================== */
+/* ===================== constants ===================== */
 var EDEF = {
   PRJ: { file: 'PROJECTS.md', key: 'projects', word: 'project', Word: 'Project', types: ['Project', 'Workstream', 'Pod'], sts: ['Active', 'On hold', 'Done'], pk: 'parent' },
   SYS: { file: 'SYSTEMS.md', key: 'systems', word: 'system', Word: 'System', types: ['Platform', 'Pipeline', 'Registry', 'Application', 'Instrument', 'Other'], sts: ['Live', 'In build', 'Delayed', 'Retired'], pk: 'part-of' }
@@ -659,7 +659,7 @@ var S = {
   gate: { mode: 'pick', msg: '' }, side: lsGet('discerny-side', 'auto'), theme: lsGet('discerny-theme', 'system')
 };
 
-/* ===================== folder handle (shared with discerny-old.html) ===================== */
+/* ===================== folder handle ===================== */
 var dir = null;
 function idb() {
   return new Promise(function (res, rej) {

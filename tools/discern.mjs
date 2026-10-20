@@ -129,18 +129,14 @@ function stdinJson() {
 
 // ---------------------------------------------------------------- the shared parser from the UI
 function loadCore() {
-  for (const name of ['discerny.html', 'discerny-old.html']) {
-    const p = path.join(REPO, name);
-    if (!fs.existsSync(p)) continue;
-    const html = fs.readFileSync(p, 'utf8');
-    const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-    if (a < 0 || b < a) continue;
-    const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS', 'FILES', 'WATCH'];
-    const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
-    try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
-    catch (e) { fail(`the //<core> block in ${name} did not load: ${e.message}`); }
-  }
-  fail('no //<core> ... //</core> block found in discerny.html or discerny-old.html next to tools/');
+  const p = path.join(REPO, 'discerny.html');
+  const html = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
+  const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
+  if (a < 0 || b < a) fail('no //<core> ... //</core> block found in discerny.html next to tools/');
+  const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS', 'FILES', 'WATCH'];
+  const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
+  try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
+  catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
 }
 const C = loadCore();
 

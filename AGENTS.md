@@ -1,6 +1,6 @@
 # Discerny: instructions for agents
 
-Discerny is a task tracker and knowledge base kept as plain Markdown files in a data folder. It borrows from David Allen's Getting Things Done (GTD): new things land in an inbox, get triaged into tasks, and are organised by project, person and system. The user works on the files through two local web pages; you, the agent, work on the same files directly. The files are the only source of truth, so the user and you always see the same state.
+Discerny is a task tracker and knowledge base kept as plain Markdown files in a data folder. It borrows from David Allen's Getting Things Done (GTD): new things land in an inbox, get triaged into tasks, and are organised by project, person and system. The user works on the files through a local web page; you, the agent, work on the same files directly. The files are the only source of truth, so the user and you always see the same state.
 
 This file is the contract for any agent that reads or edits a Discerny data folder, and for any skill written to do so. Read it before acting.
 
@@ -9,7 +9,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 - **Discerny**: the whole system: the app, the file formats and the user's data.
 - **The app folder**: this folder. It holds the UI, the helper, the skills and these instructions, and none of the user's data.
 - **The data folder**: the folder that holds the user's files (`TASKS.md` and the rest). It is kept apart from the app, so the app can work with any data folder: the user's own, or one for testing. In this file a bare file name such as `TASKS.md` means the file in the data folder.
-- **The UI**: the web pages, `discerny.html` (the current one) and `discerny-old.html` (the previous version, kept for now). Both read and write the same files. When this file says "the UI does X", it means the pages, not you.
+- **The UI**: the web page, `discerny.html`. When this file says "the UI does X", it means the page, not you.
 - **The user**: the person the data folder belongs to. Their record in `PEOPLE.md` is the one whose note says "The user of Discerny" (normally `P-0001`).
 - **Skill**: a reusable set of instructions an agent runs on request. Discerny skills are named `discern-<name>`.
 - **Source skill**: a skill that reads one outside source (mail, chat, a calendar, an export) and proposes items into `INBOX.md`.
@@ -56,7 +56,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `.claude/skills/` | The `discern-*` skills for Claude | when running one |
 | `config.toml` | The app folder's settings. `data_folder` is the path of the connected data folder, written by `discern connect` and `discern new` | when Node is missing |
 | `new_discerny_repo/` | The blank starter files for a new data folder | never, unless asked |
-| `discerny.html`, `discerny-old.html` | The UI (current and previous version) | never |
+| `discerny.html` | The UI | never |
 | `AGENTS.md`, `CLAUDE.md`, `README.md`, `LICENSE` | Instructions and documentation | this file only |
 
 ## Rules for every edit

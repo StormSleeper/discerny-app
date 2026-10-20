@@ -393,6 +393,15 @@ function runApp(a, args, env = {}) {
   return { code: r.status, json, out: r.stdout };
 }
 
+test('the helper reads its parser from discerny.html only', () => {
+  const a = app();
+  fs.renameSync(path.join(a, 'discerny.html'), path.join(a, 'discerny-old.html'));
+  const r = runApp(a, ['--version']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.json.error, /discerny\.html/);
+  assert.doesNotMatch(r.json.error, /discerny-old/);
+});
+
 test('new makes a data folder from the starter and connects to it; connect switches folders', () => {
   const a = app(), mine = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-new-')), 'mine');
   assert.equal(runApp(a, ['check']).code, 2);
