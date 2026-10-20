@@ -12,7 +12,8 @@
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
 //
 // The app (this helper, the UI, the skills) and the user's data live in separate folders. The data folder
-// is --dir, else $DISCERNY_DIR, else the path in data-folder.txt in the app folder, which connect and new write.
+// is --dir, else $DISCERNY_DIR, else data_folder in config.toml in the app folder, which connect and new write.
+// An app folder from an earlier build may still have data-folder.txt instead, which is read until the next connect or new.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,6 +23,7 @@ import { spawnSync } from 'node:child_process';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
+const CONFIG = path.join(REPO, 'config.toml');
 const LINK = path.join(REPO, 'data-folder.txt');
 const MIGRATIONS = path.join(REPO, 'migrations');
 const STARTER = path.join(REPO, 'new_discerny_repo');
@@ -43,9 +45,70 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--port') OPT.port = argv[++i] || '';
   else ARGS.push(a);
 }
+// ---------------------------------------------------------------- config.toml
+// The App folder's settings. The helper reads and writes a subset of TOML itself, with no dependencies:
+// comments, blank lines, [table] headings, and key = value with a basic or literal string, an integer or a boolean.
+const UNESCAPE = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\' };
+// The settings as { top: { key: { value, line } }, tables: { name: { key: { value, line } } }, firstTable, lines, eol }.
+// Throws an Error naming the line for anything outside the subset.
+function parseConfig(text) {
+  const eol = eolOf(text), lines = text.split(/\r?\n/);
+  const top = {}, tables = {};
+  let cur = top, firstTable = -1;
+  lines.forEach((ln, i) => {
+    const where = `config.toml line ${i + 1}`;
+    const rest = (s) => { if (!/^\s*(#.*)?$/.test(s)) throw new Error(`${where}: unexpected "${s.trim()}" after the value; put a comment after #`); };
+    if (/^\s*(#.*)?$/.test(ln)) return;
+    const h = /^\s*\[\s*([A-Za-z0-9_-]+)\s*\](.*)$/.exec(ln);
+    if (h) {
+      rest(h[2]);
+      if (tables[h[1]]) throw new Error(`${where}: [${h[1]}] appears twice; keep one`);
+      cur = tables[h[1]] = {};
+      if (firstTable < 0) firstTable = i;
+      return;
+    }
+    const kv = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.*)$/.exec(ln);
+    if (!kv) throw new Error(`${where}: "${ln.trim()}" is not key = value, a [table] heading or a # comment`);
+    const [, key, v] = kv;
+    let m, value;
+    if ((m = /^'([^'\r\n]*)'(.*)$/.exec(v))) value = m[1];
+    else if ((m = /^"((?:[^"\\]|\\.)*)"(.*)$/.exec(v))) {
+      value = m[1].replace(/\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)/g, (s, c) => {
+        if (c.length > 1) return String.fromCodePoint(parseInt(c.slice(1), 16));
+        if (!(c in UNESCAPE)) throw new Error(`${where}: \\${c} is not an escape TOML knows; write \\\\ for a backslash, or use single quotes`);
+        return UNESCAPE[c];
+      });
+    } else if ((m = /^([+-]?(?:0|[1-9](?:_?\d)*))(?![\w.:-])(.*)$/.exec(v))) value = Number(m[1].replace(/_/g, ''));
+    else if ((m = /^(true|false)(?![\w.-])(.*)$/.exec(v))) value = m[1] === 'true';
+    else throw new Error(`${where}: the value of ${key} must be a 'string', a "string", a whole number, true or false`);
+    rest(m[m.length - 1]);
+    if (cur[key]) throw new Error(`${where}: ${key} is set twice; keep one`);
+    cur[key] = { value, line: i };
+  });
+  return { top, tables, firstTable, lines, eol };
+}
+function configText() { try { return fs.readFileSync(CONFIG, 'utf8'); } catch (e) { return ''; } }
+function readConfig() {
+  try { return parseConfig(configText()); } catch (e) { fail(e.message); }
+}
+// A TOML string: literal ('...') so Windows paths need no escaping, or basic ("...") when it holds a '.
+function tomlString(s) { return s.includes("'") ? `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : `'${s}'`; }
+// Sets data_folder in config.toml, changing no other line and making the file if it is missing, and retires data-folder.txt.
+function connectTo(d) {
+  const text = configText();
+  const cfg = text ? readConfig() : parseConfig('# Settings for this Discerny app folder. discern connect and discern new write data_folder; the rest is yours to edit.\n');
+  const { lines, eol } = cfg, line = `data_folder = ${tomlString(d)}`, had = cfg.top.data_folder;
+  if (had) lines[had.line] = line;
+  else if (cfg.firstTable >= 0) lines.splice(cfg.firstTable, 0, line);
+  else { while (lines.length && lines[lines.length - 1] === '') lines.pop(); lines.push(line, ''); }
+  fs.writeFileSync(CONFIG, lines.join(eol));
+  fs.rmSync(LINK, { force: true });
+}
 function linked() { try { return fs.readFileSync(LINK, 'utf8').trim(); } catch (e) { return ''; } }
+const CONFIGURED = (readConfig().top.data_folder || {}).value;
 const [DIR, FROM] = OPT.dir ? [path.resolve(OPT.dir), '--dir']
   : process.env.DISCERNY_DIR ? [path.resolve(process.env.DISCERNY_DIR), 'DISCERNY_DIR']
+  : CONFIGURED ? [path.resolve(REPO, CONFIGURED), 'config.toml']
   : linked() ? [path.resolve(REPO, linked()), 'data-folder.txt'] : ['', ''];
 const NOT_CONNECTED = 'no data folder is connected. Ask the user which folder holds their Discerny data, then run: discern connect <folder>; or start one with: discern new <folder>';
 function isDataFolder(d) { return fs.existsSync(path.join(d, 'TASKS.md')); }
@@ -337,8 +400,8 @@ CMD.connect = function () {
   }
   const d = path.resolve(want);
   if (!isDataFolder(d)) fail(`${d} has no TASKS.md, so it is not a Discerny data folder. To start a new one there, run: discern new ${want}`);
-  fs.writeFileSync(LINK, d + '\n');
-  const warnings = process.env.DISCERNY_DIR ? ['DISCERNY_DIR is set, and it overrides data-folder.txt until it is unset'] : [];
+  connectTo(d);
+  const warnings = process.env.DISCERNY_DIR ? ['DISCERNY_DIR is set, and it overrides config.toml until it is unset'] : [];
   const { problem } = formatStanding(d);
   if (problem) warnings.push(problem);
   out({ connected: d, warnings });
@@ -352,7 +415,7 @@ CMD.new = function () {
   if (!isDataFolder(STARTER)) fail(`the starter folder ${STARTER} is missing`);
   fs.cpSync(STARTER, d, { recursive: true });
   recordFormat(d, C.FORMAT);
-  fs.writeFileSync(LINK, d + '\n');
+  connectTo(d);
   out({ created: d, connected: d });
 };
 

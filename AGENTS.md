@@ -16,7 +16,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 
 ## Start here
 
-1. Find the data folder: run `node tools/discern.mjs connect` in the app folder, which prints it as `folder`. Without Node, it is the path in `data-folder.txt` in the app folder. If none is connected (exit 2), ask the user which folder holds their Discerny data and run `node tools/discern.mjs connect <folder>`; to start a new one, `node tools/discern.mjs new <folder>` copies the starter files and connects to the copy. Never write data files into the app folder.
+1. Find the data folder: run `node tools/discern.mjs connect` in the app folder, which prints it as `folder`. Without Node, it is `data_folder` in `config.toml` in the app folder: a path in single quotes as written, or in double quotes with `\\` and `\"` standing for `\` and `"`. If none is connected (exit 2), ask the user which folder holds their Discerny data and run `node tools/discern.mjs connect <folder>`; to start a new one, `node tools/discern.mjs new <folder>` copies the starter files and connects to the copy. Never write data files into the app folder.
 2. If the helper refuses the data folder because of its Format (exit 2, naming the folder's Format and the app's), do no work on it. Tell the user what the message says. For an older folder, offer the Upgrade: they can ask you to "upgrade my Discerny folder", which the `discern-upgrade` skill does. Never edit the folder by hand, `DISCERNY.md` included, to get past the refusal.
 3. Read only what the request needs. Do not read every file. The tables below say when each file is needed.
 4. Find items by searching for their ID (`T-0012`, `P-0003`, `PRJ-0001`, `SYS-0002`), then read or edit only those lines.
@@ -54,7 +54,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `migrations/` | One folder per Format change, which `discern upgrade` runs. Its `README.md` says how to write one | when an Upgrade stops at a Migration's `INSTRUCTIONS.md`, or when changing the Format |
 | `tools/evals/` | Recorded connector responses and expected results for testing the skills | only when testing a skill |
 | `.claude/skills/` | The `discern-*` skills for Claude | when running one |
-| `data-folder.txt` | The path of the connected data folder, written by `discern connect` and `discern new` | when Node is missing |
+| `config.toml` | The app folder's settings. `data_folder` is the path of the connected data folder, written by `discern connect` and `discern new` | when Node is missing |
 | `new_discerny_repo/` | The blank starter files for a new data folder | never, unless asked |
 | `discerny.html`, `discerny-old.html` | The UI (current and previous version) | never |
 | `AGENTS.md`, `CLAUDE.md`, `README.md`, `LICENSE` | Instructions and documentation | this file only |

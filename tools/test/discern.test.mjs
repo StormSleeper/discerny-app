@@ -377,7 +377,7 @@ test('add takes lists as arrays or comma-separated strings, and has a dry run', 
   assert.match(read(d, 'INBOX.md'), /prj:PRJ-0001; tg:Supplier Quality,Document Control/);
 });
 
-// connect and new write data-folder.txt, so they run in a throwaway copy of the app.
+// connect and new write config.toml in the app folder, so they run in a throwaway copy of the app.
 function app() {
   const a = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-app-'));
   fs.mkdirSync(path.join(a, 'tools'));
@@ -386,8 +386,8 @@ function app() {
   fs.cpSync(path.join(REPO, 'new_discerny_repo'), path.join(a, 'new_discerny_repo'), { recursive: true });
   return a;
 }
-function runApp(a, args) {
-  const r = spawnSync(process.execPath, [path.join(a, 'tools', 'discern.mjs'), ...args, '--now', NOW], { encoding: 'utf8', env: { ...process.env, DISCERNY_DIR: '' } });
+function runApp(a, args, env = {}) {
+  const r = spawnSync(process.execPath, [path.join(a, 'tools', 'discern.mjs'), ...args, '--now', NOW], { encoding: 'utf8', env: { ...process.env, DISCERNY_DIR: '', ...env } });
   let json = null;
   try { json = JSON.parse(r.stdout); } catch (e) { /* plain usage text */ }
   return { code: r.status, json, out: r.stdout };
@@ -404,7 +404,7 @@ test('new makes a data folder from the starter and connects to it; connect switc
   assert.equal(runApp(a, ['new', mine]).code, 1);
   const d = folder();
   assert.equal(runApp(a, ['connect', d]).code, 0);
-  assert.deepEqual(runApp(a, ['connect']).json, { folder: d, from: 'data-folder.txt', ok: true });
+  assert.deepEqual(runApp(a, ['connect']).json, { folder: d, from: 'config.toml', ok: true });
   assert.equal(runApp(a, ['state', 'outlook-mail']).json.user.name, 'Imogen Hartley');
   assert.equal(runApp(a, ['connect', path.join(a, 'tools')]).code, 1);
   assert.equal(runApp(a, ['connect']).json.folder, d);
@@ -420,6 +420,81 @@ test('new writes DISCERNY.md with the app\'s Format version, and check finds it 
   const c = runApp(a, ['check']);
   assert.equal(c.code, 0, c.out);
   assert.deepEqual(c.json.format, { folder: '0.1.0.0', app: '0.1.0.0', is: 'same' });
+});
+
+const appFile = (a, f) => path.join(a, f);
+
+test('connect writes data_folder in config.toml, and commands then use it with no --dir', () => {
+  const a = app(), d = folder();
+  assert.equal(runApp(a, ['connect', d]).code, 0);
+  const toml = read(a, 'config.toml');
+  assert.match(toml, /^# /);
+  assert.ok(toml.includes(`data_folder = '${d}'`), toml);
+  assert.equal(fs.existsSync(appFile(a, 'data-folder.txt')), false);
+  assert.deepEqual(runApp(a, ['connect']).json, { folder: d, from: 'config.toml', ok: true });
+  assert.equal(runApp(a, ['state', 'outlook-mail']).json.user.name, 'Imogen Hartley');
+});
+
+test('a folder path with backslashes, spaces and a quote round-trips through config.toml', () => {
+  const a = app(), d = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'discerny path ')), "Imogen's data");
+  fs.cpSync(BASE, d, { recursive: true });
+  assert.equal(runApp(a, ['connect', d]).code, 0);
+  assert.deepEqual(runApp(a, ['connect']).json, { folder: d, from: 'config.toml', ok: true });
+  assert.equal(runApp(a, ['state', 'outlook-mail']).json.user.name, 'Imogen Hartley');
+});
+
+test('connect changes only data_folder in config.toml, keeping other keys, tables and comments as they were', () => {
+  const a = app(), d = folder();
+  const head = '# My settings\r\n\r\ntheme = "dark"   # a comment after a value\r\n';
+  const tail = '\r\n[ui]\r\nfont_size = 14\r\nwide = true\r\nlabel = \'Work\'\r\n';
+  fs.writeFileSync(appFile(a, 'config.toml'), `${head}data_folder = 'C:\\old\\place'\r\n${tail}`);
+  assert.equal(runApp(a, ['connect', d]).code, 0);
+  assert.equal(read(a, 'config.toml'), `${head}data_folder = '${d}'\r\n${tail}`);
+  const t = '# Only a comment\n[ui]\ndata_folder = \'not this one\'\n';
+  fs.writeFileSync(appFile(a, 'config.toml'), t);
+  assert.equal(runApp(a, ['connect', d]).code, 0);
+  assert.equal(read(a, 'config.toml'), `# Only a comment\ndata_folder = '${d}'\n[ui]\ndata_folder = 'not this one'\n`);
+  assert.deepEqual(runApp(a, ['connect']).json, { folder: d, from: 'config.toml', ok: true });
+});
+
+test('a config.toml outside the subset the helper reads is exit 1 naming the line, and nothing is written', () => {
+  const a = app(), d = folder();
+  for (const [bad, line] of [['data_folder = [1, 2]', 2], ['ports = 1.5', 2], ['data_folder = "C:\\Users"', 2], ['a.b = 1', 2], ["x = 'open", 2], ['[ui]\n[ui]', 3], ['k = 1\nk = 2', 3], ['just words', 2]]) {
+    const text = `# settings\n${bad}\n`;
+    fs.writeFileSync(appFile(a, 'config.toml'), text);
+    for (const args of [['connect', d], ['connect'], ['state', 'outlook-mail']]) {
+      const r = runApp(a, args);
+      assert.equal(r.code, 1, `${bad} / ${args[0]}: ${r.out}`);
+      assert.match(r.json.error, new RegExp(`config\\.toml line ${line}\\b`), `${bad} / ${args[0]}`);
+    }
+    assert.equal(read(a, 'config.toml'), text);
+  }
+});
+
+test('an App folder upgraded with only data-folder.txt still finds its folder, and the next connect or new moves it to config.toml', () => {
+  for (const how of ['connect', 'new']) {
+    const a = app(), d = folder();
+    fs.writeFileSync(appFile(a, 'data-folder.txt'), d + '\n');
+    assert.deepEqual(runApp(a, ['connect']).json, { folder: d, from: 'data-folder.txt', ok: true });
+    assert.equal(runApp(a, ['state', 'outlook-mail']).json.user.name, 'Imogen Hartley');
+    fs.writeFileSync(appFile(a, 'config.toml'), '# no folder yet\n[ui]\nwide = true\n');
+    assert.equal(runApp(a, ['connect']).json.from, 'data-folder.txt');
+    const e = how === 'new' ? path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-new-')), 'mine') : folder();
+    assert.equal(runApp(a, [how, e]).code, 0, how);
+    assert.equal(fs.existsSync(appFile(a, 'data-folder.txt')), false, how);
+    assert.equal(read(a, 'config.toml'), `# no folder yet\ndata_folder = '${e}'\n[ui]\nwide = true\n`, how);
+    assert.deepEqual(runApp(a, ['connect']).json, { folder: e, from: 'config.toml', ok: true }, how);
+  }
+});
+
+test('--dir and $DISCERNY_DIR still win over config.toml, and connect warns that $DISCERNY_DIR does', () => {
+  const a = app(), d = folder(), e = folder(), f = folder();
+  assert.equal(runApp(a, ['connect', d]).code, 0);
+  assert.deepEqual(runApp(a, ['connect', '--dir', e]).json, { folder: e, from: '--dir', ok: true });
+  assert.deepEqual(runApp(a, ['connect'], { DISCERNY_DIR: e }).json, { folder: e, from: 'DISCERNY_DIR', ok: true });
+  assert.deepEqual(runApp(a, ['connect', '--dir', f], { DISCERNY_DIR: e }).json.from, '--dir');
+  const w = runApp(a, ['connect', f], { DISCERNY_DIR: e });
+  assert.deepEqual(w.json.warnings, ['DISCERNY_DIR is set, and it overrides config.toml until it is unset']);
 });
 
 test('connect connects to a folder in another Format, and warns', () => {

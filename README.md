@@ -72,7 +72,7 @@ Serve the page when you want a browser other than Chrome or Edge, or when your a
 
 [discerny-example](https://github.com/StormSleeper/discerny-example) is a ready-made data folder for a fictional company, Pennywhistle Puppet Works, with a few weeks of tasks, meetings, people, projects and systems already in it. It is the quickest way to see what Discerny looks like in use. Clone it beside the app folder (`git clone https://github.com/StormSleeper/discerny-example.git`), then choose that folder in the UI, or run `node tools/discern.mjs connect ../discerny-example` in the app folder. Its README says how to put the sample data back after you've changed it.
 
-You can have more than one data folder, for example one to try things out in. Switch the UI with *Change folder*, and your agent with `node tools/discern.mjs connect <folder>` in the app folder; `node tools/discern.mjs connect` on its own shows which folder is connected.
+You can have more than one data folder, for example one to try things out in. Switch the UI with *Change folder*, and your agent with `node tools/discern.mjs connect <folder>` in the app folder, which records it as `data_folder` in `config.toml` there; `node tools/discern.mjs connect` on its own shows which folder is connected.
 
 ## What's in the folders
 
@@ -102,7 +102,7 @@ You can have more than one data folder, for example one to try things out in. Sw
 | `tools/` | `discern.mjs`, the helper: it connects the app to a data folder (`connect`, `new`), serves the UI in any browser (`serve`), upgrades one written by an older app (`upgrade`) and does the fiddly parts for source skills. Also its tests (`node --test tools/test/discern.test.mjs`) and `evals/`, test data for the skills. Both run on a copy of the test data folder, a fictional company called Pennywhistle Puppet Works: [discerny-example](https://github.com/StormSleeper/discerny-example), cloned beside the app folder and read as of its last commit, or the folder named in `DISCERNY_TEST_DATA` |
 | `migrations/` | One folder per change to the way a data folder is written, which `discern upgrade` runs in order. Its `README.md` is for whoever writes one |
 | `new_discerny_repo/` | The blank starter files a new data folder is copied from |
-| `data-folder.txt` | Where your data folder is, so your agent and the skills can find it. Written by `discern connect` and `discern new` |
+| `config.toml` | The app folder's settings. `data_folder` says where your data folder is, so your agent and the skills can find it; `discern connect` and `discern new` write it, and leave the rest of the file as you wrote it |
 
 `discerny.html` is the UI: Today, Inbox, Next actions, Waiting for, Upcoming, FYI, All items, Projects, People, Systems, Weekly review, Done and an Agent page, with search (Ctrl K), undo and dark mode. `discerny-old.html` is the earlier four-page version (Tasks, People, Projects, Systems). Both work on the same files, and the old one is kept for now while the new one is being tested.
 
