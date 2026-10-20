@@ -8,7 +8,7 @@ Everything lives in a folder of plain Markdown files on your own computer, kept 
 
 - **The files are the source of truth.** `TASKS.md`, `PEOPLE.md`, `PROJECTS.md`, `SYSTEMS.md` and a few others hold everything in a simple, readable format. You can open them in any text editor.
 - **The app and your data are separate folders.** The app folder (this one) holds the UI, the instructions, the helper and the skills. Your data folder holds only your files and can live anywhere. The app works on whichever data folder you connect it to: your own, or one for trying things out. You can replace the app with a newer version without touching your data.
-- **The UI is a local web page.** Open `discerny.html` in Chrome or Edge and choose your data folder. The page reads and saves the files in place. Nothing is uploaded anywhere.
+- **The UI is a local web page.** Open `discerny.html` in Chrome or Edge and choose your data folder, or run `node tools/discern.mjs serve` and open the page in any browser. Either way the page reads and saves the files in place. Nothing is uploaded anywhere.
 - **Your agent follows `AGENTS.md`.** That file tells any AI agent how the files are laid out and the rules for changing them. Point your agent at it and it can work alongside you.
 - **You talk to your agent through the files.** Every item in the UI has an "Ask agent" button. Notes you leave there queue up in `ASK-AGENT.md`, and the agent works through them the next time you run the `discern-ask-agent` skill.
 
@@ -54,7 +54,15 @@ On the first run, a source has no block in `SOURCES.md` yet, so its skill asks h
 
 1. **Get the app.** Clone this repository (`git clone https://github.com/StormSleeper/discerny-app.git`), or download it as a zip and unzip it, for example to `~/discerny-app`. This is the app folder. Your data goes in a folder of its own.
 2. **Make your data folder.** In the app folder, run `node tools/discern.mjs new ~/discerny-data` (any new or empty folder will do). It copies the blank starter files from `new_discerny_repo` and connects the app to the copy. Without Node, copy the `new_discerny_repo` folder somewhere private yourself. If you keep your data in git, use a private repository.
-3. **Open the UI.** Open `discerny.html` in Chrome or Edge, click to choose a folder, and pick your data folder. Allow the browser to edit files when it asks. To switch to another data folder later, use *Change folder* at the bottom of the sidebar.
+3. **Open the UI.** Open `discerny.html` in Chrome or Edge, click to choose a folder, and pick your data folder. Allow the browser to edit files when it asks. To switch to another data folder later, use *Change folder* at the bottom of the sidebar. To use another browser, or to skip choosing the folder, serve the page instead, as the next section says.
+
+### Serving the UI from the helper
+
+In the app folder, run `node tools/discern.mjs serve`. It prints an address such as `http://127.0.0.1:4790/`: open it in any browser, Firefox and Safari included, and the page opens straight on your connected data folder, with no folder to choose and nothing to allow. Leave the command running while you use the page, and stop it with Ctrl C. If the page says the server isn't running, start it again and click *Retry*; nothing you changed on screen is lost.
+
+The server answers only this computer (127.0.0.1), and only for the files the page itself uses. `--port <n>` picks another port, and `--dir <folder>` serves a different data folder without changing the connected one. To switch folders, stop the server, run `node tools/discern.mjs connect <folder>`, and start it again; *Change folder* in a served page says the same.
+
+Serve the page when you want a browser other than Chrome or Edge, or when your agent should open the UI itself. Opening the file needs no Node and works the same in Chrome and Edge.
 4. **Work through the starter project.** Your data folder starts with one project, *Discerny Setup*, and three tasks:
    - T-0001: connect your agent to your data folder. For Claude Code, that means starting it in the app folder with `claude --add-dir ~/discerny-data`.
    - T-0002: set up the `discern-ask-agent` skill. Claude Code already has it; the task says how to add it to a Claude project, and has a prompt to paste in for any other agent.
@@ -91,7 +99,7 @@ You can have more than one data folder, for example one to try things out in. Sw
 | `AGENTS.md` | Instructions for AI agents (`CLAUDE.md` points Claude to it) |
 | `SOURCE-SKILLS.md` | The rules every source skill follows |
 | `.claude/skills/` | The Discerny skills for Claude (a hidden folder) |
-| `tools/` | `discern.mjs`, the helper: it connects the app to a data folder (`connect`, `new`), upgrades one written by an older app (`upgrade`) and does the fiddly parts for source skills. Also its tests (`node --test tools/test/discern.test.mjs`) and `evals/`, test data for the skills. Both run on a copy of the test data folder, a fictional company called Pennywhistle Puppet Works: [discerny-example](https://github.com/StormSleeper/discerny-example), cloned beside the app folder and read as of its last commit, or the folder named in `DISCERNY_TEST_DATA` |
+| `tools/` | `discern.mjs`, the helper: it connects the app to a data folder (`connect`, `new`), serves the UI in any browser (`serve`), upgrades one written by an older app (`upgrade`) and does the fiddly parts for source skills. Also its tests (`node --test tools/test/discern.test.mjs`) and `evals/`, test data for the skills. Both run on a copy of the test data folder, a fictional company called Pennywhistle Puppet Works: [discerny-example](https://github.com/StormSleeper/discerny-example), cloned beside the app folder and read as of its last commit, or the folder named in `DISCERNY_TEST_DATA` |
 | `migrations/` | One folder per change to the way a data folder is written, which `discern upgrade` runs in order. Its `README.md` is for whoever writes one |
 | `new_discerny_repo/` | The blank starter files a new data folder is copied from |
 | `data-folder.txt` | Where your data folder is, so your agent and the skills can find it. Written by `discern connect` and `discern new` |

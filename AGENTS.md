@@ -50,7 +50,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | File | Holds | Agent reads |
 |---|---|---|
 | `SOURCE-SKILLS.md` | The protocol every source skill follows | when running or writing a source skill |
-| `tools/discern.mjs` | The helper: `connect` and `new` for the data folder, `upgrade` for one in an older Format, and the IDs, times, dedupe and writes source skills need | run it; never read it |
+| `tools/discern.mjs` | The helper: `connect` and `new` for the data folder, `serve` to open the UI in a browser, `upgrade` for one in an older Format, and the IDs, times, dedupe and writes source skills need | run it; never read it |
 | `migrations/` | One folder per Format change, which `discern upgrade` runs. Its `README.md` says how to write one | when an Upgrade stops at a Migration's `INSTRUCTIONS.md`, or when changing the Format |
 | `tools/evals/` | Recorded connector responses and expected results for testing the skills | only when testing a skill |
 | `.claude/skills/` | The `discern-*` skills for Claude | when running one |
@@ -203,6 +203,15 @@ Source skills bring outside items into the inbox. Discerny itself never talks to
 ```
 
 `IGNORED.md` lines are `ref | YYYY-MM-DD | reason`. Parse them from the right, because a `ref` may contain ` | `.
+
+## Testing a change to the UI
+
+When you change `discerny.html`, open it in a browser on a throwaway copy of a data folder and check the change there. A served page writes real files, so the copy is what keeps the user's own data out of the test.
+
+1. Make the copy in a temporary folder. If `discerny-example` sits beside the app folder, copy it (it is the test data folder). Otherwise run `node tools/discern.mjs connect` and note the `folder` it prints, then `node tools/discern.mjs new <tmp>`, which makes a blank folder and connects the app to it.
+2. Start `node tools/discern.mjs serve --dir <tmp> --port 0` in the background. Once listening it prints one line of JSON, `{"url", "folder"}`; check that `folder` is the copy.
+3. Open `url` in a browser (a headless one works) and try the change. The files in `<tmp>` show what the page saved, and an edit you make there shows up on the page within a few seconds.
+4. Stop the server and delete `<tmp>`. If you used `new`, run `node tools/discern.mjs connect <folder>` with the folder you noted, so the user's own folder is connected again.
 
 ## Writing a skill for Discerny
 

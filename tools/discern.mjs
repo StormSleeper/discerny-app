@@ -6,7 +6,7 @@
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
 //   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
-// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, migrate, upgrade.
+// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, migrate, upgrade, serve.
 // Input for match, add, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
@@ -16,6 +16,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
@@ -28,7 +29,7 @@ const DAY = 864e5;
 
 // ---------------------------------------------------------------- arguments and output
 const argv = process.argv.slice(2);
-const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '' };
+const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '', port: '4790' };
 const ARGS = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -39,6 +40,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--dry-run') OPT.dry = true;
   else if (a === '--one') OPT.one = true;
   else if (a === '--done') OPT.done = argv[++i] || '';
+  else if (a === '--port') OPT.port = argv[++i] || '';
   else ARGS.push(a);
 }
 function linked() { try { return fs.readFileSync(LINK, 'utf8').trim(); } catch (e) { return ''; } }
@@ -65,7 +67,7 @@ function loadCore() {
     const html = fs.readFileSync(p, 'utf8');
     const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
     if (a < 0 || b < a) continue;
-    const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS'];
+    const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS', 'FILES', 'WATCH'];
     const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
     try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
     catch (e) { fail(`the //<core> block in ${name} did not load: ${e.message}`); }
@@ -773,13 +775,67 @@ CMD.upgrade = function () {
   out(res);
 };
 
+// Serves the UI and the data folder to it on 127.0.0.1 until it is stopped, so the page works in any
+// browser and an Agent can open it. Prints {url, folder} once listening.
+CMD.serve = function () {
+  const send = (res, code, body, headers = {}) => {
+    res.writeHead(code, { 'Content-Type': typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json', ...headers });
+    res.end(typeof body === 'string' ? body : JSON.stringify(body));
+  };
+  // Only the files the page reads or writes, matched as written in the URL, so no name is ever resolved against the disk.
+  const NAMES = new Set([...Object.values(C.FILES), ...C.WATCH]);
+  const mtime = (f) => Math.floor(fs.statSync(f).mtimeMs);
+  const MAX_PUT = 10 * 1024 * 1024;
+  const server = http.createServer(async (req, res) => {
+    // A web page can reach 127.0.0.1 through DNS rebinding, but its requests then carry its own Host.
+    const port = server.address().port;
+    if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(req.headers.host)) return send(res, 403, 'forbidden');
+    if (req.method === 'GET' && req.url === '/') return send(res, 200, fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'), { 'Content-Type': 'text/html; charset=utf-8' });
+    if (req.method === 'GET' && req.url === '/api/info') return send(res, 200, { folder: DIR, name: path.basename(DIR), version: C.VERSION });
+    if (req.method === 'GET' && req.url === '/api/mtimes') return send(res, 200, Object.fromEntries([...NAMES].map(n => [n, fs.existsSync(fp(n)) ? mtime(fp(n)) : 0])));
+    if (req.method === 'GET' && req.url === '/api/drafts') {
+      const dr = fp('drafts');
+      const names = fs.existsSync(dr) ? fs.readdirSync(dr, { withFileTypes: true }).filter(e => e.isFile() && /\.(md|txt)$/i.test(e.name)).map(e => e.name) : [];
+      return send(res, 200, names.sort().map(n => ({ name: n, text: fs.readFileSync(path.join(dr, n), 'utf8'), mod: mtime(path.join(dr, n)) })));
+    }
+    const file = /^\/api\/file\/([^/]+)$/.exec(req.url);
+    if (!file || !NAMES.has(file[1])) return send(res, 404, 'not found');
+    const f = fp(file[1]);
+    if (req.method === 'GET') {
+      if (!fs.existsSync(f)) return send(res, 404, 'not found');
+      return send(res, 200, fs.readFileSync(f, 'utf8'), { 'X-Mtime': String(mtime(f)) });
+    }
+    if (req.method === 'PUT') {
+      if (!/^text\/plain\s*(;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, 'send the file as text/plain');
+      // The whole body is read even when it is too big, so the page gets the answer rather than a dropped connection.
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of req) { size += chunk.length; if (size <= MAX_PUT) chunks.push(chunk); }
+      if (size > MAX_PUT) return send(res, 413, `a file can be at most ${MAX_PUT} bytes`);
+      const body = Buffer.concat(chunks).toString('utf8');
+      // The page refuses to blank a file that has content, and so does the server.
+      if (!body.trim() && fs.existsSync(f) && fs.readFileSync(f, 'utf8').trim()) return send(res, 400, 'refusing to write an empty file over one with content');
+      const ifMtime = req.headers['if-mtime'];
+      if (ifMtime !== undefined && Number(ifMtime) !== (fs.existsSync(f) ? mtime(f) : 0)) return send(res, 409, 'the file changed since it was read');
+      const tmp = `${f}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, body);
+      fs.renameSync(tmp, f);
+      return send(res, 200, { mtime: mtime(f) });
+    }
+    send(res, 405, 'method not allowed');
+  });
+  server.listen(Number(OPT.port), '127.0.0.1', () => {
+    process.stdout.write(JSON.stringify({ url: `http://127.0.0.1:${server.address().port}/`, folder: DIR }) + '\n');
+  });
+};
+
 const cmd = ARGS[0];
 if (cmd === '--version' || cmd === 'version') {
   process.stdout.write((C.VERSION || 'unknown') + '\n');
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|ignore|note|ref|commit|log|check|migrate|upgrade> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|ignore|note|ref|commit|log|check|migrate|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
 if (cmd !== 'connect' && cmd !== 'new') {

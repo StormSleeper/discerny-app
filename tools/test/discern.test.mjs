@@ -685,3 +685,167 @@ test('a copy shifted by refresh-dates passes check', { skip: !hasDates }, () => 
 test('the test data folder is as of Monday 12 October 2026, however far the Example has been refreshed', { skip: !hasDates }, () => {
   assert.match(read(folder(), 'README.md'), /\*\*As of:\*\* Monday 12 October 2026/);
 });
+
+// ---------------------------------------------------------------- serve
+// Starts `serve` on any free port and resolves once it prints where it is listening.
+// Every server is stopped when its test ends.
+async function serve(t, dir) {
+  const { spawn } = await import('node:child_process');
+  const p = spawn(process.execPath, [CLI, 'serve', '--dir', dir, '--port', '0'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  t.after(() => p.kill());
+  let outText = '';
+  const said = await new Promise((resolve, reject) => {
+    p.stdout.on('data', (b) => { outText += b; if (outText.includes('\n')) resolve(JSON.parse(outText.split('\n')[0])); });
+    p.on('exit', (code) => reject(new Error(`serve exited ${code} before listening: ${outText}`)));
+  });
+  return said;
+}
+
+test('serve prints its URL and folder, and /api/info names the folder and the app version', async (t) => {
+  const d = folder();
+  const said = await serve(t, d);
+  assert.match(said.url, /^http:\/\/127\.0\.0\.1:\d+\/$/);
+  assert.equal(said.folder, d);
+  const r = await fetch(new URL('api/info', said.url));
+  assert.equal(r.status, 200);
+  const version = /var VERSION='([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'))[1];
+  assert.deepEqual(await r.json(), { folder: d, name: path.basename(d), version });
+});
+
+test('serve reads a file with its mtime, and a PUT writes it and returns the new mtime', async (t) => {
+  const d = folder();
+  const { url } = await serve(t, d);
+  const got = await fetch(new URL('api/file/TASKS.md', url));
+  assert.equal(got.status, 200);
+  assert.equal(await got.text(), read(d, 'TASKS.md'));
+  const before = Number(got.headers.get('X-Mtime'));
+  assert.equal(before, Math.floor(fs.statSync(path.join(d, 'TASKS.md')).mtimeMs));
+  fs.utimesSync(path.join(d, 'TASKS.md'), new Date(before - 60e3), new Date(before - 60e3));
+  const text = read(d, 'TASKS.md') + '- [ ] T-9999 Written through the server\n';
+  const put = await fetch(new URL('api/file/TASKS.md', url), { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: text });
+  assert.equal(put.status, 200);
+  const { mtime } = await put.json();
+  assert.equal(read(d, 'TASKS.md'), text);
+  assert.equal(mtime, Math.floor(fs.statSync(path.join(d, 'TASKS.md')).mtimeMs));
+  assert.notEqual(mtime, before - 60e3);
+  const again = await fetch(new URL('api/file/TASKS.md', url));
+  assert.equal(await again.text(), text);
+  assert.equal(Number(again.headers.get('X-Mtime')), mtime);
+});
+
+test('serve answers 404 for a known file that is missing', async (t) => {
+  const d = folder();
+  fs.rmSync(path.join(d, 'IGNORED.md'), { force: true });
+  const { url } = await serve(t, d);
+  assert.equal((await fetch(new URL('api/file/IGNORED.md', url))).status, 404);
+});
+
+test('serve refuses a PUT whose If-Mtime is stale with 409, and leaves the file as it was', async (t) => {
+  const d = folder();
+  const { url } = await serve(t, d);
+  const got = await fetch(new URL('api/file/TASKS.md', url));
+  const seen = Number(got.headers.get('X-Mtime')), before = await got.text();
+  const put = (ifMtime) => fetch(new URL('api/file/TASKS.md', url), { method: 'PUT', headers: { 'Content-Type': 'text/plain', 'If-Mtime': String(ifMtime) }, body: before + '- [ ] T-9999 Overwrites\n' });
+  const stale = await put(seen - 1000);
+  assert.equal(stale.status, 409);
+  assert.equal(read(d, 'TASKS.md'), before);
+  assert.equal(Math.floor(fs.statSync(path.join(d, 'TASKS.md')).mtimeMs), seen);
+  assert.equal((await put(seen)).status, 200);
+});
+
+// A request sent exactly as written: fetch would tidy away `..` and never sends a Host of our choosing.
+async function raw(url, reqPath, { method = 'GET', headers = {}, body } = {}) {
+  const http = await import('node:http');
+  const u = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: u.hostname, port: u.port, method, path: reqPath, headers }, (res) => {
+      let text = '';
+      res.on('data', (b) => { text += b; });
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
+test('serve refuses unknown names, paths out of the folder and a Host that is not its own', async (t) => {
+  const d = folder();
+  const { url } = await serve(t, d);
+  for (const p of ['/api/file/README.md', '/api/file/../TASKS.md', '/api/file/..%2fTASKS.md', '/api/file/%2e%2e%2fTASKS.md', '/api/file/drafts%2fx.md', '/api/file/..%5cTASKS.md', '/api/file/TASKS.md/']) {
+    assert.equal((await raw(url, p)).status, 404, p);
+  }
+  const port = new URL(url).port;
+  for (const host of ['evil.example', `evil.example:${port}`, '127.0.0.1:1', `127.0.0.2:${port}`]) {
+    const r = await raw(url, '/api/file/TASKS.md', { headers: { Host: host } });
+    assert.equal(r.status, 403, host);
+    assert.equal(r.text.includes('# Tasks'), false, host);
+  }
+  for (const host of [`127.0.0.1:${port}`, `localhost:${port}`]) {
+    assert.equal((await raw(url, '/api/file/TASKS.md', { headers: { Host: host } })).status, 200, host);
+  }
+  const ok = await raw(url, '/api/info');
+  assert.equal(Object.keys(ok.headers).some(h => h.startsWith('access-control-')), false);
+});
+
+test('serve refuses a PUT that is empty over a file with content, not text/plain, or over 10 MB, and writes nothing', async (t) => {
+  const d = folder();
+  const { url } = await serve(t, d);
+  const before = read(d, 'TASKS.md');
+  const put = (body, type = 'text/plain') => fetch(new URL('api/file/TASKS.md', url), { method: 'PUT', headers: { 'Content-Type': type }, body });
+  assert.equal((await put('')).status, 400);
+  assert.equal((await put(before + '- [ ] T-9999 Sent as JSON\n', 'application/json')).status, 415);
+  assert.equal((await put(before + 'x'.repeat(10 * 1024 * 1024))).status, 413);
+  assert.equal(read(d, 'TASKS.md'), before);
+  assert.deepEqual(fs.readdirSync(d).filter(f => f.endsWith('.tmp')), []);
+});
+
+test('serve gives the mtime of every file the page reads in one answer, 0 for a missing one', async (t) => {
+  const d = folder();
+  fs.utimesSync(path.join(d, 'PEOPLE.md'), new Date('2026-10-01T09:00:00Z'), new Date('2026-10-01T09:00:00Z'));
+  fs.rmSync(path.join(d, 'IGNORED.md'), { force: true });
+  const { url } = await serve(t, d);
+  const m = await (await fetch(new URL('api/mtimes', url))).json();
+  assert.equal(m['PEOPLE.md'], Date.parse('2026-10-01T09:00:00Z'));
+  assert.equal(m['IGNORED.md'], 0);
+  for (const f of ['TASKS.md', 'INBOX.md', 'DONE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md']) {
+    assert.equal(m[f], fs.existsSync(path.join(d, f)) ? Math.floor(fs.statSync(path.join(d, f)).mtimeMs) : 0, f);
+  }
+  assert.equal(Object.keys(m).length, 12);
+});
+
+test('serve lists the Drafts, .md and .txt only, by name, and none when there is no drafts folder', async (t) => {
+  const d = folder(), dr = path.join(d, 'drafts');
+  fs.rmSync(dr, { recursive: true, force: true });
+  const { url } = await serve(t, d);
+  assert.deepEqual(await (await fetch(new URL('api/drafts', url))).json(), []);
+  fs.mkdirSync(path.join(dr, 'sub.md'), { recursive: true });
+  fs.writeFileSync(path.join(dr, 'b-reply.md'), 'Hi Ana,\n');
+  fs.writeFileSync(path.join(dr, 'a-note.TXT'), 'Plain text\n');
+  fs.writeFileSync(path.join(dr, 'c.json'), '{}');
+  fs.utimesSync(path.join(dr, 'b-reply.md'), new Date('2026-10-02T08:00:00Z'), new Date('2026-10-02T08:00:00Z'));
+  const list = await (await fetch(new URL('api/drafts', url))).json();
+  assert.deepEqual(list.map(x => x.name), ['a-note.TXT', 'b-reply.md']);
+  assert.deepEqual(list[1], { name: 'b-reply.md', text: 'Hi Ana,\n', mod: Date.parse('2026-10-02T08:00:00Z') });
+});
+
+test('serve refuses a folder in another Format, or no folder, with exit 2, and never listens', () => {
+  // A server that did start would never exit, so the timeout turns that into a failure.
+  const opts = { encoding: 'utf8', timeout: 10e3 };
+  for (const format of ['0.0.1.5', '0.2.0.1', 'next']) {
+    const r = spawnSync(process.execPath, [CLI, 'serve', '--dir', folderInFormat(format), '--port', '0'], opts);
+    assert.equal(r.status, 2, `${format}: ${r.stdout}`);
+    assert.match(JSON.parse(r.stdout).error, new RegExp(`Format ${format}`));
+  }
+  const a = app();
+  const r = spawnSync(process.execPath, [path.join(a, 'tools', 'discern.mjs'), 'serve', '--port', '0'], { ...opts, env: { ...process.env, DISCERNY_DIR: '' } });
+  assert.equal(r.status, 2, r.stdout);
+  assert.match(JSON.parse(r.stdout).error, /no data folder is connected/);
+});
+
+test('serve gives the UI at /', async (t) => {
+  const { url } = await serve(t, folder());
+  const r = await fetch(url);
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get('Content-Type'), /^text\/html/);
+  assert.equal(await r.text(), fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'));
+});
