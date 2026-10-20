@@ -398,12 +398,12 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.1.1.14'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.1.1.15'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
-var URG={today:'Today',week:'This week',soon:'Next 2 weeks',later:'Later',fyi:'FYI / awareness'};
+var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','week','soon','later','fyi'];
 var TYPES=['Task','Meeting','Process','Document','FYI'];
-var TYPE_LABEL={Task:'Tasks',Meeting:'Meetings',Process:'Processes & SOPs',Document:'Documents to read',FYI:'FYI / awareness'};
+var TYPE_LABEL={Task:'Tasks',Meeting:'Meetings',Process:'Processes & SOPs',Document:'Documents to read',FYI:'FYI'};
 var STATUS=['To do','In progress','Waiting'];
 var ITEM_RE=/^- \[( |x)\] (T-\d+) (.*)$/;
 function parseMeta(s){var m={};s.split(';').forEach(function(p){var i=p.indexOf(':');if(i>0)m[p.slice(0,i).trim()]=p.slice(i+1).trim();else if(p.trim())(m[' bare']=m[' bare']||[]).push(p.trim());});return m;}
@@ -544,13 +544,13 @@ function rParse(text){var lines=String(text||'').replace(/\r/g,'').split('\n');i
 function kindOf(id){return String(id).split('-')[0];}
 var REL_PAIRS={'T|SYS':'concerns','T|P':'involves','P|SYS':'owns','PRJ|SYS':'uses'};
 function relLine(a,b){
-  if(a===b)return {err:'An item cannot be linked to itself.'};
+  if(a===b)return {err:'Nothing can be related to itself.'};
   var ka=kindOf(a),kb=kindOf(b);
   if(ka===kb&&ka!=='PRJ'){var s=[a,b].sort();return {line:'- '+s[0]+' ~ '+s[1]+' | related'};}
   var k1=ka+'|'+kb,k2=kb+'|'+ka;
   if(REL_PAIRS[k1])return {line:'- '+a+' -> '+b+' | '+REL_PAIRS[k1]};
   if(REL_PAIRS[k2])return {line:'- '+b+' -> '+a+' | '+REL_PAIRS[k2]};
-  return {err:'Cannot link '+ka+' to '+kb+' (projects are linked to tasks with the Project field).'};}
+  return {err:'Cannot relate '+ka+' to '+kb+' (an item joins a project through its Project field).'};}
 // versions compare part by part, a missing part counting as 0; 'next' (an unlanded Migration) is newer than any
 function versionCmp(a,b){if(a===b)return 0;if(a==='next')return 1;if(b==='next')return -1;
   var x=String(a).split('.'),y=String(b).split('.');
@@ -617,6 +617,9 @@ function quickItem(q,o){
 // The data folder files the page reads and writes; `discern serve` serves these and no others.
 var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', ignored: 'IGNORED.md' };
 var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
+// The header the page writes when it creates a missing RELATIONSHIPS.md or ASK-AGENT.md: the starter file's, word for word.
+var REL_HEAD = ['# Relationships', '<!-- One line per relationship, stored once (shown on both): `- A ~ B | related` (symmetric) or `- A -> B | type` (involves, concerns, owns, uses). Validate: both IDs exist, no duplicates, nothing related to itself. `dep:` on items is separate. -->', ''];
+var ASK_HEAD = ['# Ask agent queue', '<!-- The agent queue. One line per agent request: - ID | YYYY-MM-DD HH:MM | text. Written by discerny.html. The agent removes a line once it is actioned (skill: discern-ask-agent) and records it in ASK-AGENT-LOG.md. -->', ''];
 //</core>
 
 /* ===================== constants ===================== */
@@ -624,8 +627,6 @@ var EDEF = {
   PRJ: { file: 'PROJECTS.md', key: 'projects', word: 'project', Word: 'Project', types: ['Project', 'Workstream', 'Pod'], sts: ['Active', 'On hold', 'Done'], pk: 'parent' },
   SYS: { file: 'SYSTEMS.md', key: 'systems', word: 'system', Word: 'System', types: ['Platform', 'Pipeline', 'Registry', 'Application', 'Instrument', 'Other'], sts: ['Live', 'In build', 'Delayed', 'Retired'], pk: 'part-of' }
 };
-var REL_HEAD = ['# Relationships', '<!-- One line per link, stored once (shown on both items): `- A ~ B | related` (symmetric) or `- A -> B | type` (involves, concerns, owns, uses). Validate: both IDs exist, no duplicates, no self-links. `dep:` on tasks is separate. -->', ''];
-var ASK_HEAD = ['# Ask agent queue', '<!-- One line per pending note: - ID | YYYY-MM-DD HH:MM | text. Written by discerny.html. The agent removes a line once it is actioned (skill: discern-ask-agent) and records it in ASK-AGENT-LOG.md. -->', ''];
 var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, ignored: function (t) { return { text: String(t || '') }; } };
 function serKey(k, m) {
   if (k === 'tasks' || k === 'inbox' || k === 'done') return serialize(m);
@@ -1089,7 +1090,7 @@ var OPS = {
     });
   },
   addRel: function (line) {
-    return op('Link', ['rels'], function (M) { var R = M.rels, l = remapLine(line); if (R.lines.indexOf(l) >= 0) return; if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); });
+    return op('Relate', ['rels'], function (M) { var R = M.rels, l = remapLine(line); if (R.lines.indexOf(l) >= 0) return; if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); });
   },
   removeRel: function (line) {
     return op('Unlink', ['rels'], function (M) { var R = M.rels, k = R.lines.indexOf(remapLine(line)); if (k >= 0) { R.lines.splice(k, 1); relRefresh(R); } });
@@ -1188,10 +1189,10 @@ var OPS = {
     });
   },
   addEntLink: function (kind, id, v) {
-    return op('Add link to ' + id, [EDEF[kind].key], function (M) { var e = entIn(M, kind, id); if (e && !e.subs.some(function (s) { return s.k === 'link' && s.v === v; })) e.subs.push({ k: 'link', v: v }); });
+    return op('Add URL to ' + id, [EDEF[kind].key], function (M) { var e = entIn(M, kind, id); if (e && !e.subs.some(function (s) { return s.k === 'link' && s.v === v; })) e.subs.push({ k: 'link', v: v }); });
   },
   removeEntLink: function (kind, id, v) {
-    return op('Remove link from ' + id, [EDEF[kind].key], function (M) {
+    return op('Remove URL from ' + id, [EDEF[kind].key], function (M) {
       var e = entIn(M, kind, id);
       if (!e) return;
       var k = e.subs.findIndex(function (s) { return s.k === 'link' && s.v === v; });
@@ -1558,7 +1559,7 @@ function whoLabel(i) { return isWaiting(i) ? 'Waiting on' : (i.meta.ty === 'Meet
 function realWho(i) { var w = i.meta.who || ''; return w === 'Unassigned' ? '' : w; }
 
 /* "When" is worked out from due; urg only matters when there is no due date. */
-var URGW = { today: ['Today, no date', 'warn', 1], week: ['This week', 'soft', 2], soon: ['Next 2 weeks', 'soft', 3], later: ['Later', 'soft', 5], fyi: ['FYI', 'soft', 6] };
+var URGW = { today: ['Today, no date', 'warn', 1], week: ['This week', 'soft', 2], soon: ['Soon', 'soft', 3], later: ['Later', 'soft', 5], fyi: ['FYI', 'soft', 6] };
 function when(i) {
   var due = i.meta.due || '';
   if (isDay(due)) {
@@ -1812,14 +1813,14 @@ function reviewSteps() {
   var gp = activePeople().filter(function (p) { return gaps(p).length; }).length;
   var asks = S.m.asks.notes.length;
   var defs = [
-    ['inbox', 'Empty the inbox', 'Accept, correct or dismiss everything the agent proposed.', inbox ? inbox + ' to triage' : 'Clear', inbox ? 'warn' : 'ok', 'Open Inbox', 'inbox'],
+    ['inbox', 'Empty the inbox', 'Accept, correct or dismiss everything the agent proposed.', inbox ? inbox + ' to clarify' : 'Clear', inbox ? 'warn' : 'ok', 'Open Inbox', 'inbox'],
     ['today', 'Deal with overdue items', 'Re-date anything that slipped. Nothing should stay overdue.', overdue ? overdue + ' overdue' : 'None overdue · ' + dueToday + ' due today', overdue ? 'danger' : 'ok', 'Open Today', 'today'],
     ['waiting', 'Chase what you are waiting for', 'Anything waiting more than two weeks probably needs a nudge.', waiting.length + ' waiting · ' + long + ' over 14 days', long ? 'warn' : 'ok', 'Open Waiting for', 'waiting'],
     ['projects', 'Give every project a next action', 'A project without a next action is stuck.', stuck ? plural(stuck, 'project') + ' without a next action' : 'All ' + active.length + ' have one', stuck ? 'danger' : 'ok', 'Open Projects', 'projects'],
     ['undated', 'Date or park undated actions', 'Give each one a due date, or set it to Later to park it.', undated ? undated + ' without a date' : 'All dated or parked', undated ? 'warn' : 'ok', 'Open Next actions', 'next'],
     ['fyi', 'File the FYIs', 'Read them, then acknowledge so they leave your lists.', fyi ? fyi + ' to file' : 'Nothing to file', fyi ? 'warn' : 'ok', 'Open FYI', 'fyi'],
     ['people', 'Fill in missing people details', 'Colleagues need organisation, department, job title and manager.', gp ? gp + ' missing details' : 'All complete', gp ? 'warn' : 'ok', 'Open People', 'people-gaps'],
-    ['claude', 'Clear the agent queue', 'Run discern-ask-agent so the agent works through your notes.', asks ? plural(asks, 'note') + ' queued' : 'Queue empty', asks ? 'warn' : 'ok', 'Open Agent', 'claude']
+    ['claude', 'Clear the agent queue', 'Run discern-ask-agent so the agent works through your requests.', asks ? plural(asks, 'request') + ' queued' : 'Queue empty', asks ? 'warn' : 'ok', 'Open Agent', 'claude']
   ];
   return defs.map(function (x, k) { return { key: x[0], n: k + 1, title: x[1], help: x[2], count: x[3], tone: x[4], attention: x[4] !== 'ok', done: !!rs[x[0]], action: x[5], go: x[6] }; });
 }
@@ -1829,7 +1830,7 @@ var CMDS = [
   ['Go to Today', 'go', 'today'], ['Go to Inbox', 'go', 'inbox'], ['Go to Next actions', 'go', 'next'], ['Go to Waiting for', 'go', 'waiting'],
   ['Go to Upcoming', 'go', 'upcoming'], ['Go to FYI', 'go', 'fyi'], ['Go to All items', 'go', 'all'], ['Go to Projects', 'go', 'projects'], ['Go to People', 'go', 'people'],
   ['Go to Systems', 'go', 'systems'], ['Start the weekly review', 'go', 'review'], ['Go to Done', 'go', 'done'], ['Open the agent queue', 'go', 'claude'],
-  ['Add a task', 'cmd', 'quickadd'], ['Appearance: follow Windows', 'cmd', 'theme-system'], ['Appearance: light', 'cmd', 'theme-light'], ['Appearance: dark', 'cmd', 'theme-dark'],
+  ['Add an item', 'cmd', 'quickadd'], ['Appearance: follow Windows', 'cmd', 'theme-system'], ['Appearance: light', 'cmd', 'theme-light'], ['Appearance: dark', 'cmd', 'theme-dark'],
   ['Sidebar: expand or collapse', 'cmd', 'side'], ['Keyboard shortcuts', 'cmd', 'keys'], ['Read the folder again', 'cmd', 'sync']
 ];
 function search(qs) {
@@ -1937,7 +1938,7 @@ function vRow(i, o) {
   if (S.fresh.has(i.id)) badges += badge('Updated', 'info');
   if (!done) {
     var bl = openBlockers(i);
-    if (bl.length) badges += badge('Blocked by ' + bl.join(', '), 'danger');
+    if (bl.length) badges += badge('Depends on ' + bl.join(', '), 'danger');
     if (waiting && !inbox) { var a = age(i); badges += badge('Waiting ' + plural(a, 'day'), a >= 14 ? 'warn' : 'info'); }
     if (i.meta.st === 'In progress') badges += badge('In progress');
     if (i.meta.p === '1') badges += badge('High', 'flag');
@@ -2017,14 +2018,14 @@ function vCards() {
   var card = function (k, v, vcls, s, act, a) { return '<button type="button" class="card" data-act="' + act + '"' + dv(act === 'open' ? 'id' : 'v', a) + '><span class="k">' + esc(k) + '</span><span class="v' + (vcls ? ' ' + vcls : '') + '">' + esc(v) + '</span><span class="s">' + esc(s) + '</span></button>'; };
   return '<div class="cards" data-k="cards">' +
     card('Meetings', meetToday.length ? meetToday.length + ' today' : 'None today', '', nextM ? 'Next: ' + when(nextM).label + ', ' + clip(nextM.title, 60) : 'Nothing scheduled', nextM ? 'open' : 'go', nextM ? nextM.id : 'upcoming') +
-    card('Inbox', inbox ? inbox + ' to triage' : 'Clear', inbox ? 'accent' : '', 'Proposed by your source skills', 'go', 'inbox') +
+    card('Inbox', inbox ? inbox + ' to clarify' : 'Clear', inbox ? 'accent' : '', 'Proposed by your source skills', 'go', 'inbox') +
     card('Waiting for', waiting.length + ' open', '', waiting.length ? 'Oldest: ' + (realWho(waiting[0]) || 'someone') + ', ' + plural(age(waiting[0]), 'day') : 'Nobody', 'go', 'waiting') +
-    card('Agent', plural(asks, 'note') + ' queued', 'claude', drafts ? plural(drafts, 'draft') + ' ready to review' : 'No drafts waiting', 'go', 'claude') +
+    card('Agent', plural(asks, 'request') + ' queued', 'claude', drafts ? plural(drafts, 'draft') + ' ready to review' : 'No drafts waiting', 'go', 'claude') +
     '</div>';
 }
 function vQuick() {
   var text = S.qa || '', q = text.trim() ? parseQuick(text, S.qaType) : null;
-  var h = '<div class="qa" data-k="qa"><label for="qa-in">Add a task</label><div class="qa-row">' +
+  var h = '<div class="qa" data-k="qa"><label for="qa-in">Add an item</label><div class="qa-row">' +
     '<input id="qa-in" class="in" type="text" autocomplete="off" spellcheck="true" data-in="qa" data-kd="qa" value="' + esc(text) + '" placeholder="Call @Sam about the budget +launch #finance mon 10:00 !high" aria-describedby="qa-help">' +
     bt('More', 'qa-more', { attrs: ' aria-expanded="' + S.qaMore + '" aria-controls="qa-more"' }) + bt('Add', 'qa-add', { cls: 'primary' }) + '</div>';
   if (S.qaMore) {
@@ -2052,8 +2053,8 @@ function vQuick() {
 function viewInbox() {
   var l = inboxList(), r = lastRefresh();
   return {
-    title: 'Inbox', sub: plural(l.length, 'proposal') + (r ? ' · last refresh ' + r : ''),
-    body: '<div class="list">' + vSec('triage', 'To triage', rowsOf(l), { hint: 'oldest first', empty: 'Inbox zero. Nothing is waiting to be triaged.' }) + '</div>'
+    title: 'Inbox', sub: plural(l.length, 'proposal') + (r ? ' · last run ' + r : ''),
+    body: '<div class="list">' + vSec('triage', 'To clarify', rowsOf(l), { hint: 'oldest first', empty: 'Inbox zero. Nothing is waiting to be clarified.' }) + '</div>'
   };
 }
 function viewNext() {
@@ -2078,12 +2079,12 @@ function viewNext() {
   } else {
     b += vSec('all', 'All actions', rowsOf(sortItems(ready)), { empty: 'Nothing to do. Enjoy it.' });
   }
-  if (blocked.length) b += vSec('blocked', 'Blocked', rowsOf(sortItems(blocked)), { hint: 'starts when the blocking task is done' });
+  if (blocked.length) b += vSec('blocked', 'Waiting on a dependency', rowsOf(sortItems(blocked)), { hint: 'each can start when its dependency is done' });
   if (!b) b = vSec('all', 'All actions', [], { empty: 'Nothing to do. Enjoy it.' });
   var tools = '<div class="seg" role="group" aria-label="Group by">' + [['project', 'By project'], ['kind', 'By kind'], ['none', 'One list']].map(function (g) {
     return '<button type="button" data-act="group" data-v="' + g[0] + '"' + pressed(S.group === g[0]) + '>' + g[1] + '</button>';
   }).join('') + '</div>';
-  return { title: 'Next actions', sub: ready.length + ' you can do now · ' + blocked.length + ' blocked', tools: tools, qa: true, body: '<div class="list">' + b + '</div>' };
+  return { title: 'Next actions', sub: ready.length + ' you can do now · ' + blocked.length + ' waiting on a dependency', tools: tools, qa: true, body: '<div class="list">' + b + '</div>' };
 }
 function viewWaiting() {
   var list = openList().filter(isWaiting), by = {};
@@ -2189,12 +2190,12 @@ function viewProject(id) {
   var uses = relsOf(id).filter(function (r) { return kindOf(r.other) === 'SYS'; }).map(function (r) { return r.other; });
   var hasNext = open.some(isNext), blocked = open.filter(function (i) { return openBlockers(i).length; }).length;
   var st = e.meta.st || 'Active';
-  var pills = badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + (hasNext ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) + (blocked ? badge(blocked + ' blocked', 'danger') : '') + '<span class="sp id">' + id + '</span>';
+  var pills = badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + (hasNext ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) + (blocked ? badge(blocked + ' waiting on a dependency', 'danger') : '') + '<span class="sp id">' + id + '</span>';
   var parent = e.meta.parent ? entById(e.meta.parent) : null, kids = kidsOf(id);
   var facts = fact('Next date', [dated[0] ? fv(when(dated[0]).label + ', ' + dated[0].title, 'open', dated[0].id) : fv('Nothing dated')]) +
     fact('Key meeting', [meeting ? fv(when(meeting).label + ', ' + meeting.title, 'open', meeting.id) : fv('None scheduled')]) +
     fact('People involved', people.length ? people.map(function (n) { var p = personByName(n); return p && p.meta.id ? fv(n, 'person', p.meta.id) : fv(n); }) : [fv('Nobody yet')]) +
-    fact('Uses', uses.length ? uses.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No systems linked')]);
+    fact('Uses', uses.length ? uses.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No systems related')]);
   if (parent) facts += fact('Part of', [fv(parent.name, 'ent', parent.meta.id)]);
   if (kids.length) facts += fact('Sub-projects', kids.map(function (k) { return fv(k.name, 'ent', k.meta.id); }));
   var ls = linksOf(e);
@@ -2223,10 +2224,10 @@ function viewSystem(id) {
   var projects = relsOf(id).filter(function (r) { return kindOf(r.other) === 'PRJ'; }).map(function (r) { return r.other; });
   var owners = relsOf(id).filter(function (r) { return r.type === 'owns' && kindOf(r.other) === 'P'; }).map(function (r) { return r.other; }).filter(function (pid) { var p = personById(pid); return !(p && owner && p === owner); });
   var st = e.meta.st || '';
-  var facts = fact('Owner', [owner && owner.meta.id ? fv(owner.name, 'person', owner.meta.id) : fv(e.meta.owner || 'Not set')].concat(owners.map(function (x) { return fv((labelOf(x) || x) + ' (linked)', 'person', x); }))) +
+  var facts = fact('Owner', [owner && owner.meta.id ? fv(owner.name, 'person', owner.meta.id) : fv(e.meta.owner || 'Not set')].concat(owners.map(function (x) { return fv((labelOf(x) || x) + ' (related)', 'person', x); }))) +
     fact('Part of', [parent ? fv(parent.name, 'ent', parent.meta.id) : fv('Stands alone')]) +
     fact('Parts', parts.length ? parts.map(function (x) { return fv(x.name, 'ent', x.meta.id); }) : [fv('None')]) +
-    fact('Used by', projects.length ? projects.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No projects linked')]);
+    fact('Used by', projects.length ? projects.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No projects related')]);
   var ls = linksOf(e);
   var box = '<div class="entity" data-k="entity"><div class="pills">' + (st ? badge(st, ST_TONE[st]) : badge('No status', 'soft')) + badge(e.meta.type || 'System') + '<span class="sp id">' + id + '</span></div>' +
     notesOf(e).map(function (t) { return '<div class="ent-note">' + esc(t) + '</div>'; }).join('') + '<div class="facts">' + facts + '</div>' +
@@ -2254,7 +2255,7 @@ function viewPerson(id) {
   var pills = (isExt(p) ? badge('External', 'info') : '') + (p.meta.st === 'Left' ? badge('Left') : '') +
     (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : (p.meta.st === 'Left' ? '' : badge('Details complete', 'ok'))) + (p.grp ? badge(p.grp, 'soft') : '') + '<span class="sp id">' + esc(id) + '</span>';
   var facts = fact('Organisation', [fv([p.meta.co, p.meta.dept].filter(Boolean).join(' › ') || 'Not set')]) +
-    fact('Reports to', chain.length ? chain : [fv(isExt(p) ? 'External contact' : 'Not set')]) +
+    fact('Reports to', chain.length ? chain : [fv(isExt(p) ? 'External' : 'Not set')]) +
     fact('Direct reports', reports.length ? reports.map(function (x) { return fv(x.name, x.meta.id ? 'person' : '', x.meta.id); }) : [fv('None')]) +
     fact('Owns', owns.length ? owns.map(function (x) { return fv(x.name, 'ent', x.meta.id); }) : [fv('No systems')]) +
     fact('Last checked', [fv(p.meta.chk ? fmtY(p.meta.chk) : 'Never')]);
@@ -2273,7 +2274,7 @@ function viewPerson(id) {
   var inbox = theirs.filter(function (i) { return whereOf(i.id) === 'inbox' && !isWaiting(i); });
   if (inbox.length) b += vSec('pi', 'In your inbox', rowsOf(inbox, { hidePerson: true }));
   var linked = relsOf(id).filter(function (r) { return kindOf(r.other) === 'T'; }).map(function (r) { return item(r.other); }).filter(function (i) { return i && whereOf(i.id) === 'open' && i.meta.who !== name; });
-  if (linked.length) b += vSec('pl', 'Linked to ' + first, rowsOf(linked));
+  if (linked.length) b += vSec('pl', 'Related to ' + first, rowsOf(linked));
   var shown = {};
   theirs.concat(linked).forEach(function (i) { shown[i.id] = 1; });
   var re = new RegExp('\\b' + reEsc(first) + '\\b');
@@ -2322,7 +2323,7 @@ function viewProjects() {
     var blocked = open.filter(function (i) { return openBlockers(i).length; }).length;
     var dated = sortByDue(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) >= 0; }));
     var st = e.meta.st || 'Active', live = st === 'Active';
-    var badges = (live ? (next.length ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) : '') + (blocked ? badge(blocked + ' blocked', 'danger') : '') + (waiting.length ? badge(waiting.length + ' waiting', 'info') : '') + (inbox.length ? badge(inbox.length + ' in inbox') : '') + (asksFor(id).length ? badge(asksFor(id).length + ' for agent', 'claude') : '');
+    var badges = (live ? (next.length ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) : '') + (blocked ? badge(blocked + ' waiting on a dependency', 'danger') : '') + (waiting.length ? badge(waiting.length + ' waiting', 'info') : '') + (inbox.length ? badge(inbox.length + ' in inbox') : '') + (asksFor(id).length ? badge(asksFor(id).length + ' for agent', 'claude') : '');
     return '<article class="ecard" data-k="c-' + id + '"' + (o.dep ? ' style="margin-left:' + Math.min(o.dep, 3) * 18 + 'px"' : '') + '><div class="pills">' + badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + '<span class="sp id">' + id + '</span></div>' +
       (e.meta.parent && entById(e.meta.parent) ? '<div class="path">Part of ' + esc(entPath(e.meta.parent)) + '</div>' : '') +
       '<button type="button" class="nm" data-act="ent" data-id="' + id + '">' + esc(e.name) + '</button>' +
@@ -2365,7 +2366,7 @@ function viewPeople() {
     var g = gaps(p), pid = p.meta.id || '';
     return '<div class="tr" role="listitem" data-k="p-' + esc(pid || p.name) + '"><div><button type="button" class="nm" data-act="person" data-id="' + esc(pid) + '"' + (pid ? '' : ' disabled') + '>' + esc(p.name + (isMe(p) ? ' (you)' : '')) + '</button><div class="hint">' + esc(p.meta.title || 'No job title') + '</div></div>' +
       '<div class="c2">' + esc([p.meta.co, p.meta.dept].filter(Boolean).join(' › ') || 'Not set') + (isExt(p) ? ' ' + badge('External', 'info') : '') + '</div>' +
-      '<div class="c3">' + esc(p.meta.mgr || (isExt(p) ? 'External contact' : 'Not set')) + '</div>' +
+      '<div class="c3">' + esc(p.meta.mgr || (isExt(p) ? 'External' : 'Not set')) + '</div>' +
       '<div class="r">' + (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : '') + (p.meta.st === 'Left' ? badge('Left') : '') + '<span class="hint">' + personOpenCount(p) + ' open</span></div></div>';
   };
   var sorted = list.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
@@ -2426,7 +2427,7 @@ function viewClaude() {
     return '<div class="logrow" data-k="l-' + esc(l.raw) + '"><span class="when">' + esc(fmtDT(l.at)) + '</span><div class="grow" style="flex:1 1 260px;min-width:0"><div>' + esc(l.did) + '</div><div class="hint">You asked: ' + esc(l.note) + '</div></div>' + (exists(l.id) ? lk(l.id, 'any', { id: l.id }) : '<span class="id">' + esc(l.id) + '</span>') + '</div>';
   }).join('') + '</div>'] : [], { count: log.length, empty: 'Nothing yet.' });
   var r = lastClaudeRun();
-  return { title: 'Agent', sub: plural(q.length, 'note') + ' queued' + (r ? ' · last actioned ' + r : ''), body: '<div class="list">' + b + '</div>' };
+  return { title: 'Agent', sub: plural(q.length, 'request') + ' queued' + (r ? ' · last actioned ' + r : ''), body: '<div class="list">' + b + '</div>' };
 }
 
 /* ===================== the details panel ===================== */
@@ -2438,7 +2439,7 @@ function panelHead(id, kindText, openPage) {
     '<button type="button" class="xbtn" data-act="close" aria-label="Close details" title="Close (Esc)">' + ic('x') + '</button></div>';
 }
 function vTabs(id, nLinks, nAsks) {
-  return '<div class="tabs" data-k="tabs" role="tablist" aria-label="Sections">' + [['details', 'Details'], ['links', 'Links' + (nLinks ? ' (' + nLinks + ')' : '')], ['claude', 'Agent' + (nAsks ? ' (' + nAsks + ')' : '')]].map(function (t) {
+  return '<div class="tabs" data-k="tabs" role="tablist" aria-label="Sections">' + [['details', 'Details'], ['links', 'Relationships' + (nLinks ? ' (' + nLinks + ')' : '')], ['claude', 'Agent' + (nAsks ? ' (' + nAsks + ')' : '')]].map(function (t) {
     var on = S.tab === t[0];
     return '<button type="button" role="tab" class="tab" id="tab-' + t[0] + '"' + (on ? ' aria-controls="tp-' + t[0] + '"' : '') + ' aria-selected="' + on + '" tabindex="' + (on ? '0' : '-1') + '" data-act="tab" data-v="' + t[0] + '">' + esc(t[1]) + '</button>';
   }).join('') + '</div>';
@@ -2447,11 +2448,11 @@ function tabPanel(name, html) { return '<div role="tabpanel" id="tp-' + name + '
 function fRow(label, forId, ctl, top) { return '<div class="f' + (top ? ' top' : '') + '" data-k="row-' + slug(forId || label) + '">' + (forId ? '<label class="lbl" for="' + forId + '">' + esc(label) + '</label>' : '<span class="lbl">' + esc(label) + '</span>') + '<div class="ctl">' + ctl + '</div></div>'; }
 function vLinked(id) {
   var rels = relsOf(id);
-  return '<section data-k="sec-linked"><h3 class="h3">Linked</h3>' + (rels.length ? rels.map(function (r) {
+  return '<section data-k="sec-linked"><h3 class="h3">Related</h3>' + (rels.length ? rels.map(function (r) {
     var lab = labelOf(r.other);
     return '<div class="lrow" data-k="l-' + esc(r.raw) + '"><span class="kind">' + esc(relWord(r)) + '</span><button type="button" class="grow" data-act="any" data-id="' + r.other + '">' + esc(lab === null ? r.other + ' (not found)' : lab) + '</button><span class="id">' + r.other + '</span>' +
-      '<button type="button" class="xbtn" data-act="rel-del" data-v="' + esc(r.raw) + '" aria-label="Remove link to ' + r.other + '">' + ic('x', 's') + '</button></div>';
-  }).join('') : '<div class="empty">No links yet.</div>') + '</section>';
+      '<button type="button" class="xbtn" data-act="rel-del" data-v="' + esc(r.raw) + '" aria-label="Remove relationship with ' + r.other + '">' + ic('x', 's') + '</button></div>';
+  }).join('') : '<div class="empty">No relationships yet.</div>') + '</section>';
 }
 function linkCands(id, mode) {
   var q = S.linkQ.trim().toLowerCase();
@@ -2473,8 +2474,8 @@ function vLinkAdd(id, allowBlocked) {
   var mode = allowBlocked ? S.linkMode : 'related';
   var res = linkCands(id, mode);
   var h = '<section class="box" data-k="sec-linkadd"><div class="ctl" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span class="lbl" style="font-weight:600">Add</span>';
-  if (allowBlocked) h += '<div class="seg" role="group" aria-label="Kind of link">' + [['related', 'Link to item'], ['blocked', 'Blocked by']].map(function (m) { return '<button type="button" data-act="link-mode" data-v="' + m[0] + '"' + pressed(mode === m[0]) + '>' + m[1] + '</button>'; }).join('') + '</div>';
-  h += '</div><label class="sr" for="f-linkq">Find an item to link</label><input id="f-linkq" class="in" type="search" autocomplete="off" data-in="linkQ" data-kd="linkq" value="' + esc(S.linkQ) + '" placeholder="' + (mode === 'blocked' ? 'Find the task this is waiting on' : 'Find a task, person, project or system') + '">';
+  if (allowBlocked) h += '<div class="seg" role="group" aria-label="Kind of relationship">' + [['related', 'Relate to item'], ['blocked', 'Depends on']].map(function (m) { return '<button type="button" data-act="link-mode" data-v="' + m[0] + '"' + pressed(mode === m[0]) + '>' + m[1] + '</button>'; }).join('') + '</div>';
+  h += '</div><label class="sr" for="f-linkq">Find an item to relate</label><input id="f-linkq" class="in" type="search" autocomplete="off" data-in="linkQ" data-kd="linkq" value="' + esc(S.linkQ) + '" placeholder="' + (mode === 'blocked' ? 'Find the task this is waiting on' : 'Find a task, person, project or system') + '">';
   if (res) h += res.length ? res.map(function (x) { return '<button type="button" class="pick" data-act="link-add" data-v="' + x.id + '"><span class="kind hint">' + esc(x.kind) + '</span><span style="flex:1;min-width:0">' + esc(x.label) + '</span><span class="id">' + x.id + '</span></button>'; }).join('') : '<div class="hint">No match' + (mode === 'blocked' ? ' (tasks that already depend on this one are left out, to avoid a loop)' : '') + '.</div>';
   return h + '</section>';
 }
@@ -2498,12 +2499,12 @@ function panelTask(i) {
   if (!done) h += '<div class="seg" data-k="seg-status" role="group" aria-label="Status" style="align-self:flex-start">' + STATUS.map(function (x) { return '<button type="button" data-act="status" data-id="' + id + '" data-v="' + x + '"' + pressed((i.meta.st || 'To do') === x) + '>' + x + '</button>'; }).join('') + '</div>';
   h += vTabs(id, rels.length + deps.length, asks.length);
   if (S.tab === 'links') {
-    var x = '<section data-k="sec-blockers"><h3 class="h3">Blocked by</h3>' + (deps.length ? deps.map(function (d) {
+    var x = '<section data-k="sec-blockers"><h3 class="h3">Depends on</h3>' + (deps.length ? deps.map(function (d) {
       var t = item(d), op = whereOf(d) === 'open';
       return '<div class="lrow" data-k="dep-' + d + '">' + badge(t ? (op ? 'Open' : (whereOf(d) === 'done' ? 'Done' : 'In inbox')) : 'Not found', op ? 'danger' : 'ok') + '<button type="button" class="grow" data-act="open" data-id="' + d + '">' + esc(t ? t.title : d) + '</button><span class="id">' + d + '</span>' +
         '<button type="button" class="xbtn" data-act="dep-del" data-id="' + id + '" data-v="' + d + '" aria-label="Remove dependency on ' + d + '">' + ic('x', 's') + '</button></div>';
     }).join('') : '<div class="empty">Nothing. This can start now.</div>') + '</section>';
-    x += '<section data-k="sec-blocks"><h3 class="h3">Waiting on this</h3>' + (blocks.length ? blocks.map(function (b) { return '<div class="lrow" data-k="blk-' + b.id + '"><button type="button" class="grow" data-act="open" data-id="' + b.id + '">' + esc(b.title) + '</button><span class="id">' + b.id + '</span></div>'; }).join('') : '<div class="empty">No other task waits on this one.</div>') + '</section>';
+    x += '<section data-k="sec-blocks"><h3 class="h3">Needed by</h3>' + (blocks.length ? blocks.map(function (b) { return '<div class="lrow" data-k="blk-' + b.id + '"><button type="button" class="grow" data-act="open" data-id="' + b.id + '">' + esc(b.title) + '</button><span class="id">' + b.id + '</span></div>'; }).join('') : '<div class="empty">Nothing depends on this one.</div>') + '</section>';
     x += vLinked(id) + vLinkAdd(id, true);
     h += tabPanel('links', x);
   } else if (S.tab === 'claude') {
@@ -2513,7 +2514,7 @@ function panelTask(i) {
     var whenText = 'No due date';
     if (isDay(due)) whenText = fmt(due) + ', ' + relDays(dd(due));
     var f = fRow('Due', 'f-due', '<input id="f-due" class="in" type="date" data-ch="due" data-id="' + id + '" value="' + esc(due.slice(0, 10)) + '"><label class="sr" for="f-time">Due time</label><input id="f-time" class="in" type="time" data-ch="due-time" data-id="' + id + '" value="' + esc(timeOf(due)) + '"><span class="hint">' + esc(whenText) + '</span>');
-    if (!isDay(due)) f += fRow('When, no date', 'f-urg', '<select id="f-urg" class="in" data-ch="urg" data-id="' + id + '">' + opts([['today', 'Today'], ['week', 'This week'], ['soon', 'Next 2 weeks'], ['later', 'Later'], ['fyi', 'FYI']], i.meta.urg || 'later') + '</select>');
+    if (!isDay(due)) f += fRow('Urgency', 'f-urg', '<select id="f-urg" class="in" data-ch="urg" data-id="' + id + '">' + opts([['today', 'Today'], ['week', 'This week'], ['soon', 'Soon'], ['later', 'Later'], ['fyi', 'FYI']], i.meta.urg || 'later') + '</select>');
     f += fRow('Priority', 'f-p', '<select id="f-p" class="in" data-ch="p" data-id="' + id + '">' + opts([['1', 'High'], ['2', 'Normal'], ['3', 'Low']], i.meta.p || '2') + '</select>');
     var ty = i.meta.ty || 'Task', tyl = [['Task', 'Task'], ['Meeting', 'Meeting'], ['Document', 'Read or review'], ['Process', 'Process'], ['FYI', 'FYI']];
     if (TYPES.indexOf(ty) < 0) tyl.push([ty, ty]);
@@ -2546,7 +2547,7 @@ function panelTask(i) {
       if (sg.length) tail += '<div class="box" data-k="sug"><div class="h3" style="margin:0">Looks related</div>' + sg.map(function (g) {
         var cid = 'sg-' + g.id, on = !!S.suggestOn[id + '|' + g.id];
         return '<div class="subrow"><input type="checkbox" id="' + cid + '" data-ch="suggest" data-id="' + id + '" data-v="' + g.id + '"' + (on ? ' checked' : '') + '><label for="' + cid + '"><span class="id">' + g.id + '</span> ' + esc(g.title) + ' <span class="hint">· ' + esc(g.why) + '</span></label></div>';
-      }).join('') + '<div class="hint">Tick an item to link it when you accept.</div></div>';
+      }).join('') + '<div class="hint">Tick an item to relate it when you accept.</div></div>';
       tail += '<div class="foot" data-k="foot-inbox">' + bt('Accept', 'accept', { id: id, cls: 'primary' }) + bt('Dismiss…', 'dismiss-open', { id: id, attrs: ' aria-expanded="' + (S.dismissFor === id) + '"' }) + (pos >= 0 ? '<span class="hint">' + (pos + 1) + ' of ' + il.length + ' in the inbox</span>' : '') + '</div>';
       if (S.dismissFor === id && S.dismissAt === 'panel') tail += vReasons(id);
     } else if (!done) {
@@ -2599,11 +2600,11 @@ function panelEnt(e) {
     f += fRow('Group', 'ef-grp', '<input id="ef-grp" class="in" type="text" list="dl-egrp-' + kind + '" autocomplete="off" data-ch="e-grp" data-id="' + id + '" value="' + esc(e.grp) + '" style="width:100%">');
     f += '<section data-k="sec-enotes"><label class="h3" for="ef-notes" style="display:block">Notes</label><textarea id="ef-notes" class="in" rows="5" data-ch="e-notes" data-id="' + id + '" placeholder="Notes (saved as note: lines)">' + esc(notesOf(e).join('\n')) + '</textarea></section>';
     var ls = linksOf(e);
-    f += '<section data-k="sec-weblinks"><h3 class="h3">Web links</h3>' + ls.map(function (l) { return '<div class="lrow" data-k="wl-' + esc(l.raw) + '">' + linkA(l) + '<span style="flex:1"></span><button type="button" class="xbtn" data-act="e-link-del" data-id="' + id + '" data-v="' + esc(l.raw) + '" aria-label="Remove link ' + esc(l.label) + '">' + ic('x', 's') + '</button></div>'; }).join('') +
-      '<div class="pills" style="margin-top:6px"><label class="sr" for="ef-ll">Link label</label><input id="ef-ll" class="in" type="text" data-in="linkLabel" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkLabel) + '" placeholder="Label" style="width:120px"><label class="sr" for="ef-lu">Link address</label><input id="ef-lu" class="in" type="url" data-in="linkUrl" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkUrl) + '" placeholder="https://…" style="flex:1;min-width:140px">' + bt('Add link', 'e-link-add', { id: id, cls: 'sm' }) + '</div></section>';
+    f += '<section data-k="sec-weblinks"><h3 class="h3">URLs</h3>' + ls.map(function (l) { return '<div class="lrow" data-k="wl-' + esc(l.raw) + '">' + linkA(l) + '<span style="flex:1"></span><button type="button" class="xbtn" data-act="e-link-del" data-id="' + id + '" data-v="' + esc(l.raw) + '" aria-label="Remove URL ' + esc(l.label) + '">' + ic('x', 's') + '</button></div>'; }).join('') +
+      '<div class="pills" style="margin-top:6px"><label class="sr" for="ef-ll">URL label</label><input id="ef-ll" class="in" type="text" data-in="linkLabel" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkLabel) + '" placeholder="Label" style="width:120px"><label class="sr" for="ef-lu">URL</label><input id="ef-lu" class="in" type="url" data-in="linkUrl" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkUrl) + '" placeholder="https://…" style="flex:1;min-width:140px">' + bt('Add URL', 'e-link-add', { id: id, cls: 'sm' }) + '</div></section>';
     if (S.confirm === 'del:' + id) {
       var nt = kind === 'PRJ' ? allItems().filter(function (i) { return prjOf(i).indexOf(id) >= 0; }).length : 0;
-      f += '<div class="confirm" data-k="confirm" role="alert"><span style="flex:1;min-width:200px">Delete ' + id + '? Its ' + plural(rels.length, 'link') + ' will be removed' + (nt ? ' and ' + plural(nt, 'task') + ' will lose this project' : '') + '. You can undo straight after.</span>' + bt('Delete', 'e-del-yes', { id: id, cls: 'danger sm' }) + bt('Cancel', 'e-del-no', { cls: 'sm' }) + '</div>';
+      f += '<div class="confirm" data-k="confirm" role="alert"><span style="flex:1;min-width:200px">Delete ' + id + '? Its ' + plural(rels.length, 'relationship') + ' will be removed' + (nt ? ' and ' + plural(nt, 'task') + ' will lose this project' : '') + '. You can undo straight after.</span>' + bt('Delete', 'e-del-yes', { id: id, cls: 'danger sm' }) + bt('Cancel', 'e-del-no', { cls: 'sm' }) + '</div>';
     } else f += '<div class="foot" data-k="foot-e">' + bt('Delete ' + D.word, 'e-del', { id: id, cls: 'danger sm' }) + '</div>';
     h += tabPanel('details', f);
   }
@@ -2622,7 +2623,7 @@ function vPanel() {
 /* ===================== shell ===================== */
 var NAV = [
   ['Focus', [['today', 'Today'], ['inbox', 'Inbox'], ['next', 'Next actions'], ['waiting', 'Waiting for'], ['upcoming', 'Upcoming'], ['fyi', 'FYI'], ['all', 'All items']]],
-  ['Knowledge', [['projects', 'Projects'], ['people', 'People'], ['systems', 'Systems']]],
+  ['Knowledge base', [['projects', 'Projects'], ['people', 'People'], ['systems', 'Systems']]],
   ['Reflect', [['review', 'Weekly review'], ['done', 'Done'], ['claude', 'Agent']]]
 ];
 var NAV_COUNTS = { today: 1, inbox: 1, next: 1, waiting: 1, fyi: 1, review: 1, claude: 1 };
@@ -2713,7 +2714,7 @@ function vPalette() {
     bt('Esc', 'dlg-close', { cls: 'sm', attrs: ' aria-label="Close search"' }) + '</div><div class="dlg-b" id="pal-list" role="listbox" aria-label="Results">' + body + '</div>' +
     '<div class="dlg-f" aria-hidden="true"><span>↑ ↓ to move</span><span>Enter to open</span><span>Esc to close</span></div></div></div>';
 }
-var KEYMAP = [['Ctrl K or /', 'Search everything and run commands'], ['N', 'Add a task (quick add)'], ['J  K', 'Move down and up the list'], ['Enter', 'Open the highlighted item'], ['X', 'Mark done or reopen (Undo appears)'], ['A  D', 'Accept or dismiss in the inbox'], ['C', 'Ask the agent about the open item'], ['G then T I N W U F A', 'Go to Today, Inbox, Next, Waiting, Upcoming, FYI, All items'], ['G then P E S R C', 'Go to Projects, People, Systems, Review, Agent'], ['Ctrl Z', 'Undo the last change (outside text boxes)'], ['Esc', 'Close the dialog, then the panel'], ['?', 'This list']];
+var KEYMAP = [['Ctrl K or /', 'Search everything and run commands'], ['N', 'Add an item (quick add)'], ['J  K', 'Move down and up the list'], ['Enter', 'Open the highlighted item'], ['X', 'Mark done or reopen (Undo appears)'], ['A  D', 'Accept or dismiss in the inbox'], ['C', 'Ask the agent about the open item'], ['G then T I N W U F A', 'Go to Today, Inbox, Next, Waiting, Upcoming, FYI, All items'], ['G then P E S R C', 'Go to Projects, People, Systems, Review, Agent'], ['Ctrl Z', 'Undo the last change (outside text boxes)'], ['Esc', 'Close the dialog, then the panel'], ['?', 'This list']];
 function vKeys() {
   return '<div class="dlg-scrim" data-k="dlg-keys" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="keys-h"><div class="dlg-h"><h2 id="keys-h" style="margin:0;flex:1;font-size:16px">Keyboard shortcuts</h2>' +
     '<button type="button" class="xbtn" data-act="dlg-close" aria-label="Close">' + ic('x') + '</button></div><div class="dlg-pad"><div class="kgrid">' +
@@ -3003,7 +3004,7 @@ function accept(id) {
   var nx = nextInbox(id);
   S.dismissFor = null;
   commit(OPS.accept(id, rl));
-  toastShow('Accepted ' + id + ' into ' + listName(item(id)) + (rl.length ? ', linked to ' + rl.length + ' related item' + (rl.length > 1 ? 's' : '') : '') + '.', OPS.unaccept(id, rl));
+  toastShow('Accepted ' + id + ' into ' + listName(item(id)) + (rl.length ? ', related to ' + rl.length + ' item' + (rl.length > 1 ? 's' : '') : '') + '.', OPS.unaccept(id, rl));
   afterTriage(id, nx);
 }
 function dismiss(id, reason) {
@@ -3075,11 +3076,11 @@ function queueAsk(id) {
 function addLink(id, other) {
   if (S.linkMode === 'blocked' && kindOf(id) === 'T') {
     if (dependsOn(other, id)) { toastShow(other + ' already depends on ' + id + '. That would make a loop.'); return; }
-    commit(OPS.addDep(id, other), { toast: id + ' is now blocked by ' + other + '.', undo: OPS.removeDep(id, other) });
+    commit(OPS.addDep(id, other), { toast: id + ' now depends on ' + other + '.', undo: OPS.removeDep(id, other) });
   } else {
     var r = relLine(id, other);
     if (r.err) { toastShow(r.err); return; }
-    commit(OPS.addRel(r.line), { toast: 'Linked ' + id + ' and ' + other + '.', undo: OPS.removeRel(r.line) });
+    commit(OPS.addRel(r.line), { toast: 'Relationship added.', undo: OPS.removeRel(r.line) });
   }
   S.linkQ = ''; forceClear('f-linkq');
   focusLater('#f-linkq');
@@ -3096,10 +3097,10 @@ function entSnapshot(id) {
 }
 function addEntityLink(id) {
   var label = String(S.linkLabel || '').replace(/[\[\]\n]/g, ' ').trim(), url = String(S.linkUrl || '').trim().replace(/\s/g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
-  if (!url) { toastShow('Type the link address first.'); focusLater('#ef-lu'); return; }
+  if (!url) { toastShow('Type the URL first.'); focusLater('#ef-lu'); return; }
   if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = 'https://' + url;
   var v = '[' + (label || url) + '](' + url + ')';
-  commit(OPS.addEntLink(kindOf(id), id, v), { toast: 'Link added.', undo: OPS.removeEntLink(kindOf(id), id, v) });
+  commit(OPS.addEntLink(kindOf(id), id, v), { toast: 'URL added.', undo: OPS.removeEntLink(kindOf(id), id, v) });
   S.linkLabel = ''; S.linkUrl = ''; forceClear('ef-ll'); forceClear('ef-lu');
 }
 function setTheme(t) {
@@ -3198,8 +3199,8 @@ var ACT = {
   },
   'hide-who': function (el) { var a = lsJson('discerny-hide-who', []); a.push(dvv(el)); lsSet('discerny-hide-who', JSON.stringify(a)); toastShow('“' + dvv(el) + '” won’t be suggested for People again.'); },
   del: function (el) { deleteTask(did(el)); },
-  'dep-del': function (el) { var id = did(el), d = dvv(el); commit(OPS.removeDep(id, d), { toast: 'Removed: blocked by ' + d + '.', undo: OPS.addDep(id, d) }); },
-  'rel-del': function (el) { var raw = dvv(el); commit(OPS.removeRel(raw), { toast: 'Link removed.', undo: OPS.addRel(raw) }); },
+  'dep-del': function (el) { var id = did(el), d = dvv(el); commit(OPS.removeDep(id, d), { toast: id + ' no longer depends on ' + d + '.', undo: OPS.addDep(id, d) }); },
+  'rel-del': function (el) { var raw = dvv(el); commit(OPS.removeRel(raw), { toast: 'Relationship removed.', undo: OPS.addRel(raw) }); },
   'link-mode': function (el) { S.linkMode = dvv(el); S.linkQ = ''; forceClear('f-linkq'); focusLater('#f-linkq'); },
   'link-add': function (el) { if (S.sel) addLink(S.sel, dvv(el)); },
   prompt: function (el) {
@@ -3273,7 +3274,7 @@ var ACT = {
     commit(OPS.deleteEnt(kind, id), { toast: 'Deleted ' + id + '.', undo: OPS.restoreEnt(kind, snap) });
   },
   'e-link-add': function (el) { addEntityLink(did(el)); },
-  'e-link-del': function (el) { var id = did(el), v = dvv(el); commit(OPS.removeEntLink(kindOf(id), id, v), { toast: 'Link removed.', undo: OPS.addEntLink(kindOf(id), id, v) }); },
+  'e-link-del': function (el) { var id = did(el), v = dvv(el); commit(OPS.removeEntLink(kindOf(id), id, v), { toast: 'URL removed.', undo: OPS.addEntLink(kindOf(id), id, v) }); },
   pick: function () { pickFolder(); },
   // From a folder refused after it was open, switching reloads the page so nothing of it carries over.
   refolder: function () { if (S.m || srv) changeFolder(); else pickFolder(); },

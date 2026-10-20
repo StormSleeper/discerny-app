@@ -11,7 +11,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 function loadCore() {
   const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
   const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-  const names = ['parse', 'workbench', 'itemMatch', 'quickItem'];
+  const names = ['parse', 'workbench', 'itemMatch', 'quickItem', 'REL_HEAD', 'ASK_HEAD'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -26,10 +26,12 @@ test('the workbench groups by urgency in urgency order, with no urgency counting
     '- [ ] T-0002 No urgency',
     '- [ ] T-0003 Today one {urg:today}',
     '- [ ] T-0004 FYI one {urg:fyi}',
+    '- [ ] T-0005 Soon one {urg:soon}',
+    '- [ ] T-0006 Week one {urg:week}',
   ].join('\n'));
   const groups = C.workbench(list, { group: 'urg', sort: 'urg' });
-  assert.deepEqual(groups.map(g => g.label), ['Today', 'Later', 'FYI / awareness']);
-  assert.deepEqual(groups.map(ids), [['T-0003'], ['T-0001', 'T-0002'], ['T-0004']]);
+  assert.deepEqual(groups.map(g => g.label), ['Today', 'This week', 'Soon', 'Later', 'FYI']);
+  assert.deepEqual(groups.map(ids), [['T-0003'], ['T-0006'], ['T-0005'], ['T-0001', 'T-0002'], ['T-0004']]);
 });
 
 test('grouped by tag, an item shows under each of its tags, biggest group first and untagged last', () => {
@@ -196,4 +198,13 @@ test('quick add keeps its shortcuts: person, projects, tags, priority, due date 
   assert.deepEqual(it.meta, { ty: 'Meeting', who: 'Ana Silva', prj: 'PRJ-0003', tg: 'Lab,Audit', urg: 'week', p: '1', due: '2026-10-21 09:30', asg: '2026-10-19 14:05' });
   assert.equal(it.title, 'Book the lab');
   assert.deepEqual(C.quickItem(parsed(), at).meta, { ty: 'Task', urg: 'week', p: '2', asg: '2026-10-19 14:05' });
+});
+
+test('a Relationships or Agent queue file the page creates starts with the starter file\'s header', () => {
+  const header = file => {
+    const lines = fs.readFileSync(path.join(REPO, 'new_discerny_repo', file), 'utf8').split(/\r?\n/);
+    return lines.slice(0, lines.indexOf('') + 1);
+  };
+  assert.deepEqual(C.REL_HEAD, header('RELATIONSHIPS.md'));
+  assert.deepEqual(C.ASK_HEAD, header('ASK-AGENT.md'));
 });
