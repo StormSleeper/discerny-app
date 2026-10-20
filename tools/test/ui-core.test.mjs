@@ -11,7 +11,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 function loadCore() {
   const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
   const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-  const names = ['parse', 'workbench', 'itemMatch', 'quickItem', 'REL_HEAD', 'ASK_HEAD'];
+  const names = ['parse', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue', 'REL_HEAD', 'ASK_HEAD'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -207,4 +207,37 @@ test('a Relationships or Agent queue file the page creates starts with the start
   };
   assert.deepEqual(C.REL_HEAD, header('RELATIONSHIPS.md'));
   assert.deepEqual(C.ASK_HEAD, header('ASK-AGENT.md'));
+});
+
+// 2026-10-20 is a Tuesday.
+test('snooze counts its step from today, not from the old due date, and keeps the time of day', () => {
+  assert.equal(C.snooze('2026-10-15 14:30', 1, '2026-10-20'), '2026-10-21 14:30');
+});
+
+test('a snooze that lands on a Saturday or Sunday moves to the Monday', () => {
+  assert.equal(C.snooze('2026-10-20 09:00', 3, '2026-10-22'), '2026-10-26 09:00'); // Thursday + 3 = Sunday
+  assert.equal(C.snooze('2026-10-20 09:00', 1, '2026-10-23'), '2026-10-26 09:00'); // Friday + 1 = Saturday
+});
+
+test('a snooze from a weekend day counts from that day, and a due date with no time stays without one', () => {
+  assert.equal(C.snooze('2026-10-20 09:00', 1, '2026-10-24'), '2026-10-26 09:00'); // Saturday + 1 = Sunday
+  assert.equal(C.snooze('2026-10-20', 7, '2026-10-25'), '2026-11-02'); // Sunday + 1 week = Sunday
+  assert.equal(C.snooze('2026-10-20', 28, '2026-10-24'), '2026-11-23'); // Saturday + 4 weeks = Saturday, across the clock change
+});
+
+test('a Meeting is overdue from the day after it takes place, not from its start time', () => {
+  const [m] = items('- [ ] T-0001 Standup {ty:Meeting; due:2026-10-20 09:00}');
+  assert.equal(C.isOverdue(m, '2026-10-20'), false);
+  assert.equal(C.isOverdue(m, '2026-10-21'), true);
+});
+
+test('a Meeting stays overdue until it is marked done, and an item with no due date is never overdue', () => {
+  const [open, done, undated] = items([
+    '- [ ] T-0001 Standup {ty:Meeting; due:2026-10-01 09:00}',
+    '- [x] T-0002 Standup {ty:Meeting; due:2026-10-01 09:00; done:2026-10-02}',
+    '- [ ] T-0003 Someday',
+  ].join('\n'));
+  assert.equal(C.isOverdue(open, '2026-10-20'), true);
+  assert.equal(C.isOverdue(done, '2026-10-20'), false);
+  assert.equal(C.isOverdue(undated, '2026-10-20'), false);
 });

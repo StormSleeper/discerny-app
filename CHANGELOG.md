@@ -19,3 +19,4 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - The earlier four-page version of the UI, discerny-old.html, has been removed; discerny.html is now the only page.
 - The instructions, skills, README and file headers now use one name for each thing throughout, and the README describes the Agent tab and the Ask agent button as the UI has them.
 - The page's labels now match the docs: Urgency choices read Today, This week, Soon, Later and FYI; an Item's links are Relationships and its web addresses are URLs; dependencies show as "Depends on" and "Needed by"; and the Inbox asks you to clarify proposals.
+- Mark an item done from its panel (or straight from the inbox), snooze a due date by a day, three days, a week or four weeks, add systems and URLs to an item, find done items when relating, and copy a person's, project's or system's ID from its page.

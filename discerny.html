@@ -284,6 +284,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .box{background:var(--surface-2);border:1px solid var(--line-3);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
 .pick{display:flex;gap:8px;align-items:baseline;width:100%;border:1px solid var(--line);border-radius:8px;background:var(--surface);min-height:34px;padding:6px 10px;text-align:left;color:var(--ink)}
 .pick:hover{border-color:var(--field)}
+[data-k="seg-snooze"] button{white-space:nowrap}
+.picks{display:flex;flex-direction:column;gap:4px;max-height:320px;overflow-y:auto}
 .ask{border-radius:10px;padding:10px 12px;border:1px solid var(--claude-bd);background:var(--claude-bg);display:flex;flex-direction:column;gap:6px}
 .ask .txt{white-space:pre-line;color:var(--ink-2);overflow-wrap:anywhere}
 .ask .ts{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);align-items:center}
@@ -398,7 +400,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.1.1.15'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.1.1.16'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','week','soon','later','fyi'];
@@ -602,6 +604,13 @@ function itemMatch(i,q,prjName){
 // quick add: parseQuick's result plus what the User chose -> {title, meta, notes} for the new item
 function daysBetween(a,b){function t(s){var p=String(s).slice(0,10).split('-').map(Number);return Date.UTC(p[0],p[1]-1,p[2]);}return Math.round((t(b)-t(a))/86400000);}
 function urgForDue(due,today){var n=daysBetween(today,due);return n<=0?'today':(n<=7?'week':(n<=14?'soon':'later'));}
+// overdue: open and due on a day before today. A Meeting is overdue from the day after it takes place, not from its start time
+function isOverdue(i,today){return !i.done&&/^\d{4}-\d{2}-\d{2}/.test(String(i.meta.due||''))&&daysBetween(today,i.meta.due)<0;}
+// Snooze: the new due date is today plus the step in days, a Saturday or Sunday moved to the Monday, keeping the old due date's time of day
+function snooze(due,days,today){var p=String(today).slice(0,10).split('-').map(Number),d=new Date(Date.UTC(p[0],p[1]-1,p[2]+days));
+  var w=d.getUTCDay();if(w===6||w===0)d.setUTCDate(d.getUTCDate()+(w===6?2:1));
+  var t=/^\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/.exec(String(due||''));
+  return d.toISOString().slice(0,10)+(t?' '+t[1]:'');}
 function quickItem(q,o){
   var due=q.date?q.date+(q.time?' '+q.time:''):'';
   var meta={ty:q.ty};
@@ -654,8 +663,8 @@ var S = {
   group: lsGet('discerny-group', 'project'), pf: 'all', pq: '', pgroup: lsGet('discerny-pgroup', 'none'),
   wb: Object.assign({ group: 'urg', sort: 'urg', tag: '' }, lsJson('discerny-wb', {})), wq: '',
   qa: '', qaType: null, qaMore: false, qaUrg: '', qaDesc: '', palette: false, palQ: '', palI: 0, dialog: null,
-  composer: {}, subDraft: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', suggestOn: {},
-  dismissFor: null, confirm: null, editAsk: null, editAskText: '', adding: null, addName: '', addGrp: '', addType: '',
+  composer: {}, subDraft: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', linkKind: 'All', linkDone: false, sysQ: '', suggestOn: {},
+  dismissFor: null, snoozeFor: null, confirm: null, editAsk: null, editAskText: '', adding: null, addName: '', addGrp: '', addType: '',
   linkLabel: '', linkUrl: '', toasts: [], doneLimit: 60, copied: null,
   gate: { mode: 'pick', msg: '' }, side: lsGet('discerny-side', 'auto'), theme: lsGet('discerny-theme', 'system')
 };
@@ -1189,11 +1198,11 @@ var OPS = {
     });
   },
   addEntLink: function (kind, id, v) {
-    return op('Add URL to ' + id, [EDEF[kind].key], function (M) { var e = entIn(M, kind, id); if (e && !e.subs.some(function (s) { return s.k === 'link' && s.v === v; })) e.subs.push({ k: 'link', v: v }); });
+    return op('Add URL to ' + id, kind === 'T' ? ANY : [EDEF[kind].key], function (M) { var e = kind === 'T' ? (fItem(M, id) || {}).it : entIn(M, kind, id); if (e && !e.subs.some(function (s) { return s.k === 'link' && s.v === v; })) e.subs.push({ k: 'link', v: v }); });
   },
   removeEntLink: function (kind, id, v) {
-    return op('Remove URL from ' + id, [EDEF[kind].key], function (M) {
-      var e = entIn(M, kind, id);
+    return op('Remove URL from ' + id, kind === 'T' ? ANY : [EDEF[kind].key], function (M) {
+      var e = kind === 'T' ? (fItem(M, id) || {}).it : entIn(M, kind, id);
       if (!e) return;
       var k = e.subs.findIndex(function (s) { return s.k === 'link' && s.v === v; });
       if (k >= 0) e.subs.splice(k, 1);
@@ -1803,7 +1812,7 @@ function reviewState() {
 function reviewSteps() {
   var rs = reviewState().done, open = openList();
   var inbox = S.m.inbox.items.length;
-  var overdue = open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) < 0 && i.meta.ty !== 'FYI'; }).length;
+  var overdue = open.filter(function (i) { return isOverdue(i, todayStr()) && i.meta.ty !== 'FYI'; }).length;
   var dueToday = todayItems().length;
   var waiting = open.filter(isWaiting), long = waiting.filter(function (i) { return age(i) >= 14; }).length;
   var active = entsOf('PRJ').filter(function (p) { return (p.meta.st || 'Active') === 'Active'; });
@@ -1954,10 +1963,11 @@ function vRow(i, o) {
   var lead = (inbox || fyi) ? '<span class="pip' + (fyi ? ' grey' : '') + '" aria-hidden="true"></span>'
     : '<input type="checkbox" data-ch="done" data-id="' + i.id + '"' + (done ? ' checked' : '') + ' aria-label="' + esc((done ? 'Reopen: ' : 'Mark done: ') + i.title) + '">';
   var acts = '';
-  if (inbox) acts = bt('Accept', 'accept', { id: i.id, cls: 'primary sm' }) + bt('Dismiss…', 'dismiss-open', { id: i.id, cls: 'sm', attrs: ' aria-expanded="' + (S.dismissFor === i.id) + '"' });
+  if (inbox) acts = bt('Accept', 'accept', { id: i.id, cls: 'primary sm' }) + doneBtn(i, 'sm') + bt('Dismiss…', 'dismiss-open', { id: i.id, cls: 'sm', attrs: ' aria-expanded="' + (S.dismissFor === i.id) + '"' });
+  else if (o.snooze && canSnooze(i)) acts = bt('Snooze…', 'snooze-open', { id: i.id, cls: 'sm', attrs: ' aria-expanded="' + (S.snoozeFor === i.id) + '"' });
   else if (!done && o.waiting && waiting) acts = bt('Chase', 'chase', { id: i.id, cls: 'sm' }) + bt('Got it', 'gotit', { id: i.id, cls: 'sm' });
   else if (fyi) acts = bt('Acknowledge', 'ack', { id: i.id, cls: 'sm' }) + bt('Make it a task', 'maketask', { id: i.id, cls: 'sm quiet' });
-  var reasons = inbox && S.dismissFor === i.id && S.dismissAt !== 'panel' ? vReasons(i.id) : '';
+  var reasons = inbox && S.dismissFor === i.id && S.dismissAt !== 'panel' ? vReasons(i.id) : (o.snooze && S.snoozeFor === i.id && canSnooze(i) ? '<div class="reasons">' + vSnooze(i.id) + lk('Cancel', 'snooze-cancel') + '</div>' : '');
   var sel = S.sel === i.id && S.panel;
   return '<div class="row' + (sel ? ' sel' : '') + (S.cur === i.id ? ' cur' : '') + (done ? ' done' : '') + '" data-k="r-' + i.id + '" data-row="' + i.id + '">' +
     '<div class="lead">' + lead + '</div>' +
@@ -1967,6 +1977,11 @@ function vRow(i, o) {
     '<div class="right">' + badges + (showWhen ? '<span class="b when' + (wh.tone ? ' ' + wh.tone : '') + '">' + esc(whenLabel) + '</span>' : '') + acts + '<span class="id">' + i.id + '</span></div></div>';
 }
 var REASONS = ['Not actionable', 'Already handled', 'Duplicate', 'Not mine'];
+// Done: on an FYI it reads Acknowledge; on a Proposal it accepts and marks done in one step
+function doneBtn(i, cls) { return bt(i.meta.ty === 'FYI' ? 'Acknowledge' : 'Done', 'done-now', { id: i.id, cls: cls, attrs: whereOf(i.id) === 'inbox' ? ' title="Accept and mark done"' : '' }); }
+var SNOOZE = [[1, '+1 day'], [3, '+3 days'], [7, '+1 week'], [28, '+4 weeks']];
+function canSnooze(i) { return whereOf(i.id) === 'open' && isDay(i.meta.due) && i.meta.ty !== 'Meeting'; }
+function vSnooze(id) { return '<div class="seg" data-k="seg-snooze" role="group" aria-label="Snooze ' + id + ' from today">' + SNOOZE.map(function (x) { return '<button type="button" data-act="snooze" data-id="' + id + '" data-v="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>'; }
 function vReasons(id) {
   return '<div class="reasons" data-k="reasons" role="group" aria-label="Why are you dismissing ' + id + '?"><span class="hint">Why?</span>' +
     REASONS.map(function (r) { return '<button type="button" class="chipbtn" data-act="dismiss" data-id="' + id + '" data-v="' + esc(r) + '">' + esc(r) + '</button>'; }).join('') +
@@ -1991,13 +2006,13 @@ function rowsOf(list, o) { return list.map(function (i) { return vRow(i, o); });
 /* ===================== focus lists ===================== */
 function viewToday() {
   var open = openList().filter(function (i) { return i.meta.ty !== 'FYI' && !isWaiting(i); });
-  var overdue = sortItems(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) < 0; }));
+  var overdue = sortItems(open.filter(function (i) { return isOverdue(i, todayStr()); }));
   var dueToday = sortByDue(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) === 0; }));
   var planned = sortItems(open.filter(function (i) { return !isDay(i.meta.due) && i.meta.urg === 'today'; }));
   var horizon = addWorkdays(todayStr(), 3);
   var coming = sortByDue(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) > 0 && i.meta.due.slice(0, 10) <= horizon; }));
   var b = '';
-  if (overdue.length) b += vSec('overdue', 'Overdue', rowsOf(overdue));
+  if (overdue.length) b += vSec('overdue', 'Overdue', rowsOf(overdue, { snooze: true }));
   b += vSec('duetoday', 'Due today', rowsOf(dueToday, { timeFirst: true }), { empty: 'Nothing is due today.' });
   if (planned.length) b += vSec('planned', 'Planned for today', rowsOf(planned), { hint: 'marked Today, no date set' });
   b += vSec('coming', 'Coming up', rowsOf(coming), { hint: 'next 3 working days', empty: 'Nothing dated in the next 3 working days.', link: lk('See everything upcoming', 'go', { v: 'upcoming' }) });
@@ -2103,11 +2118,11 @@ function viewWaiting() {
 }
 function viewUpcoming() {
   var list = openList().filter(function (i) { return isDay(i.meta.due) && i.meta.ty !== 'FYI'; });
-  var overdue = sortByDue(list.filter(function (i) { return dd(i.meta.due) < 0; }));
+  var overdue = sortByDue(list.filter(function (i) { return isOverdue(i, todayStr()); }));
   var days = {}, order = [];
   sortByDue(list.filter(function (i) { return dd(i.meta.due) >= 0; })).forEach(function (i) { var k = i.meta.due.slice(0, 10); if (!days[k]) { days[k] = []; order.push(k); } days[k].push(i); });
   var b = '';
-  if (overdue.length) b += vSec('u-overdue', 'Overdue', rowsOf(overdue));
+  if (overdue.length) b += vSec('u-overdue', 'Overdue', rowsOf(overdue, { snooze: true }));
   order.forEach(function (k) {
     var n = dd(k), t = (n === 0 ? 'Today, ' : (n === 1 ? 'Tomorrow, ' : '')) + fmtLong(k);
     b += vSec('u-' + k, t, days[k].map(function (i) { return vRow(i, { timeFirst: true, hideWhen: true, waiting: isWaiting(i) }); }), { count: '' });
@@ -2190,7 +2205,7 @@ function viewProject(id) {
   var uses = relsOf(id).filter(function (r) { return kindOf(r.other) === 'SYS'; }).map(function (r) { return r.other; });
   var hasNext = open.some(isNext), blocked = open.filter(function (i) { return openBlockers(i).length; }).length;
   var st = e.meta.st || 'Active';
-  var pills = badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + (hasNext ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) + (blocked ? badge(blocked + ' waiting on a dependency', 'danger') : '') + '<span class="sp id">' + id + '</span>';
+  var pills = badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + (hasNext ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) + (blocked ? badge(blocked + ' waiting on a dependency', 'danger') : '') + '<span class="sp">' + copyId(id) + '</span>';
   var parent = e.meta.parent ? entById(e.meta.parent) : null, kids = kidsOf(id);
   var facts = fact('Next date', [dated[0] ? fv(when(dated[0]).label + ', ' + dated[0].title, 'open', dated[0].id) : fv('Nothing dated')]) +
     fact('Key meeting', [meeting ? fv(when(meeting).label + ', ' + meeting.title, 'open', meeting.id) : fv('None scheduled')]) +
@@ -2229,7 +2244,7 @@ function viewSystem(id) {
     fact('Parts', parts.length ? parts.map(function (x) { return fv(x.name, 'ent', x.meta.id); }) : [fv('None')]) +
     fact('Used by', projects.length ? projects.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No projects related')]);
   var ls = linksOf(e);
-  var box = '<div class="entity" data-k="entity"><div class="pills">' + (st ? badge(st, ST_TONE[st]) : badge('No status', 'soft')) + badge(e.meta.type || 'System') + '<span class="sp id">' + id + '</span></div>' +
+  var box = '<div class="entity" data-k="entity"><div class="pills">' + (st ? badge(st, ST_TONE[st]) : badge('No status', 'soft')) + badge(e.meta.type || 'System') + '<span class="sp">' + copyId(id) + '</span></div>' +
     notesOf(e).map(function (t) { return '<div class="ent-note">' + esc(t) + '</div>'; }).join('') + '<div class="facts">' + facts + '</div>' +
     (ls.length ? '<div class="links">' + ls.map(linkA).join('') + '</div>' : '') + vAsksBox(id) + '</div>';
   var items = sysItems(id);
@@ -2253,7 +2268,7 @@ function viewPerson(id) {
   var reports = S.m.people.people.filter(function (x) { return x.meta.mgr === p.name && x.meta.st !== 'Left'; });
   var owns = systemsOwnedBy(p), g = gaps(p);
   var pills = (isExt(p) ? badge('External', 'info') : '') + (p.meta.st === 'Left' ? badge('Left') : '') +
-    (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : (p.meta.st === 'Left' ? '' : badge('Details complete', 'ok'))) + (p.grp ? badge(p.grp, 'soft') : '') + '<span class="sp id">' + esc(id) + '</span>';
+    (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : (p.meta.st === 'Left' ? '' : badge('Details complete', 'ok'))) + (p.grp ? badge(p.grp, 'soft') : '') + '<span class="sp">' + copyId(id) + '</span>';
   var facts = fact('Organisation', [fv([p.meta.co, p.meta.dept].filter(Boolean).join(' › ') || 'Not set')]) +
     fact('Reports to', chain.length ? chain : [fv(isExt(p) ? 'External' : 'Not set')]) +
     fact('Direct reports', reports.length ? reports.map(function (x) { return fv(x.name, x.meta.id ? 'person' : '', x.meta.id); }) : [fv('None')]) +
@@ -2431,9 +2446,9 @@ function viewClaude() {
 }
 
 /* ===================== the details panel ===================== */
+function copyId(id) { var copied = S.copied === id; return '<button type="button" class="idbtn" data-act="copy" data-id="' + esc(id) + '" aria-label="' + (copied ? 'Copied ' : 'Copy ID ') + esc(id) + '">' + ic(copied ? 'check' : 'copy', 's') + (copied ? 'Copied' : esc(id)) + '</button>'; }
 function panelHead(id, kindText, openPage) {
-  var copied = S.copied === id;
-  return '<div class="ph"><button type="button" class="idbtn" data-act="copy" data-id="' + esc(id) + '" aria-label="' + (copied ? 'Copied ' : 'Copy ID ') + esc(id) + '">' + ic(copied ? 'check' : 'copy', 's') + (copied ? 'Copied' : esc(id)) + '</button>' +
+  return '<div class="ph">' + copyId(id) +
     '<span class="hint" style="flex:1;min-width:0">' + esc(kindText) + '</span>' + (S.fresh.has(id) ? badge('Updated', 'info') : '') +
     (openPage ? '<button type="button" class="btn sm quiet" data-act="any-page" data-id="' + esc(id) + '">Open page</button>' : '') +
     '<button type="button" class="xbtn" data-act="close" aria-label="Close details" title="Close (Esc)">' + ic('x') + '</button></div>';
@@ -2454,30 +2469,57 @@ function vLinked(id) {
       '<button type="button" class="xbtn" data-act="rel-del" data-v="' + esc(r.raw) + '" aria-label="Remove relationship with ' + r.other + '">' + ic('x', 's') + '</button></div>';
   }).join('') : '<div class="empty">No relationships yet.</div>') + '</section>';
 }
-function linkCands(id, mode) {
-  var q = S.linkQ.trim().toLowerCase();
+// the relate search: o.kind ('All', an Item type, 'Person', 'Project' or 'System') and o.done (search DONE.md too) -> {list, more} or null
+var LINK_KINDS = ['All', 'Task', 'Meeting', 'Process', 'Document', 'FYI', 'Person', 'Project', 'System'], LINK_MAX = 50;
+function linkCands(id, mode, q, o) {
+  o = o || {};
+  q = String(q || '').trim().toLowerCase();
   if (!q) return null;
-  var linked = {};
+  var linked = {}, blocked = mode === 'blocked', kind = o.kind || 'All';
   relsOf(id).forEach(function (r) { linked[r.other] = 1; });
   var t = kindOf(id) === 'T' ? item(id) : null;
   if (t) depList(t).forEach(function (x) { linked[x] = 1; });
   var c = [];
-  openList().concat(S.m.inbox.items).forEach(function (x) { if (x.id !== id && !linked[x.id] && (mode !== 'blocked' || !dependsOn(x.id, id))) c.push({ id: x.id, label: x.title, kind: 'Task', hay: x.id + ' ' + x.title }); });
-  if (mode !== 'blocked') {
-    activePeople().forEach(function (p) { if (p.meta.id && !linked[p.meta.id]) c.push({ id: p.meta.id, label: p.name, kind: 'Person', hay: p.meta.id + ' ' + p.name + ' ' + (p.meta.title || '') }); });
-    entsOf('PRJ').concat(entsOf('SYS')).forEach(function (x) { if (x.meta.id && !linked[x.meta.id]) c.push({ id: x.meta.id, label: x.name, kind: KIND_WORD[kindOf(x.meta.id)], hay: x.meta.id + ' ' + x.name }); });
+  function addItem(x, done) { if (x.id !== id && !linked[x.id] && (!blocked || !dependsOn(x.id, id))) c.push({ id: x.id, label: x.title, kind: x.meta.ty || 'Task', done: done, at: String((done ? x.meta.done : x.meta.asg) || ''), hay: x.id + ' ' + x.title }); }
+  openList().concat(S.m.inbox.items).forEach(function (x) { addItem(x, false); });
+  if (!blocked && o.done) S.m.done.items.forEach(function (x) { addItem(x, true); });
+  if (!blocked) {
+    activePeople().forEach(function (p) { if (p.meta.id && !linked[p.meta.id]) c.push({ id: p.meta.id, label: p.name, kind: 'Person', at: '', hay: p.meta.id + ' ' + p.name + ' ' + (p.meta.title || '') }); });
+    entsOf('PRJ').concat(entsOf('SYS')).forEach(function (x) { if (x.meta.id && !linked[x.meta.id]) c.push({ id: x.meta.id, label: x.name, kind: KIND_WORD[kindOf(x.meta.id)], at: '', hay: x.meta.id + ' ' + x.name }); });
   }
-  c = c.filter(function (x) { return x.id !== id && (mode === 'blocked' || !relLine(id, x.id).err); });
-  return c.filter(function (x) { return q.split(/\s+/).every(function (w) { return x.hay.toLowerCase().indexOf(w) >= 0; }); }).slice(0, 7);
+  var words = q.split(/\s+/);
+  c = c.filter(function (x) {
+    return x.id !== id && (blocked || !relLine(id, x.id).err) && (kind === 'All' || x.kind === kind) &&
+      words.every(function (w) { return x.hay.toLowerCase().indexOf(w) >= 0; });
+  });
+  function rank(x) { return x.id.toLowerCase() === q ? 0 : (x.label.toLowerCase().indexOf(q) === 0 ? 1 : 2); }
+  function num(x) { return parseInt(x.id.split('-')[1], 10) || 0; }
+  c.sort(function (a, b) { return rank(a) - rank(b) || (!!a.done - !!b.done) || (a.at < b.at ? 1 : a.at > b.at ? -1 : 0) || num(b) - num(a); });
+  return { list: c.slice(0, LINK_MAX), more: Math.max(0, c.length - LINK_MAX) };
+}
+function vPicks(res, act, none) {
+  if (!res) return '';
+  if (!res.list.length) return '<div class="hint">' + none + '</div>';
+  return '<div class="picks" data-k="picks">' + res.list.map(function (x) {
+    return '<button type="button" class="pick" data-act="' + act + '" data-v="' + x.id + '"><span class="kind hint">' + esc(x.kind) + '</span><span style="flex:1;min-width:0">' + esc(x.label) + '</span>' + (x.done ? badge('Done', 'ok') : '') + '<span class="id">' + x.id + '</span></button>';
+  }).join('') + '</div>' + (res.more ? '<div class="hint">' + res.more + ' more, refine your search.</div>' : '');
 }
 function vLinkAdd(id, allowBlocked) {
-  var mode = allowBlocked ? S.linkMode : 'related';
-  var res = linkCands(id, mode);
+  var mode = allowBlocked ? S.linkMode : 'related', blocked = mode === 'blocked';
+  var kinds = blocked ? LINK_KINDS.slice(0, 6) : LINK_KINDS, kind = kinds.indexOf(S.linkKind) >= 0 ? S.linkKind : 'All';
+  var res = linkCands(id, mode, S.linkQ, { kind: kind, done: S.linkDone });
   var h = '<section class="box" data-k="sec-linkadd"><div class="ctl" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span class="lbl" style="font-weight:600">Add</span>';
   if (allowBlocked) h += '<div class="seg" role="group" aria-label="Kind of relationship">' + [['related', 'Relate to item'], ['blocked', 'Depends on']].map(function (m) { return '<button type="button" data-act="link-mode" data-v="' + m[0] + '"' + pressed(mode === m[0]) + '>' + m[1] + '</button>'; }).join('') + '</div>';
-  h += '</div><label class="sr" for="f-linkq">Find an item to relate</label><input id="f-linkq" class="in" type="search" autocomplete="off" data-in="linkQ" data-kd="linkq" value="' + esc(S.linkQ) + '" placeholder="' + (mode === 'blocked' ? 'Find the task this is waiting on' : 'Find a task, person, project or system') + '">';
-  if (res) h += res.length ? res.map(function (x) { return '<button type="button" class="pick" data-act="link-add" data-v="' + x.id + '"><span class="kind hint">' + esc(x.kind) + '</span><span style="flex:1;min-width:0">' + esc(x.label) + '</span><span class="id">' + x.id + '</span></button>'; }).join('') : '<div class="hint">No match' + (mode === 'blocked' ? ' (tasks that already depend on this one are left out, to avoid a loop)' : '') + '.</div>';
+  h += '</div><div class="pills" role="group" aria-label="Search only">' + kinds.map(function (k) { return '<button type="button" class="chipbtn" data-act="link-kind" data-v="' + k + '"' + pressed(kind === k) + '>' + k + '</button>'; }).join('') +
+    (blocked ? '' : '<label class="hint" style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" data-ch="link-done"' + (S.linkDone ? ' checked' : '') + '>Include done</label>') + '</div>';
+  h += '<label class="sr" for="f-linkq">Find an item to relate</label><input id="f-linkq" class="in" type="search" autocomplete="off" data-in="linkQ" data-kd="linkq" value="' + esc(S.linkQ) + '" placeholder="' + (blocked ? 'Find the item this depends on' : 'Find an item, person, project or system') + '">';
+  h += vPicks(res, 'link-add', 'No match' + (blocked ? ' (open items that already depend on this one are left out, to avoid a loop)' : '') + '.');
   return h + '</section>';
+}
+// the URLs on an Item or Record (link: lines), each removable, and a form to add one
+function vUrls(id, ls) {
+  return '<section data-k="sec-weblinks"><h3 class="h3">URLs</h3>' + ls.map(function (l) { return '<div class="lrow" data-k="wl-' + esc(l.raw) + '">' + linkA(l) + '<span style="flex:1"></span><button type="button" class="xbtn" data-act="e-link-del" data-id="' + id + '" data-v="' + esc(l.raw) + '" aria-label="Remove URL ' + esc(l.label) + '">' + ic('x', 's') + '</button></div>'; }).join('') +
+    '<div class="pills" style="margin-top:6px"><label class="sr" for="ef-ll">URL label</label><input id="ef-ll" class="in" type="text" data-in="linkLabel" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkLabel) + '" placeholder="Label" style="width:120px"><label class="sr" for="ef-lu">URL</label><input id="ef-lu" class="in" type="url" data-in="linkUrl" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkUrl) + '" placeholder="https://…" style="flex:1;min-width:140px">' + bt('Add URL', 'e-link-add', { id: id, cls: 'sm' }) + '</div></section>';
 }
 function vClaudeTab(id) {
   var asks = asksFor(id), drafts = draftsFor(id), log = logFor(id);
@@ -2496,7 +2538,7 @@ function panelTask(i) {
   if (inbox) h += '<div class="note" data-k="note-inbox">Proposed by the agent from ' + esc(srcKind(i)) + (i.meta.asg ? ' on ' + esc(fmtDT(i.meta.asg)) : '') + '. Correct anything below, then accept or dismiss.</div>';
   if (done) h += '<div class="note ok" data-k="note-done" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">Done on ' + esc(i.meta.done ? fmt(i.meta.done) : 'an earlier date') + '.</span>' + bt('Reopen', 'reopen', { id: id, cls: 'sm' }) + '</div>';
   h += '<label class="sr" for="f-title">Title</label><textarea id="f-title" class="title-in" rows="2" data-ch="title" data-kd="title" data-id="' + id + '">' + esc(i.title) + '</textarea>';
-  if (!done) h += '<div class="seg" data-k="seg-status" role="group" aria-label="Status" style="align-self:flex-start">' + STATUS.map(function (x) { return '<button type="button" data-act="status" data-id="' + id + '" data-v="' + x + '"' + pressed((i.meta.st || 'To do') === x) + '>' + x + '</button>'; }).join('') + '</div>';
+  if (!done) h += '<div class="pills" data-k="row-status"><div class="seg" data-k="seg-status" role="group" aria-label="Status">' + STATUS.map(function (x) { return '<button type="button" data-act="status" data-id="' + id + '" data-v="' + x + '"' + pressed((i.meta.st || 'To do') === x) + '>' + x + '</button>'; }).join('') + '</div>' + doneBtn(i, '') + '</div>';
   h += vTabs(id, rels.length + deps.length, asks.length);
   if (S.tab === 'links') {
     var x = '<section data-k="sec-blockers"><h3 class="h3">Depends on</h3>' + (deps.length ? deps.map(function (d) {
@@ -2513,7 +2555,7 @@ function panelTask(i) {
     var who = realWho(i), known = !who || !!personByName(who);
     var whenText = 'No due date';
     if (isDay(due)) whenText = fmt(due) + ', ' + relDays(dd(due));
-    var f = fRow('Due', 'f-due', '<input id="f-due" class="in" type="date" data-ch="due" data-id="' + id + '" value="' + esc(due.slice(0, 10)) + '"><label class="sr" for="f-time">Due time</label><input id="f-time" class="in" type="time" data-ch="due-time" data-id="' + id + '" value="' + esc(timeOf(due)) + '"><span class="hint">' + esc(whenText) + '</span>');
+    var f = fRow('Due', 'f-due', '<input id="f-due" class="in" type="date" data-ch="due" data-id="' + id + '" value="' + esc(due.slice(0, 10)) + '"><label class="sr" for="f-time">Due time</label><input id="f-time" class="in" type="time" data-ch="due-time" data-id="' + id + '" value="' + esc(timeOf(due)) + '"><span class="hint">' + esc(whenText) + '</span>' + (canSnooze(i) ? '<div style="flex-basis:100%">' + vSnooze(id) + '</div>' : ''));
     if (!isDay(due)) f += fRow('Urgency', 'f-urg', '<select id="f-urg" class="in" data-ch="urg" data-id="' + id + '">' + opts([['today', 'Today'], ['week', 'This week'], ['soon', 'Soon'], ['later', 'Later'], ['fyi', 'FYI']], i.meta.urg || 'later') + '</select>');
     f += fRow('Priority', 'f-p', '<select id="f-p" class="in" data-ch="p" data-id="' + id + '">' + opts([['1', 'High'], ['2', 'Normal'], ['3', 'Low']], i.meta.p || '2') + '</select>');
     var ty = i.meta.ty || 'Task', tyl = [['Task', 'Task'], ['Meeting', 'Meeting'], ['Document', 'Read or review'], ['Process', 'Process'], ['FYI', 'FYI']];
@@ -2529,6 +2571,13 @@ function panelTask(i) {
     }).join('');
     f += fRow('Projects', 'f-prj', chips + '<input id="f-prj" class="in" type="text" list="dl-prj" autocomplete="off" data-in="newPrj" data-kd="prj" data-id="' + id + '" value="' + esc(S.newPrj) + '" placeholder="Add to a project, Enter" style="width:100%">' +
       (pq ? '<div class="hint" style="flex-basis:100%">' + (hit ? (ps.indexOf(hit.meta.id) >= 0 ? 'Already in “' + esc(hit.name) + '”.' : 'Enter adds it to “' + esc(hit.name) + '”.') : 'Enter creates a new project “' + esc(cleanName(pq)) + '”.') + '</div>' : ''), true);
+    var sysRels = rels.filter(function (r) { return kindOf(r.other) === 'SYS'; });
+    f += fRow('Systems', 'f-sys', sysRels.map(function (r) {
+      var e = entById(r.other);
+      return '<span class="tag">' + (e ? '<button type="button" class="tl" data-act="ent" data-id="' + r.other + '" title="Open ' + esc(e.name) + '">' + esc(short(e.name, 34)) + '</button>' : esc(r.other) + ' (missing)') +
+        '<button type="button" class="xbtn" data-act="rel-del" data-v="' + esc(r.raw) + '" aria-label="Remove ' + esc(e ? e.name : r.other) + '">' + ic('x', 's') + '</button></span>';
+    }).join('') + '<input id="f-sys" class="in" type="search" autocomplete="off" data-in="sysQ" data-kd="sys" data-id="' + id + '" value="' + esc(S.sysQ) + '" placeholder="Find a system" style="width:100%">' +
+      '<div style="flex-basis:100%">' + vPicks(linkCands(id, 'related', S.sysQ, { kind: 'System' }), 'sys-add', 'No system matches.') + '</div>', true);
     f += fRow('Tags', 'f-tag', tagsOf(i).map(function (t) { return '<span class="tag">' + esc(t) + '<button type="button" class="xbtn" data-act="tag-del" data-id="' + id + '" data-v="' + esc(t) + '" aria-label="Remove tag ' + esc(t) + '">' + ic('x', 's') + '</button></span>'; }).join('') +
       '<input id="f-tag" class="in" type="text" list="dl-tags" autocomplete="off" data-in="tagDraft" data-kd="tag" data-id="' + id + '" value="' + esc(S.tagDraft) + '" placeholder="Add tag, Enter" style="width:150px">', true);
     f += fRow('Assigned', 'f-asg', '<input id="f-asg" class="in" type="datetime-local" data-ch="asg" data-id="' + id + '" value="' + esc(isDay(i.meta.asg) ? String(i.meta.asg).slice(0, 16).replace(' ', 'T') : '') + '"><span class="hint">from ' + esc(srcKind(i)) + '</span>');
@@ -2539,7 +2588,7 @@ function panelTask(i) {
         '<button type="button" class="xbtn" data-act="sub-del" data-id="' + id + '" data-i="' + k + '" aria-label="Remove sub-task: ' + esc(s.v) + '">' + ic('x', 's') + '</button></div>';
     }).join('') + '<label class="sr" for="f-sub">New sub-task</label><input id="f-sub" class="in" type="text" autocomplete="off" data-in="subDraft" data-kd="sub" data-id="' + id + '" value="' + esc(S.subDraft) + '" placeholder="Add a sub-task and press Enter" style="width:100%"></section>';
     var src = srcOf(i), notes = notesOf(i), ls = linksOf(i);
-    var ctx = src.length + notes.length + ls.length ? '<section data-k="sec-ctx"><h3 class="h3">Context</h3>' + src.map(function (t) { return '<div class="ctx src">Source: ' + esc(t) + '</div>'; }).join('') + notes.map(function (t) { return '<div class="ctx">' + esc(t) + '</div>'; }).join('') + (ls.length ? '<div class="links">' + ls.map(linkA).join('') + '</div>' : '') + '</section>' : '';
+    var ctx = (src.length + notes.length ? '<section data-k="sec-ctx"><h3 class="h3">Context</h3>' + src.map(function (t) { return '<div class="ctx src">Source: ' + esc(t) + '</div>'; }).join('') + notes.map(function (t) { return '<div class="ctx">' + esc(t) + '</div>'; }).join('') + '</section>' : '') + vUrls(id, ls);
     var my = '<section data-k="sec-my"><label class="h3" for="f-my" style="display:block">Your notes</label><textarea id="f-my" class="in" rows="4" data-ch="my" data-id="' + id + '" placeholder="Anything you want to remember about this">' + esc(myOf(i).join('\n')) + '</textarea></section>';
     var tail = '';
     if (inbox) {
@@ -2600,8 +2649,7 @@ function panelEnt(e) {
     f += fRow('Group', 'ef-grp', '<input id="ef-grp" class="in" type="text" list="dl-egrp-' + kind + '" autocomplete="off" data-ch="e-grp" data-id="' + id + '" value="' + esc(e.grp) + '" style="width:100%">');
     f += '<section data-k="sec-enotes"><label class="h3" for="ef-notes" style="display:block">Notes</label><textarea id="ef-notes" class="in" rows="5" data-ch="e-notes" data-id="' + id + '" placeholder="Notes (saved as note: lines)">' + esc(notesOf(e).join('\n')) + '</textarea></section>';
     var ls = linksOf(e);
-    f += '<section data-k="sec-weblinks"><h3 class="h3">URLs</h3>' + ls.map(function (l) { return '<div class="lrow" data-k="wl-' + esc(l.raw) + '">' + linkA(l) + '<span style="flex:1"></span><button type="button" class="xbtn" data-act="e-link-del" data-id="' + id + '" data-v="' + esc(l.raw) + '" aria-label="Remove URL ' + esc(l.label) + '">' + ic('x', 's') + '</button></div>'; }).join('') +
-      '<div class="pills" style="margin-top:6px"><label class="sr" for="ef-ll">URL label</label><input id="ef-ll" class="in" type="text" data-in="linkLabel" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkLabel) + '" placeholder="Label" style="width:120px"><label class="sr" for="ef-lu">URL</label><input id="ef-lu" class="in" type="url" data-in="linkUrl" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkUrl) + '" placeholder="https://…" style="flex:1;min-width:140px">' + bt('Add URL', 'e-link-add', { id: id, cls: 'sm' }) + '</div></section>';
+    f += vUrls(id, ls);
     if (S.confirm === 'del:' + id) {
       var nt = kind === 'PRJ' ? allItems().filter(function (i) { return prjOf(i).indexOf(id) >= 0; }).length : 0;
       f += '<div class="confirm" data-k="confirm" role="alert"><span style="flex:1;min-width:200px">Delete ' + id + '? Its ' + plural(rels.length, 'relationship') + ' will be removed' + (nt ? ' and ' + plural(nt, 'task') + ' will lose this project' : '') + '. You can undo straight after.</span>' + bt('Delete', 'e-del-yes', { id: id, cls: 'danger sm' }) + bt('Cancel', 'e-del-no', { cls: 'sm' }) + '</div>';
@@ -2926,7 +2974,7 @@ function select(id, o) {
   o = o || {};
   if (S.sel !== id) {
     S.tab = o.tab || 'details';
-    S.subDraft = ''; S.tagDraft = ''; S.newPrj = ''; S.linkQ = ''; S.dismissFor = null; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
+    S.subDraft = ''; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
   } else if (o.tab) S.tab = o.tab;
   S.sel = id; S.panel = true;
   if (kindOf(id) === 'T') S.cur = id;
@@ -3007,6 +3055,30 @@ function accept(id) {
   toastShow('Accepted ' + id + ' into ' + listName(item(id)) + (rl.length ? ', related to ' + rl.length + ' item' + (rl.length > 1 ? 's' : '') : '') + '.', OPS.unaccept(id, rl));
   afterTriage(id, nx);
 }
+// a Proposal done in two minutes: accepted and marked done in one step, keeping its ID
+function acceptDone(id) {
+  var i = item(id);
+  if (!i || whereOf(id) !== 'inbox') return;
+  var a = OPS.accept(id, []), c = OPS.complete(id, todayStr()), nx = nextInbox(id);
+  var un = OPS.unaccept(id, []), ro = OPS.reopen(id);
+  S.dismissFor = null;
+  commit(op('Accept and complete ' + id, ['tasks', 'inbox', 'rels', 'done'], function (M) { a.fn(M); c.fn(M); }));
+  toastShow('Done: ' + clip(i.title, 60), op('Undo done ' + id, ['tasks', 'done', 'inbox', 'rels'], function (M) { ro.fn(M); un.fn(M); }));
+  afterTriage(id, nx);
+}
+function doneNow(id) {
+  var i = item(id), w = whereOf(id);
+  if (!i) return;
+  if (w === 'inbox') acceptDone(id);
+  else if (w === 'open') { if (i.meta.ty === 'FYI') acknowledge(id); else toggleDone(id); }
+}
+function snoozeItem(id, days) {
+  var i = item(id);
+  if (!i || !canSnooze(i) || !days) return;
+  var was = i.meta.due, due = snooze(was, days, todayStr());
+  S.snoozeFor = null;
+  patch(id, { due: due }, 'Snoozed ' + id + ' to ' + fmtDT(due) + '.', OPS.meta(id, { due: was }));
+}
 function dismiss(id, reason) {
   var i = item(id);
   if (!i || whereOf(id) !== 'inbox') return;
@@ -3072,6 +3144,13 @@ function queueAsk(id) {
   S.composer[id] = '';
   forceClear('f-composer');
   commit(OPS.addAsk(line), { toast: 'Queued for the agent on ' + id + '.', undo: OPS.removeAsk(line) });
+}
+function addSystem(id, sys) {
+  var r = id ? relLine(id, sys) : null;
+  if (!r || r.err) { if (r) toastShow(r.err); return; }
+  commit(OPS.addRel(r.line), { toast: 'Relationship added.', undo: OPS.removeRel(r.line) });
+  S.sysQ = ''; forceClear('f-sys');
+  focusLater('#f-sys');
 }
 function addLink(id, other) {
   if (S.linkMode === 'blocked' && kindOf(id) === 'T') {
@@ -3171,6 +3250,10 @@ var ACT = {
   },
   status: function (el) { var v = dvv(el); patch(did(el), { st: v === 'To do' ? '' : v }); },
   accept: function (el) { accept(did(el)); },
+  'done-now': function (el) { doneNow(did(el)); },
+  snooze: function (el) { snoozeItem(did(el), +dvv(el)); },
+  'snooze-open': function (el) { var id = did(el); S.snoozeFor = S.snoozeFor === id ? null : id; if (S.snoozeFor) focusLater('.main [data-row="' + id + '"] .reasons button'); else render(); },
+  'snooze-cancel': function () { S.snoozeFor = null; render(); },
   'dismiss-open': function (el) { var id = did(el), at = el.closest('.panel') ? 'panel' : 'row'; if (S.dismissFor === id && S.dismissAt === at) { S.dismissFor = null; render(); return; } S.dismissFor = id; S.dismissAt = at; focusLater(at === 'panel' ? '.panel .reasons .chipbtn' : '.main [data-row="' + id + '"] .reasons .chipbtn'); },
   'dismiss-cancel': function () { S.dismissFor = null; render(); },
   dismiss: function (el) { dismiss(did(el), dvv(el)); },
@@ -3201,7 +3284,9 @@ var ACT = {
   del: function (el) { deleteTask(did(el)); },
   'dep-del': function (el) { var id = did(el), d = dvv(el); commit(OPS.removeDep(id, d), { toast: id + ' no longer depends on ' + d + '.', undo: OPS.addDep(id, d) }); },
   'rel-del': function (el) { var raw = dvv(el); commit(OPS.removeRel(raw), { toast: 'Relationship removed.', undo: OPS.addRel(raw) }); },
-  'link-mode': function (el) { S.linkMode = dvv(el); S.linkQ = ''; forceClear('f-linkq'); focusLater('#f-linkq'); },
+  'link-kind': function (el) { S.linkKind = dvv(el); focusLater('#f-linkq'); },
+  'sys-add': function (el) { addSystem(S.sel, dvv(el)); },
+  'link-mode': function (el) { S.linkMode = dvv(el); S.linkKind = 'All'; S.linkQ = ''; forceClear('f-linkq'); focusLater('#f-linkq'); },
   'link-add': function (el) { if (S.sel) addLink(S.sel, dvv(el)); },
   prompt: function (el) {
     var id = S.sel, label = dvv(el), base;
@@ -3303,6 +3388,7 @@ var CH = {
   asg: function (el) { var v = el.value ? el.value.replace('T', ' ').slice(0, 16) : ''; patch(did(el), { asg: v }); },
   my: function (el) { var id = did(el), i = item(id), l = linesOf(el.value); if (i && !same(l, myOf(i))) commit(OPS.my(id, l)); },
   sub: function (el) { var id = did(el), k = +el.getAttribute('data-i'), i = item(id), s = i ? subsOf(i)[k] : null; if (s) commit(OPS.setSub(id, k, s.v, el.checked)); },
+  'link-done': function (el) { S.linkDone = el.checked; render(); },
   suggest: function (el) { S.suggestOn[did(el) + '|' + dvv(el)] = el.checked; render(); },
   review: function (el) { var st = reviewState(); st.done[dvv(el)] = el.checked; lsSet('discerny-review', JSON.stringify(st)); render(); },
   'tag-add': function (el) { addTagFrom(el); },
@@ -3352,6 +3438,7 @@ var IN = {
   qa: function (el) { S.qa = el.value; S.qaType = null; render(); },
   palQ: function (el) { S.palQ = el.value; S.palI = 0; render(); },
   linkQ: function (el) { S.linkQ = el.value; render(); },
+  sysQ: function (el) { S.sysQ = el.value; render(); },
   pq: function (el) { S.pq = el.value; render(); },
   eq: function (el) { S.eq = el.value; render(); },
   wq: function (el) { S.wq = el.value; render(); },
@@ -3439,8 +3526,12 @@ var KD = {
   },
   composer: function (el, ev) { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); if (S.sel) queueAsk(S.sel); } },
   linkq: function (el, ev) {
-    if (ev.key === 'Enter') { ev.preventDefault(); var r = S.sel ? linkCands(S.sel, kindOf(S.sel) === 'T' ? S.linkMode : 'related') : null; if (r && r.length) addLink(S.sel, r[0].id); }
+    if (ev.key === 'Enter') { ev.preventDefault(); var lm = S.sel && kindOf(S.sel) === 'T' ? S.linkMode : 'related', r = S.sel ? linkCands(S.sel, lm, S.linkQ, { kind: S.linkKind, done: S.linkDone && lm !== 'blocked' }) : null; if (r && r.list.length) addLink(S.sel, r.list[0].id); }
     else if (ev.key === 'Escape' && el.value) { ev.preventDefault(); S.linkQ = ''; forceClear(el.id); render(); }
+  },
+  sys: function (el, ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); var r = S.sel ? linkCands(S.sel, 'related', S.sysQ, { kind: 'System' }) : null; if (r && r.list.length) addSystem(S.sel, r.list[0].id); }
+    else if (ev.key === 'Escape' && el.value) { ev.preventDefault(); S.sysQ = ''; forceClear(el.id); render(); }
   },
   'e-link': function (el, ev) { if (ev.key === 'Enter') { ev.preventDefault(); addEntityLink(did(el)); } }
 };
