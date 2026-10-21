@@ -261,7 +261,13 @@ function findPerson(q, P) {
   P = P || people();
   return P.find(p => csv(p.meta.em).some(e => e.toLowerCase() === s))
     || P.find(p => csv(p.meta.handle).some(h => h.toLowerCase() === s))
-    || P.find(p => p.name.toLowerCase() === s) || null;
+    || P.find(p => p.name.toLowerCase() === s) || firstNameOnly(s, P);
+}
+// A message often addresses someone by first name alone; that finds them only when no one else has it.
+function firstNameOnly(s, P) {
+  if (/\s|@/.test(s)) return null;
+  const hits = P.filter(p => p.name.toLowerCase().split(/\s+/)[0] === s);
+  return hits.length === 1 ? hits[0] : null;
 }
 
 // ---------------------------------------------------------------- refs
@@ -365,19 +371,35 @@ function replyDue(received, start, tz) {
   return starts && starts < due ? starts : due;
 }
 
-function actionFor(res, pass, c) {
+// What an inbound candidate on a Meeting's thread is: an ask or commitment is work the Meeting needs, a Task of its own.
+// What a candidate on a Meeting's thread means for it. Work the Meeting needs, or a material change to it, is a Task of its own,
+// due before it starts; a new place or attendance updates the Meeting; its time and cancellation come from the calendar.
+function meetingRule(ids, meetings) {
+  const id = ids.join(', '), due = ids.length === 1 ? meetings.get(ids[0]) : '';
+  return { task: `a new Task related to ${id}, due before it starts${due ? ` (${due})` : ''}`, rest: `a new place or attendance is an update to ${id}; a new time or a cancellation needs nothing: the calendar keeps ${id} in step` };
+}
+const meetingAction = (ids, meetings) => { const m = meetingRule(ids, meetings); return `drop, unless it is an ask, a commitment or a material change (a new agenda, a pre-read): then assess it as ${m.task}; ${m.rest}`; };
+
+function actionFor(res, pass, c, meetings) {
   const id = res.ids && res.ids.length ? res.ids.join(', ') : '';
-  const ask = pass === 'ask';
+  const ask = pass === 'ask', onMeeting = res.ids && res.ids.length && res.ids.every(x => meetings.has(x)), onIds = res.ids || [];
   switch (res.outcome) {
     case 'drop': return 'drop';
     case 'new': return ask ? 'classify: ask, commitment or neither' : 'assess: capture it if actionable or FYI, otherwise ignore it';
     case 'ignored': return 'drop';
     case 'done': return ask ? 'drop' : `drop, unless it reopens the work: then capture it with reopen:true and name ${id} in a note`;
-    case 'inbox': return ask ? 'drop' : `drop, unless it adds an ask or a date: then propose an update to ${id}`;
-    case 'open': return ask ? `report: you replied ${c.when || '<date>'}, consider closing ${id}` : `drop, unless it adds an ask, a date or an answer: then propose an update to ${id}`;
+    case 'inbox': return ask ? 'drop' : onMeeting ? meetingAction(onIds, meetings) : `drop, unless it adds an ask or a date: then propose an update to ${id}`;
+    case 'open': return ask ? `report: you replied ${c.when || '<date>'}, consider closing ${id}` : onMeeting ? meetingAction(onIds, meetings) : `drop, unless it adds an ask, a date or an answer: then propose an update to ${id}`;
     case 'waiting': return ask ? `report: ${id} chased ${c.when || '<date>'}` : `if it is from the person ${id} waits on: report "reply received, consider closing ${id}"; otherwise treat it as an update to an open item`;
     case 'related': return ask ? (res.waiting ? `drop: ${id} already waits on this chat` : 'classify: ask, commitment or neither') : `same topic as ${id}: propose an update; another topic: assess it as new`;
-    case 'ambiguous': return ask ? 'classify: ask, commitment or neither' : `if it plainly continues one of ${id}, propose an update to that item; otherwise assess it as new and name ${id} in a note`;
+    case 'ambiguous': {
+      if (ask) return 'classify: ask, commitment or neither';
+      const mtgIds = res.ids.filter(x => meetings.has(x)), mtg = mtgIds.join(', '), other = res.ids.filter(x => !meetings.has(x));
+      if (!mtg) return `if it plainly continues one of ${id}, propose an update to that item; otherwise assess it as new and name ${id} in a note`;
+      const onOther = other.length ? `if it plainly continues ${other.length > 1 ? `one of ${other.join(', ')}, propose an update to that item` : `${other[0]}, propose an update to it`}; ` : '';
+      const m = meetingRule(mtgIds, meetings);
+      return `${onOther}an ask, a commitment or a material change (a new agenda, a pre-read) about ${mtg} is assessed as ${m.task}: name ${id} in its note; ${m.rest}; otherwise assess it as new and name ${id} in a note`;
+    }
     case 'moved': return `report: ${id} moved to ${res.to}; propose that due; then run: discern ref ${res.ids[0]} "${res.newRef}"`;
     case 'cancelled': return `report: ${id} cancelled, consider closing`;
     case 'reply': return `propose a Task "${res.title}" due ${res.due}`;
@@ -535,6 +557,7 @@ CMD.local = function () {
 
 CMD.match = function () {
   const items = stdinJson(), recs = loadIndex(), tz = timezone(), P = people(), u = userRecord(P);
+  const meetings = new Map(recs.filter(x => x.id && /^meeting$/i.test(x.ty)).map(x => [x.id, x.due]));
   const mine = new Set((u ? csv(u.meta.em) : []).map(e => e.toLowerCase()));
   const today = local(nowDate(), tz).slice(0, 10);
   out(items.map((it, i) => {
@@ -546,8 +569,10 @@ CMD.match = function () {
       const to = String(it.recipient || '').toLowerCase();
       if (to || it.recipient_name) { const p = findPerson(to, P) || findPerson(it.recipient_name, P); r.who = p ? p.name : null; }
     } else {
-      r.from_user = !!sender && mine.has(sender);
-      if (!r.from_user && (sender || it.sender_name)) { const p = findPerson(sender, P) || findPerson(it.sender_name, P); r.who = p ? p.name : null; }
+      // A calendar event the user organises is still theirs to prepare for, so only a message can be the user's own.
+      const own = !!sender && mine.has(sender);
+      if (scheme !== 'cal') r.from_user = own;
+      if (!own && (sender || it.sender_name)) { const p = findPerson(sender, P) || findPerson(it.sender_name, P); r.who = p ? p.name : null; }
     }
     const c = { when: it.when ? local(toInstant(it.when), tz).slice(0, 10) : '' };
     let res = null;
@@ -592,7 +617,7 @@ CMD.match = function () {
     } else fail(`item ${r.key}: scheme must be mail, teams or cal`);
     res = res || { outcome: 'new', ids: [] };
     if (r.from_user) res = { outcome: 'drop', ids: [] };
-    Object.assign(r, res); r.action = r.from_user ? "drop: the user's own message" : actionFor(res, pass, c);
+    Object.assign(r, res); r.action = r.from_user ? "drop: the user's own message" : actionFor(res, pass, c, meetings);
     if (res.free) {
       delete r.free;
       r.action = res.ids.length

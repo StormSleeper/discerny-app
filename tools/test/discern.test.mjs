@@ -234,6 +234,48 @@ test('mail matching: short subjects, ambiguity, notices, waiting and replies (E1
   assert.equal(by.askto.outcome, 'new');
 });
 
+test('a mail on a tracked Meeting\'s thread that asks for or promises work is a new Task related to the Meeting, not an update to it', () => {
+  const r = run(folder(), ['match'], [{ key: 'm', scheme: 'mail', subject: 'Re: Management review – Q3 2026', sender: 'oliver.pemberton@pennywhistle.example' }]);
+  const m = r.json[0];
+  assert.equal(m.outcome, 'open');
+  assert.deepEqual(m.ids, ['T-0013']);
+  assert.match(m.action, /ask, a commitment or a material change \(a new agenda, a pre-read\)[^;]*new Task related to T-0013, due before it starts \(2026-10-22 10:00\)/);
+  assert.match(m.action, /new place or attendance[^;]*update to T-0013/);
+  assert.match(m.action, /new time or a cancellation[^;]*nothing: the calendar keeps T-0013 in step/);
+  assert.doesNotMatch(m.action, /unless it adds an ask/);
+});
+
+test('an ask ambiguous between a Meeting and another Item may update the other Item, but about the Meeting it is a new Task related to it (E2)', () => {
+  const r = run(folder(), ['match'], [{ key: 'E2', scheme: 'mail', subject: 'Re: Management review', sender: 'oliver.pemberton@pennywhistle.example' }]);
+  const e2 = r.json[0];
+  assert.equal(e2.outcome, 'ambiguous');
+  assert.match(e2.action, /plainly continues T-0030, propose an update to it/);
+  assert.match(e2.action, /about T-0013 is assessed as a new Task related to T-0013[^;]*name T-0013, T-0030 in its note/);
+  assert.doesNotMatch(e2.action, /one of T-00\d\d, T-00\d\d/);
+});
+
+test('an ask on the thread of a Meeting still in the Inbox is a new Task related to it, not an update to it', () => {
+  const r = run(folder(), ['match'], [{ key: 'm', scheme: 'mail', subject: 'RE: Mk4 FAI – Tue 20 Oct', sender: 'declan.moss@stageworks.example' }]);
+  const m = r.json[0];
+  assert.equal(m.outcome, 'inbox');
+  assert.deepEqual(m.ids, ['T-0029']);
+  assert.match(m.action, /ask, a commitment or a material change[^;]*new Task related to T-0029, due before it starts \(2026-10-20 10:30\)/);
+  assert.doesNotMatch(m.action, /unless it adds an ask/);
+});
+
+test('a calendar candidate is never the user\'s own message, even when the user organises the event and is passed as its sender', () => {
+  const r = run(folder(), ['match'], [
+    { key: 'prep', scheme: 'cal', subject: 'Supplier quality day', date: '2026-10-28', suffix: 'prep', sender: 'imogen.hartley@pennywhistle.example' },
+    { key: 'event', scheme: 'cal', subject: 'Supplier quality day', date: '2026-10-28', event_id: 'AAMk-sqd', sender: 'imogen.hartley@pennywhistle.example' },
+  ]);
+  for (const x of r.json) {
+    assert.equal(x.from_user, undefined, x.key);
+    assert.equal(x.outcome, 'new', x.key);
+    assert.doesNotMatch(x.action, /^drop/, x.key);
+  }
+  assert.equal(r.json[0].ref, 'cal|2026-10-28|supplier quality day|prep');
+});
+
 test('a decline for a Meeting with 4 people invited is a Task to reply to the sender, due a day after it was received', () => {
   const r = run(folder(), ['match'], [
     { key: 'dec', scheme: 'mail', subject: 'Declined: Goods-in walkthrough', sender: 'meera.ilangovan@pennywhistle.example',
@@ -650,6 +692,16 @@ test('ref is always allowed; note only with apply_task_updates', () => {
   run(d, ['commit', 'defaults', 'apply_task_updates=true']);
   assert.equal(run(d, ['note', 'T-0028', 'Print order moved to Thu 15 Oct']).code, 0);
   assert.match(read(d, 'INBOX.md'), /- note: Print order moved to Thu 15 Oct/);
+});
+
+test('a first name finds the one person who has it, and no one when two do, on its own and as an ask\'s recipient', () => {
+  const d = folder();
+  assert.equal(run(d, ['who', 'Gus']).json.name, 'Gus Whitfield');
+  const ask = [{ key: 'g', scheme: 'teams', pass: 'ask', chat: '19:gus-imogen_cd34ef@unq.gbl.spaces', message: '1759914000000', recipient_name: 'Gus' }];
+  assert.equal(run(d, ['match'], ask).json[0].who, 'Gus Whitfield');
+  fs.appendFileSync(path.join(d, 'PEOPLE.md'), '- Gus Ortega {id:P-0099; co:Feltcraft}\n');
+  assert.equal(run(d, ['who', 'Gus']).json.name, null);
+  assert.equal(run(d, ['match'], ask).json[0].who, null);
 });
 
 test('who, log and migrate', () => {
