@@ -26,7 +26,7 @@ Microsoft 365 connector: `outlook_calendar_search`, and the host's MCP resource 
 
 ## Passes
 
-Fetch the state's `window`, up to `page_cap` pages. First drop events matching `exclude_subject`, all-day events, `showAs: free` events that aren't cancelled, events where the user is the only attendee (focus time), and personal, religious or social events (out of scope). What is left are the user's Meetings, whoever organised them.
+Fetch the state's `window`, up to `page_cap` pages. First drop events matching `exclude_subject`, all-day events, events where the user is the only attendee (focus time), and personal, religious or social events (out of scope). A `showAs: free` event that isn't cancelled may be a Meeting the user declined and kept on the calendar: send these to `discern match` with `"free": true` and follow its action. It drops the untracked ones; read each tracked one once, within the budget. Only one the user declined goes on, to pass M with `"free": true, "declined": true`. Every other free event is dropped from every pass, including pass A and B, whatever `prep_signals` says, and whether or not it is tracked. What is left are the user's Meetings, whoever organised them.
 
 - **M, Meetings.** Send every Meeting to `discern meetings` (Source keys). It puts each one not yet tracked straight into `TASKS.md` as an open Meeting item, without a proposal, and keeps tracked ones in step: a moved Meeting gets its new Due date and title, and a cancelled or declined one stays open, retitled "Cancelled: …", with a note of when this run found it. It never closes a Meeting; only the user marks one done. Its `added`, `moved` and `cancelled` lists go in the report's Meetings line.
 - **A, prep needed.** A new event needs prep when its subject matches `prep_signals`, the user organises it (they need an agenda), it has attachments, or its summary asks the user to review, bring or prepare something. It also needs prep when a priority person organises it and the summary has an agenda, a pre-read or a document URL. When the summary can't decide, read the event (it counts against the budget). If that read shows no prep is needed, `discern ignore` its `prep` source key with the reason "no prep needed". Otherwise an event with no signal is dropped silently, including one read only for pass B. Match prep candidates with `suffix: "prep"`.
@@ -38,9 +38,9 @@ Prep, invite and transcript items are proposals, each proposed as related to its
 
 ## Source keys
 
-`cal` scheme. `discern meetings` takes `[{"subject", "start": <the start pair>, "event_id", "organizer": <address>, "organizer_name", "web_link"}]`, plus `"cancelled": true` for an event with `isCancelled: true` or a "Canceled:" or "Cancelled:" subject, and `"declined": true` for a tracked Meeting whose read shows the user's `responseStatus` as declined. It matches on the `cal` and `calid` source keys, so running it again changes nothing, and it recognises a Meeting another source already tracks.
+`cal` scheme. `discern meetings` takes `[{"subject", "start": <the start pair>, "event_id", "organizer": <address>, "organizer_name", "web_link"}]`, plus `"cancelled": true` for an event with `isCancelled: true` or a "Canceled:" or "Cancelled:" subject, `"declined": true` for a tracked Meeting, busy or free, whose read shows the user's `responseStatus` as declined, and `"free": true` for a free event. It writes nothing for a free event that isn't declined or cancelled, and lists it under `dropped`. It matches on the `cal` and `calid` source keys, so running it again changes nothing, and it recognises a Meeting another source already tracks.
 
-Each `discern match` candidate: `{"key": <id>, "scheme": "cal", "subject": ..., "start": <the start pair>}`, plus the `suffix` its pass names. Write the `refs` that `match` returns.
+Each `discern match` candidate: `{"key": <id>, "scheme": "cal", "subject": ..., "start": <the start pair>}`, plus the `suffix` its pass names; a free event is matched with its `event_id`, no suffix and `"free": true`, so a moved one is still found. Write the `refs` that `match` returns (a free event returns none).
 
 ## Assess cues
 

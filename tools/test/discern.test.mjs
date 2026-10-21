@@ -332,8 +332,47 @@ test('calendar matching: tracked, moved, cancelled (E20, E21)', () => {
   assert.equal(by.new.outcome, 'new');
 });
 
+test('calendar matching: a free event is a Meeting only when tracked and declined, and never gets prep or an invite (E26)', () => {
+  const d = folder();
+  const r = run(d, ['match'], [
+    { key: 'tracked', scheme: 'cal', subject: 'Imogen / Oliver 1:1', start: { dateTime: '2026-10-13T16:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-imogen-oliver-1013', free: true },
+    { key: 'untracked', scheme: 'cal', subject: 'Lunch and learn: laser cutter safety', date: '2026-10-14', event_id: 'AAMkAGI-lunch-learn-1014', free: true },
+    { key: 'prep', scheme: 'cal', subject: 'Imogen / Oliver 1:1', date: '2026-10-13', suffix: 'prep', free: true },
+    { key: 'invite', scheme: 'cal', subject: 'Lunch and learn: laser cutter safety', date: '2026-10-14', suffix: 'invite', free: true },
+  ]);
+  assert.equal(r.code, 0, r.out);
+  const by = Object.fromEntries(r.json.map(x => [x.key, x]));
+  assert.equal(by.tracked.outcome, 'open');
+  assert.deepEqual(by.tracked.ids, ['T-0018']);
+  assert.deepEqual(by.tracked.refs, [], 'nothing to write for a free event');
+  assert.match(by.tracked.action, /declined/);
+  assert.match(by.tracked.action, /every pass/);
+  for (const k of ['untracked', 'prep', 'invite']) {
+    assert.equal(by[k].outcome, 'drop', k);
+    assert.deepEqual(by[k].refs, [], k);
+    assert.match(by[k].action, /^drop/, k);
+  }
+});
+
 const event = (o = {}) => ({ subject: 'Calibration review', start: { dateTime: '2026-10-14T09:00:00', timeZone: 'UTC' },
   event_id: 'AAMkAGI-calibration-1014', organizer: 'declan.moss@pennywhistle.example', organizer_name: 'Declan Moss', ...o });
+
+test('meetings drops a free event the user hasn\'t declined, writing nothing, and keeps a free declined one in step (E26)', () => {
+  const d = folder();
+  const before = read(d, 'TASKS.md');
+  const evs = [
+    event({ subject: 'Imogen / Oliver 1:1', start: { dateTime: '2026-10-13T16:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-imogen-oliver-1013', free: true }),
+    event({ subject: 'Lunch and learn: laser cutter safety', event_id: 'AAMkAGI-lunch-learn-1014', free: true }),
+  ];
+  const r = run(d, ['meetings'], evs);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json, { added: [], moved: [], cancelled: [], unchanged: [], dropped: ['Imogen / Oliver 1:1', 'Lunch and learn: laser cutter safety'] });
+  assert.equal(read(d, 'TASKS.md'), before, 'no calid source key, no new item, no counter change');
+  const declined = run(d, ['meetings'], [event({ subject: 'Weekly QA sync', start: { dateTime: '2026-10-15T09:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-weekly-qa-sync-1015', free: true, declined: true })]);
+  assert.deepEqual(declined.json.cancelled, [{ id: 'T-0031', title: 'Cancelled: Weekly QA sync' }]);
+  assert.deepEqual(declined.json.dropped, []);
+  assert.equal(run(d, ['check']).code, 0);
+});
 
 test('meetings puts a new event straight into TASKS.md as an open Meeting, due at its local start', () => {
   const d = folder();
@@ -358,7 +397,7 @@ test('meetings matches a Meeting already tracked by its cal source key, and a se
   const after = read(d, 'TASKS.md');
   const again = run(d, ['meetings'], [event(), qa]);
   assert.equal(again.code, 0, again.out);
-  assert.deepEqual(again.json, { added: [], moved: [], cancelled: [], unchanged: ['T-0032', 'T-0031'] });
+  assert.deepEqual(again.json, { added: [], moved: [], cancelled: [], unchanged: ['T-0032', 'T-0031'], dropped: [] });
   assert.equal(read(d, 'TASKS.md'), after);
 });
 
@@ -396,7 +435,7 @@ test('meetings keeps a cancelled or declined Meeting open, retitled "Cancelled: 
   assert.doesNotMatch(tasks, /Calibration review/);
   assert.doesNotMatch(read(d, 'DONE.md'), /T-0031|T-0018/);
   const again = run(d, ['meetings'], evs);
-  assert.deepEqual(again.json, { added: [], moved: [], cancelled: [], unchanged: ['T-0031', 'T-0018'] });
+  assert.deepEqual(again.json, { added: [], moved: [], cancelled: [], unchanged: ['T-0031', 'T-0018'], dropped: [] });
   assert.equal(read(d, 'TASKS.md'), tasks);
 });
 
@@ -493,6 +532,43 @@ test('state: day windows from the cursor minus overlap, ask window, horizon and 
   assert.equal(none.code, 2);
 });
 
+test('state hands out the ask window as day-long ask windows, oldest first, so an ask pass can finish one day at a time', () => {
+  const s = run(folder(), ['state', 'outlook-mail']).json;
+  assert.deepEqual(s.ask_windows, [
+    { after: '2026-10-07T21:14:03Z', before: '2026-10-08T21:14:03Z' },
+    { after: '2026-10-08T21:14:03Z', before: '2026-10-09T21:14:03Z' },
+    { after: '2026-10-09T21:14:03Z', before: '2026-10-10T21:14:03Z' },
+    { after: '2026-10-10T21:14:03Z', before: '2026-10-11T15:00:00Z' },
+  ]);
+});
+
+// A Run that read two windows and then spent page_cap inside the third commits that window's start as split.
+const tooBig = ['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z', 'split=2026-10-10T13:05:41Z', 'waiting_checked_through=2026-10-11T15:00:00Z', `last_run=${NOW}`];
+
+test('state hands out the day a Run found too big as hour-long windows, and the days either side a day long', () => {
+  const d = folder();
+  assert.equal(run(d, tooBig).code, 0);
+  const w = run(d, ['state', 'outlook-mail'], undefined, '2026-10-12T18:00:00Z').json.windows;
+  assert.equal(w.length, 27);
+  assert.deepEqual(w[0], { after: '2026-10-10T11:05:41Z', before: '2026-10-10T13:05:41Z' });
+  assert.deepEqual(w[1], { after: '2026-10-10T13:05:41Z', before: '2026-10-10T14:05:41Z' });
+  assert.deepEqual(w[24], { after: '2026-10-11T12:05:41Z', before: '2026-10-11T13:05:41Z' });
+  assert.deepEqual(w[25], { after: '2026-10-11T13:05:41Z', before: '2026-10-12T13:05:41Z' });
+  assert.deepEqual(w[26], { after: '2026-10-12T13:05:41Z', before: '2026-10-12T18:00:00Z' });
+});
+
+test('commit takes the end of an hour in the split day as a watermark, keeps split while inside that day, and drops it once past', () => {
+  const d = folder();
+  assert.equal(run(d, tooBig).code, 0);
+  const later = '2026-10-12T18:00:00Z';
+  const inside = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-10T18:05:41Z', `last_run=${later}`]);
+  assert.equal(inside.code, 0, inside.out);
+  assert.match(read(d, 'SOURCES.md'), /- split: 2026-10-10T13:05:41Z/);
+  const past = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-11T13:05:41Z', `last_run=${later}`]);
+  assert.equal(past.code, 0, past.out);
+  assert.doesNotMatch(read(d, 'SOURCES.md'), /split:/);
+});
+
 test('commit creates a block and replaces list keys with a value', () => {
   const d = folder();
   run(d, ['commit', 'gmail', 'watermark=2026-10-05T00:00:00Z', 'overlap=PT2H']);
@@ -501,6 +577,69 @@ test('commit creates a block and replaces list keys with a value', () => {
   assert.match(t, /## gmail\n- watermark: 2026-10-05T00:00:00Z\n- overlap: PT2H/);
   assert.match(t, /- exclude_chat: 19:lunch-club\n- exclude_text/);
   assert.match(t, /- last_result: fetched 3, inbox \+1/);
+});
+
+// The Example's outlook-mail Run at NOW reads from 8 Oct 13:05:41 (the watermark less 2 hours) in five windows:
+// four a day long, then 12 Oct 13:05:41 to 15:00. Its ask window runs from 7 Oct 21:14:03 to 11 Oct 15:00.
+test('commit after a Run reports a source caught up when its watermark and ask cursor reach the ends of their windows', () => {
+  const d = folder();
+  const r = run(d, ['commit', 'outlook-mail', `watermark=${NOW}`, 'waiting_checked_through=2026-10-11T15:00:00Z', `last_run=${NOW}`]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.behind, { days: 0, report: 'outlook-mail: caught up' });
+});
+
+test('commit after a Run that stopped one window short reports one day still to read', () => {
+  const d = folder();
+  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-12T13:05:41Z', 'waiting_checked_through=2026-10-11T15:00:00Z', `last_run=${NOW}`]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.behind, { days: 1, report: 'outlook-mail: 1 day still to read, run again' });
+});
+
+test('commit after a Run that read two of its five windows reports three days still to read', () => {
+  const d = folder();
+  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z', 'waiting_checked_through=2026-10-11T15:00:00Z', `last_run=${NOW}`]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.behind, { days: 3, report: 'outlook-mail: 3 days still to read, run again' });
+});
+
+test('commit refuses a watermark that is not the end of one of the Run\'s windows with exit 1, names the ends, and writes nothing', () => {
+  const d = folder();
+  const before = read(d, 'SOURCES.md');
+  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-11T09:30:00Z', `last_run=${NOW}`, 'last_result=fetched 40']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.json.error, /watermark 2026-10-11T09:30:00Z/);
+  assert.match(r.json.error, /2026-10-09T13:05:41Z, 2026-10-10T13:05:41Z, 2026-10-11T13:05:41Z, 2026-10-12T13:05:41Z, 2026-10-12T15:00:00Z/);
+  assert.equal(read(d, 'SOURCES.md'), before);
+});
+
+test('commit takes the watermark a source already has, from a Run that spent page_cap inside its first window', () => {
+  const d = folder();
+  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-08T15:05:41Z', 'split=2026-10-08T13:05:41Z', `last_run=${NOW}`]);
+  assert.equal(r.code, 0, r.out);
+  assert.match(read(d, 'SOURCES.md'), /- watermark: 2026-10-08T15:05:41Z[^]*- split: 2026-10-08T13:05:41Z/);
+});
+
+test('commit takes any watermark when it is not a Run\'s: a start set with no last_run, or a source\'s first', () => {
+  const d = folder();
+  assert.equal(run(d, ['commit', 'outlook-mail', 'watermark=2026-10-11T09:30:00Z']).code, 0);
+  assert.match(read(d, 'SOURCES.md'), /- watermark: 2026-10-11T09:30:00Z/);
+  const first = run(d, ['commit', 'gmail', 'watermark=2026-10-11T09:30:00Z', `last_run=${NOW}`]);
+  assert.equal(first.code, 0, first.out);
+  assert.match(read(d, 'SOURCES.md'), /## gmail\r?\n- watermark: 2026-10-11T09:30:00Z/);
+});
+
+test('commit counts asks still to check only from waiting_max_age before the Run, since older ones have aged out', () => {
+  const d = folder();
+  const r = run(d, ['commit', 'outlook-mail', `watermark=${NOW}`, 'waiting_checked_through=2026-09-01T00:00:00Z', `last_run=${NOW}`]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.behind, { days: 20, report: 'outlook-mail: 20 days still to read, run again' });
+});
+
+test('commit after a Run that left an ask unclassified on 9 Oct reports the days of asks still to check, though its watermark caught up', () => {
+  const d = folder();
+  const r = run(d, ['commit', 'outlook-mail', `watermark=${NOW}`, 'waiting_checked_through=2026-10-09T09:59:59Z', `last_run=${NOW}`]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.behind, { days: 3, report: 'outlook-mail: 3 days still to read, run again' });
 });
 
 test('ref is always allowed; note only with apply_task_updates', () => {

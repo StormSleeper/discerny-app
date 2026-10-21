@@ -22,12 +22,14 @@ Microsoft 365 connector: `outlook_email_search` for message metadata, and the ho
 
 ## Block
 
-`## outlook-mail`, a stream source: `watermark`, `overlap`, `exclude_subject` (regular expressions), `exclude_sender` (address fragments), `scan_sent_asks`, `waiting_min_age`, `waiting_max_age`, `waiting_checked_through`, `waiting_check_cap` (the read budget for sent mail), `last_run`, `last_result`; optional `page_cap`, `gap` and `fixture`.
+`## outlook-mail`, a stream source: `watermark`, `overlap`, `exclude_subject` (regular expressions), `exclude_sender` (address fragments), `scan_sent_asks`, `waiting_min_age`, `waiting_max_age`, `waiting_checked_through`, `waiting_check_cap` (the read budget for sent mail), `last_run`, `last_result`; optional `invite_count_cap` (the calendar reads for invited counts, default 5), `page_cap`, `split`, `gap` and `fixture`.
+
+An `exclude_subject` rule that drops Accepted or Tentative replies, such as `^(Accepted|Tentative):`, stops them reaching `match`, so a tentative proposing a new time, or an Accepted reply that asks something, never becomes a Task. When the block has one, propose taking it out under "People and settings proposed".
 
 ## Passes
 
 1. **Inbound**, for each of `windows`: `outlook_email_search(afterDateTime, beforeDateTime, limit: 25, offset)`.
-2. **Sent**, when `scan_sent_asks` is true and `ask_window` exists: `outlook_email_search(folderName: "Sent Items", afterDateTime, beforeDateTime, limit: 25, offset)` over `ask_window`. Drop what Filters lists for sent mail, send the rest to `discern match` with `pass: "ask"`, and follow each action. Classify what is left oldest first, reading a body when the summary can't decide, up to `waiting_check_cap` reads:
+2. **Sent**, when `scan_sent_asks` is true and `ask_window` exists, for each of `ask_windows`, oldest first: `outlook_email_search(folderName: "Sent Items", afterDateTime, beforeDateTime, limit: 25, offset)`. Results come newest first, so finish each day before starting the next; that way the oldest sent mail is classified before it ages out at `waiting_max_age`. Drop what Filters lists for sent mail, send the rest to `discern match` with `pass: "ask"`, and follow each action. Classify what is left oldest first, reading a body when the summary can't decide, up to `waiting_check_cap` reads:
    - an **ask**: the user asked someone to do, send, decide or answer something;
    - a **commitment**: the user promised something ("I'll send", "I will", "by Friday"). A reply doesn't fulfil it, so it needs no reply check;
    - neither: drop it.
@@ -42,7 +44,7 @@ Microsoft 365 connector: `outlook_email_search` for message metadata, and the ho
 
 ## Source keys
 
-`mail` scheme. Each `discern match` candidate: `{"key": <id>, "scheme": "mail", "pass": "inbound" or "ask", "subject": ..., "sender": <from address>, "sender_name": <from name>, "when": <receivedDateTime or sentDateTime>}`; on the ask pass add `"recipient": <the first address in recipients>`. For an invitation or a reply to one, add `"invite"`: `request` for the invitation itself, `accepted`, `tentative`, `declined`, `cancelled` or `updated` (the subject prefix gives these, so they may be left out), or `reply` for a plain reply to an invite. On a reply, also add `"asks": true` when it asks a time-sensitive question or makes a request; on a tentative, `"new_time": true` when it proposes a new time; on a decline, `"invited"`: how many people the Meeting invited, counting the user, from the event through the calendar connector (leave it out when the event can't be found). Add `"meeting_start"` (the event's start pair) whenever the event was found.
+`mail` scheme. Each `discern match` candidate: `{"key": <id>, "scheme": "mail", "pass": "inbound" or "ask", "subject": ..., "sender": <from address>, "sender_name": <from name>, "when": <receivedDateTime or sentDateTime>}`; on the ask pass add `"recipient": <the first address in recipients>`. For an invitation or a reply to one, add `"invite"`: `request` for the invitation itself, `accepted`, `tentative`, `declined`, `cancelled` or `updated` (the subject prefix gives these, so they may be left out), or `reply` for a plain reply to an invite. On a reply, also add `"asks": true` when it asks a time-sensitive question or makes a request; on a tentative, `"new_time": true` when it proposes a new time; on a decline, `"invited"`: how many people the Meeting invited, counting the user, from the event through the calendar connector. Each count is one calendar read, at most `invite_count_cap` a Run; leave `invited` out when the event can't be found or the budget is spent, so `match` treats the decline as one to answer. Add `"meeting_start"` (the event's start pair) whenever the event was found.
 
 ## Assess cues
 
@@ -65,4 +67,4 @@ Sent mail older than `waiting_max_age` is never checked for replies. Two threads
 
 ## Fixtures
 
-With `fixture: <folder>` in the block, read files instead of calling the connector: `inbound.json` (every inbound result for all the windows: take each window's by `receivedDateTime`), `sent.json` (Sent Items results in the ask window), `replies.json` (reply-check results keyed by normalised subject; a missing key means no reply) and `resources.json` (bodies, keyed by `uri`). `scenario.json` holds only the run time, which `discern state` uses; pass `--now <run_start>` to every later `discern` command.
+With `fixture: <folder>` in the block, read files instead of calling the connector: `inbound.json` (every inbound result for all the windows: take each window's by `receivedDateTime`), `sent.json` (Sent Items results for all the ask windows: take each one's by `sentDateTime`), `replies.json` (reply-check results keyed by normalised subject; a missing key means no reply) and `resources.json` (bodies, keyed by `uri`). `scenario.json` holds only the run time, which `discern state` uses; pass `--now <run_start>` to every later `discern` command.

@@ -64,7 +64,7 @@
     {
       "eval": "-",
       "message": "m-112",
-      "result": "Dropped (Accepted reply)."
+      "result": "Dropped by match: an Accepted reply that asks nothing. No exclude rule catches it, and no line in IGNORED.md."
     },
     {
       "eval": "-",
@@ -100,6 +100,11 @@
       "eval": "-",
       "message": "s-206",
       "result": "Dropped: an invitation the user sent."
+    },
+    {
+      "eval": "E25",
+      "message": "report",
+      "result": "The report ends \"outlook-mail: caught up\", from the commit's behind report."
     },
     {
       "eval": "-",

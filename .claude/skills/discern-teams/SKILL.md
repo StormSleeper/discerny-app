@@ -24,17 +24,17 @@ Microsoft 365 connector: `chat_message_search`, `teams_list_channel_messages` an
 
 ## Block
 
-`## teams-chat`, a stream source: `watermark`, `overlap`, `mention_query` (optional), `mention_read_cap` (read budget for the mention filter, default 8), `scan_own_commitments`, `scan_sent_asks`, `waiting_min_age`, `waiting_max_age`, `waiting_checked_through`, `waiting_check_cap`, `watch_channels` (lines `teamId | channelId | label`), `candidate_channels`, `exclude_chat` (chat-ID prefixes), `exclude_text` (a regular expression), `chat_labels` (lines `label (chat prefix)`), `last_run`, `last_result`; optional `page_cap`, `gap` and `fixture`.
+`## teams-chat`, a stream source: `watermark`, `overlap`, `mention_query` (optional), `mention_read_cap` (read budget for the mention filter, default 8), `scan_own_commitments`, `scan_sent_asks`, `waiting_min_age`, `waiting_max_age`, `waiting_checked_through`, `waiting_check_cap`, `watch_channels` (lines `teamId | channelId | label`), `candidate_channels`, `exclude_chat` (chat-ID prefixes), `exclude_text` (a regular expression), `chat_labels` (lines `label (chat prefix)`), `last_run`, `last_result`; optional `page_cap`, `split`, `gap` and `fixture`.
 
 ## Passes
 
 For each of `windows`, run A to D1 together with `afterDateTime` and `beforeDateTime` set to the window, `limit: 25` unless stated.
 
 - **A, mentions:** `query` = `mention_query`, or the state's `mention_terms` joined with `OR`.
-- **B, priority people:** one call per entry in the state's `priority_people`: `query: "*"`, `sender: <their address, else name>`, `limit: 10`.
+- **B, priority people:** for each entry in the state's `priority_people`: `query: "*"`, `sender: <their address, else name>`, following pages as in the other passes.
 - **C, files:** `query: "*"`, `hasAttachment: true`.
 - **D1, commitments** (when `scan_own_commitments` is true): `sender: <the user's address>`, `query: "I'll" OR "I will" OR "will send" OR "let me"`.
-- **D2, asks** (when `scan_sent_asks` is true), over `ask_window`: `sender: <the user's address>`, `query: "can you" OR "could you" OR "please" OR "let me know" OR "when can" OR "by end of"`, up to 3 pages. Send them, and D1's results, to `discern match` with `pass: "ask"`, then keep concrete requests to someone else. Check replies against one shared pool rather than one search per ask: `query: "*"` with `afterDateTime` at the oldest ask's `createdDateTime`, up to 5 pages. An ask is answered when the pool holds a later message in the same `chatId` from someone else. Asks past `waiting_check_cap`, or older than the pool reached before it ran out of pages, are not yet checked.
+- **D2, asks** (when `scan_sent_asks` is true), for each of `ask_windows`, oldest first, finishing each day before the next: `sender: <the user's address>`, `query: "can you" OR "could you" OR "please" OR "let me know" OR "when can" OR "by end of"`. Send them, and D1's results, to `discern match` with `pass: "ask"`, then keep concrete requests to someone else. Check replies against one shared pool rather than one search per ask: `query: "*"` with `afterDateTime` at the oldest ask's `createdDateTime`, up to 5 pages. An ask is answered when the pool holds a later message in the same `chatId` from someone else. Asks past `waiting_check_cap`, or older than the pool reached before it ran out of pages, are not yet checked.
 - **E, watched channels:** for each `watch_channels` line, `teams_list_channel_messages(teamId, channelId, limit: 20)`. These come by latest activity with no date filter: follow `cursor` until a page holds only messages whose `lastModifiedDateTime` is before the state's `cutoff`. For each top-level message changed since `cutoff`, read its replies once (`parentMessageId`, `limit: 20`) and treat each reply as a message. `bodyPreview` is HTML of up to 1,000 characters, so strip the tags; read the full body (`bodyTruncated: true`) only for posts that may be worth a proposal. Drop the user's own posts and system events (`messageType` other than `message`, or no `from`).
 
 Channels listed in `candidate_channels` aren't scanned. When posts in one of them keep turning up in pass A, propose watching it.
@@ -71,4 +71,4 @@ Channels listed in `candidate_channels` aren't scanned. When posts in one of the
 
 ## Fixtures
 
-With `fixture: <folder>` in the block, read instead of calling the connector: `mentions.json`, `priority.json`, `files.json`, `commitments.json`, `asks.json`, `pool.json` and `channels.json` (each holding that pass's results for every window of this run), and `resources.json` (full text, keyed by `uri`). `scenario.json` holds only the run time, which `discern state` uses; pass `--now <run_start>` to every later `discern` command.
+With `fixture: <folder>` in the block, read instead of calling the connector: `mentions.json`, `priority.json`, `files.json`, `commitments.json`, `asks.json`, `pool.json` and `channels.json` (each holding that pass's results for every window, or ask window, of this run), and `resources.json` (full text, keyed by `uri`). `scenario.json` holds only the run time, which `discern state` uses; pass `--now <run_start>` to every later `discern` command.

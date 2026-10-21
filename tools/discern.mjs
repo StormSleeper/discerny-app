@@ -28,7 +28,7 @@ const CONFIG = path.join(REPO, 'config.toml');
 const LINK = path.join(REPO, 'data-folder.txt');
 const MIGRATIONS = path.join(REPO, 'migrations');
 const STARTER = path.join(REPO, 'new_discerny_repo');
-const DAY = 864e5;
+const DAY = 864e5, HOUR = 36e5;
 
 // ---------------------------------------------------------------- arguments and output
 const argv = process.argv.slice(2);
@@ -485,26 +485,40 @@ CMD.state = function () {
     out(res); return;
   }
   const gap = val(b, 'gap');
-  let from, to, mode = 'normal';
+  let from, windows, mode = 'normal';
   if (gap) {
     const [g1, g2] = gap.split('/').map(s => new Date(s.trim()));
     if (isNaN(g1) || isNaN(g2) || g2 <= g1) fail(`gap: ${gap} must be <ISO start>/<ISO end>`);
-    from = g1; to = g2; mode = 'backfill';
+    from = g1; windows = dayWindows(g1.getTime(), g2.getTime()); mode = 'backfill';
   } else {
     const wm = val(b, 'watermark');
     if (!wm) { out({ ...res, next: `"${name}" has no watermark. Ask the user how far back to start, then run: discern commit ${name} watermark=<ISO time>` }); process.exit(2); }
-    from = new Date(new Date(wm).getTime() - parseDuration(val(b, 'overlap') || 'PT0S')); to = now;
+    from = new Date(new Date(wm).getTime() - parseDuration(val(b, 'overlap') || 'PT0S')); windows = runWindows(b, now.getTime());
   }
-  const windows = [];
-  for (let t = from.getTime(); t < to.getTime(); t += DAY) windows.push({ after: iso(t), before: iso(Math.min(t + DAY, to.getTime())) });
   res.mode = mode; res.windows = windows; res.cutoff = iso(from);
   if (mode === 'normal' && val(b, 'waiting_min_age') && val(b, 'waiting_max_age')) {
     const after = Math.max(val(b, 'waiting_checked_through') ? new Date(val(b, 'waiting_checked_through')).getTime() : 0, now.getTime() - parseDuration(val(b, 'waiting_max_age')));
     const before = now.getTime() - parseDuration(val(b, 'waiting_min_age'));
-    if (after < before) res.ask_window = { after: iso(after), before: iso(before) };
+    if (after < before) { res.ask_window = { after: iso(after), before: iso(before) }; res.ask_windows = dayWindows(after, before); }
   }
   out(res);
 };
+
+// Day-long windows from from to to, except the day from split (when given), which is cut into hours.
+function dayWindows(from, to, split) {
+  const windows = [];
+  for (let t = from, end; t < to; t = end) {
+    end = Math.min(to, t >= split && t < split + DAY ? t + HOUR : t < split ? Math.min(t + DAY, split) : t + DAY);
+    windows.push({ after: iso(t), before: iso(end) });
+  }
+  return windows;
+}
+// The windows state hands a stream source's Run that starts at now: from its watermark less overlap, with the
+// day a Run found too big in hours.
+function runWindows(b, now) {
+  const split = val(b, 'split') ? Date.parse(val(b, 'split')) : undefined;
+  return dayWindows(Date.parse(val(b, 'watermark')) - parseDuration(val(b, 'overlap') || 'PT0S'), now, split);
+}
 
 CMD.who = function () {
   const q = ARGS.slice(1).join(' ');
@@ -569,10 +583,22 @@ CMD.match = function () {
         }
       }
       if (it.cancelled) res = res && res.ids && res.ids.length && res.outcome !== 'ignored' && res.outcome !== 'done' ? { outcome: 'cancelled', ids: res.ids } : { outcome: 'drop', ids: [] };
+      // A free event is a Meeting only when it is tracked and the user declined it, and it never gets prep or an invite.
+      // Nothing is written for it here: discern meetings adds the calid source key to a declined one.
+      else if (it.free) {
+        r.refs = [];
+        res = !it.suffix && res && ['open', 'inbox', 'waiting'].includes(res.outcome) ? { ...res, free: true } : { outcome: 'drop', ids: [], free: true };
+      }
     } else fail(`item ${r.key}: scheme must be mail, teams or cal`);
     res = res || { outcome: 'new', ids: [] };
     if (r.from_user) res = { outcome: 'drop', ids: [] };
     Object.assign(r, res); r.action = r.from_user ? "drop: the user's own message" : actionFor(res, pass, c);
+    if (res.free) {
+      delete r.free;
+      r.action = res.ids.length
+        ? 'free: read it once, within the budget; if the user declined it, send it to discern meetings with "declined": true; otherwise drop it from every pass: no Meeting, prep or invite'
+        : 'drop: a free event that is not a tracked Meeting';
+    }
     return r;
   }));
 };
@@ -707,10 +733,12 @@ CMD.meetings = function () {
   const events = stdinJson(), tz = timezone(), now = nowDate(), today = local(now, tz).slice(0, 10);
   // Prep items once carried the Meeting's own cal source key, so they are never taken for the Meeting.
   const P = people(), u = userRecord(P), recs = loadIndex().filter(x => !/^Prepare for /.test(x.title || ''));
-  const built = [], unchanged = [], moved = [], cancelled = [];
+  const built = [], unchanged = [], moved = [], cancelled = [], dropped = [];
   events.forEach((ev, i) => {
     if (!ev.subject || !ev.start) fail(`event ${i}: an event needs subject and start`);
     const title = String(ev.subject).replace(/[\r\n]+/g, ' ').replace(/[{}]/g, '').trim();
+    // A free event the user hasn't declined isn't one of their Meetings, even a tracked one, so nothing is written for it.
+    if (ev.free && !ev.cancelled && !ev.declined) { dropped.push(title); return; }
     const due = local(toInstant(ev.start), tz), date = due.slice(0, 10);
     const cal = calRef(date, title), calid = ev.event_id ? `calid|${ev.event_id}` : '';
     const gone = !!(ev.cancelled || ev.declined);
@@ -752,7 +780,7 @@ CMD.meetings = function () {
     built.forEach((b, k) => added.push({ id: 'T-' + String(start + k).padStart(4, '0'), ...b }));
     appendLines('TASKS.md', added.map(a => C.serItem({ id: a.id, done: false, title: a.title, meta: a.meta, subs: a.subs })));
   }
-  out({ added: added.map(a => ({ id: a.id, title: a.title, due: a.meta.due })), moved, cancelled, unchanged });
+  out({ added: added.map(a => ({ id: a.id, title: a.title, due: a.meta.due })), moved, cancelled, unchanged, dropped });
 };
 
 CMD.ignore = function () {
@@ -779,6 +807,13 @@ CMD.commit = function () {
   if (!text.trim()) text = '# Sources\n';
   const eol = eolOf(text);
   let S = parseSources(text), lines = S.lines;
+  // A Run's watermark must stay where it was or be the end of one of the windows state handed it, so it can never
+  // skip a day not yet read.
+  const old = S.blocks[name], wm = (pairs.find(([k]) => k === 'watermark') || [])[1], lr = (pairs.find(([k]) => k === 'last_run') || [])[1];
+  if (val(old, 'watermark') && wm && lr) {
+    const ends = runWindows(old, Date.parse(lr)).map(w => w.before);
+    if (![val(old, 'watermark'), ...ends].some(e => Date.parse(e) === Date.parse(wm))) fail(`watermark ${wm} is not the end of a window this Run was given, so it could skip days not yet read. Send the end of the last window every pass finished, or the watermark it has (${val(old, 'watermark')}) if none was: ${ends.join(', ')}`);
+  }
   if (!S.blocks[name]) {
     while (lines.length && lines[lines.length - 1] === '') lines.pop();
     lines.push('', `## ${name}`);
@@ -795,9 +830,26 @@ CMD.commit = function () {
     } else if (v) lines.splice(b.end + 1, 0, `- ${k}: ${v}`);
     changed.push(k);
   });
+  // The day a Run found too big is read in hours until the watermark is past it.
+  const nb = parseSources(lines.join('\n')).blocks[name], split = nb.keys.split;
+  if (split && Date.parse(val(nb, 'watermark')) >= Date.parse(split.value) + DAY) { lines.splice(split.line, 1); changed.push('split'); }
   write('SOURCES.md', lines.join(eol).replace(/(\r?\n)?$/, eol));
-  out({ source: name, changed });
+  const b = parseSources(lines.join('\n')).blocks[name], res = { source: name, changed };
+  if (changed.includes('last_run') && val(b, 'watermark')) res.behind = behind(name, b);
+  out(res);
 };
+
+// How far a stream source is behind after a Run: the day-long windows of that Run still unread past its watermark,
+// or past its ask cursor in the ask window, whichever is more.
+function behind(name, b) {
+  const end = Date.parse(val(b, 'last_run')), daysFrom = (a, z) => Math.max(0, Math.ceil((z - a) / DAY));
+  let days = daysFrom(Date.parse(val(b, 'watermark')), end);
+  if (val(b, 'waiting_min_age') && val(b, 'waiting_max_age') && val(b, 'waiting_checked_through')) {
+    const asks = Math.max(Date.parse(val(b, 'waiting_checked_through')), end - parseDuration(val(b, 'waiting_max_age')));
+    days = Math.max(days, daysFrom(asks, end - parseDuration(val(b, 'waiting_min_age'))));
+  }
+  return { days, report: days ? `${name}: ${days} day${days > 1 ? 's' : ''} still to read, run again` : `${name}: caught up` };
+}
 
 CMD.log = function () {
   const text = readStdin().trim();
