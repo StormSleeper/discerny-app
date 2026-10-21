@@ -1,0 +1,40 @@
+{
+  "scenario": "fixtures/outlook-calendar/free",
+  "description": "One calendar run over the Example covering E26: events shown as free, one a tracked Meeting the user declined, one a tracked Meeting the user accepted, one never tracked.",
+  "setup": [
+    "Make a scratch data folder as README.md in this folder describes (a copy of the Example, discerny-example, as of its last commit), and connect the helper to it.",
+    "In its SOURCES.md outlook-calendar block, add \"- fixture: <absolute path to tools/evals/fixtures/outlook-calendar/free>\". Leave transcripts off."
+  ],
+  "expect": [
+    {
+      "eval": "E26",
+      "event": "AAMkAGI-weekly-qa-sync-1015",
+      "result": "Free but tracked (T-0031), and its read shows the user declined: T-0031 stays open in TASKS.md, retitled \"Cancelled: Weekly QA sync\", with a note \"Found cancelled by the calendar Run on 2026-10-12 17:00\" and a calid|AAMkAGI-weekly-qa-sync-1015 source key; the report's Meetings line says it was cancelled; no new item."
+    },
+    {
+      "eval": "E26",
+      "event": "AAMkAGI-imogen-oliver-1013",
+      "result": "Free but tracked (T-0018), and its read shows the user accepted: dropped. T-0018 is unchanged, and there is no prep or invite proposal for it."
+    },
+    {
+      "eval": "E26",
+      "event": "AAMkAGI-lunch-learn-1014",
+      "result": "Free and never tracked: match returns new, so it is dropped without a read. No item, no proposal, nothing in IGNORED.md."
+    },
+    {
+      "eval": "E26",
+      "event": "the whole scenario run twice",
+      "result": "The second run changes no item: discern meetings reports T-0031 unchanged; only last_run, last_result and the log change."
+    },
+    {
+      "eval": "-",
+      "event": "reads",
+      "result": "Exactly 2 event reads (the 1:1 and the QA sync), within invite_check_cap."
+    },
+    {
+      "eval": "-",
+      "event": "state",
+      "result": "last_run 2026-10-12T16:00:00Z and a last_result line; the next-id counter is unchanged at 32; no watermark; discern check passes."
+    }
+  ]
+}

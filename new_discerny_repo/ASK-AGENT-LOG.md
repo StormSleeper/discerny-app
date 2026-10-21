@@ -1,2 +1,2 @@
 # Ask agent log
-<!-- Append-only. One line per actioned queue note: - YYYY-MM-DD HH:MM | ID | queued YYYY-MM-DD HH:MM | the note | what the agent did -->
+<!-- Append-only. One line per actioned agent request: - YYYY-MM-DD HH:MM | ID | queued YYYY-MM-DD HH:MM | the request | what the agent did -->

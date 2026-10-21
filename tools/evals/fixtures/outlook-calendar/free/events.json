@@ -1,0 +1,90 @@
+[
+  {
+    "id": "AAMkAGI-imogen-oliver-1013",
+    "subject": "Imogen / Oliver 1:1",
+    "organizer": {
+      "name": "Oliver Pemberton",
+      "address": "oliver.pemberton@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "oliver.pemberton@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-13T15:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-13T15:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Fortnightly 1:1.",
+    "showAs": "free",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-imogen-oliver-1013",
+    "uri": "calendar:///events/AAMkAGI-imogen-oliver-1013"
+  },
+  {
+    "id": "AAMkAGI-lunch-learn-1014",
+    "subject": "Lunch and learn: laser cutter safety",
+    "organizer": {
+      "name": "Declan Moss",
+      "address": "declan.moss@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "declan.moss@pennywhistle.example",
+      "tomasz.kowalczyk@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-14T11:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-14T12:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Optional session in the Stageworks bay. Bring your own lunch.",
+    "showAs": "free",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-lunch-learn-1014",
+    "uri": "calendar:///events/AAMkAGI-lunch-learn-1014"
+  },
+  {
+    "id": "AAMkAGI-weekly-qa-sync-1015",
+    "subject": "Weekly QA sync",
+    "organizer": {
+      "name": "Meera Ilangovan",
+      "address": "meera.ilangovan@pennywhistle.example"
+    },
+    "attendees": [
+      "imogen.hartley@pennywhistle.example",
+      "meera.ilangovan@pennywhistle.example"
+    ],
+    "start": {
+      "dateTime": "2026-10-15T08:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-15T08:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Standing Thursday check-in.",
+    "showAs": "free",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-weekly-qa-sync-1015",
+    "uri": "calendar:///events/AAMkAGI-weekly-qa-sync-1015"
+  }
+]

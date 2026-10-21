@@ -1,0 +1,74 @@
+{
+  "calendar:///events/AAMkAGI-imogen-oliver-1013": {
+    "id": "AAMkAGI-imogen-oliver-1013",
+    "subject": "Imogen / Oliver 1:1",
+    "organizer": {
+      "name": "Oliver Pemberton",
+      "address": "oliver.pemberton@pennywhistle.example"
+    },
+    "start": {
+      "dateTime": "2026-10-13T15:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-13T15:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Fortnightly 1:1.",
+    "showAs": "free",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-imogen-oliver-1013",
+    "uri": "calendar:///events/AAMkAGI-imogen-oliver-1013",
+    "attendees": [
+      {
+        "emailAddress": "imogen.hartley@pennywhistle.example",
+        "responseStatus": "accepted"
+      },
+      {
+        "emailAddress": "oliver.pemberton@pennywhistle.example",
+        "responseStatus": "organizer"
+      }
+    ],
+    "body": "Fortnightly 1:1."
+  },
+  "calendar:///events/AAMkAGI-weekly-qa-sync-1015": {
+    "id": "AAMkAGI-weekly-qa-sync-1015",
+    "subject": "Weekly QA sync",
+    "organizer": {
+      "name": "Meera Ilangovan",
+      "address": "meera.ilangovan@pennywhistle.example"
+    },
+    "start": {
+      "dateTime": "2026-10-15T08:00:00.0000000",
+      "timeZone": "UTC"
+    },
+    "end": {
+      "dateTime": "2026-10-15T08:30:00.0000000",
+      "timeZone": "UTC"
+    },
+    "summary": "Standing Thursday check-in.",
+    "showAs": "free",
+    "isAllDay": false,
+    "isCancelled": false,
+    "isOrganizer": false,
+    "importance": "normal",
+    "hasAttachments": false,
+    "webLink": "https://outlook.example/calendar/item/AAMkAGI-weekly-qa-sync-1015",
+    "uri": "calendar:///events/AAMkAGI-weekly-qa-sync-1015",
+    "attendees": [
+      {
+        "emailAddress": "imogen.hartley@pennywhistle.example",
+        "responseStatus": "declined"
+      },
+      {
+        "emailAddress": "meera.ilangovan@pennywhistle.example",
+        "responseStatus": "organizer"
+      }
+    ],
+    "body": "Standing Thursday check-in."
+  }
+}

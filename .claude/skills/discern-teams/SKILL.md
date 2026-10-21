@@ -1,6 +1,6 @@
 ---
 name: discern-teams
-description: Captures Teams messages that mention or are addressed to the user, files shared with them, their own commitments and unanswered asks, and posts in watched channels into the Discerny inbox as proposals for triage. Use when asked to check, refresh or sync Teams or chats for Discerny, or as part of a Discerny refresh.
+description: Captures Teams messages that mention or are addressed to the user, files shared with them, their own commitments and unanswered asks, and posts in watched channels into the Discerny inbox as proposals for the user to clarify. Use when asked to check or sync Teams or chats for Discerny, or as part of a Discerny refresh.
 ---
 
 # discern-teams
@@ -24,36 +24,36 @@ Microsoft 365 connector: `chat_message_search`, `teams_list_channel_messages` an
 
 ## Block
 
-`## teams-chat`, a stream source: `watermark`, `overlap`, `mention_query` (optional), `mention_read_cap` (read budget for the mention filter, default 8), `scan_own_commitments`, `scan_sent_asks`, `waiting_min_age`, `waiting_max_age`, `waiting_checked_through`, `waiting_check_cap`, `watch_channels` (lines `teamId | channelId | label`), `candidate_channels`, `exclude_chat` (chat-ID prefixes), `exclude_text` (a regular expression), `chat_labels` (lines `label (chat prefix)`), `last_run`, `last_result`; optional `page_cap`, `gap` and `fixture`.
+`## teams-chat`, a stream source: `watermark`, `overlap`, `mention_query` (optional), `mention_read_cap` (read budget for the mention filter, default 8), `scan_own_commitments`, `scan_sent_asks`, `waiting_min_age`, `waiting_max_age`, `waiting_checked_through`, `waiting_check_cap`, `watch_channels` (lines `teamId | channelId | label`), `candidate_channels`, `exclude_chat` (chat-ID prefixes), `exclude_text` (a regular expression), `chat_labels` (lines `label (chat prefix)`), `last_run`, `last_result`; optional `page_cap`, `split`, `gap` and `fixture`.
 
 ## Passes
 
 For each of `windows`, run A to D1 together with `afterDateTime` and `beforeDateTime` set to the window, `limit: 25` unless stated.
 
 - **A, mentions:** `query` = `mention_query`, or the state's `mention_terms` joined with `OR`.
-- **B, priority people:** one call per entry in the state's `priority_people`: `query: "*"`, `sender: <their address, else name>`, `limit: 10`.
+- **B, priority people:** for each entry in the state's `priority_people`: `query: "*"`, `sender: <their address, else name>`, following pages as in the other passes.
 - **C, files:** `query: "*"`, `hasAttachment: true`.
 - **D1, commitments** (when `scan_own_commitments` is true): `sender: <the user's address>`, `query: "I'll" OR "I will" OR "will send" OR "let me"`.
-- **D2, asks** (when `scan_sent_asks` is true), over `ask_window`: `sender: <the user's address>`, `query: "can you" OR "could you" OR "please" OR "let me know" OR "when can" OR "by end of"`, up to 3 pages. Send them, and D1's results, to `discern match` with `pass: "ask"`, then keep concrete requests to someone else. Check replies against one shared pool rather than one search per ask: `query: "*"` with `afterDateTime` at the oldest ask's `createdDateTime`, up to 5 pages. An ask is answered when the pool holds a later message in the same `chatId` from someone else. Asks past `waiting_check_cap`, or older than the pool reached before it ran out of pages, are not yet checked.
-- **E, watched channels:** for each `watch_channels` line, `teams_list_channel_messages(teamId, channelId, limit: 20)`. These come by latest activity with no date filter: follow `cursor` until a page holds only messages whose `lastModifiedDateTime` is before the state's `cutoff`. For each top-level message changed since `cutoff`, read its replies once (`parentMessageId`, `limit: 20`) and treat each reply as a message. `bodyPreview` is HTML of up to 1,000 characters, so strip the tags; read the full body (`bodyTruncated: true`) only for real candidates. Drop the user's own posts and system events (`messageType` other than `message`, or no `from`).
+- **D2, asks** (when `scan_sent_asks` is true), for each of `ask_windows`, oldest first, finishing each day before the next: `sender: <the user's address>`, `query: "can you" OR "could you" OR "please" OR "let me know" OR "when can" OR "by end of"`. Send them, and D1's results, to `discern match` with `pass: "ask"`, then keep concrete requests to someone else. Check replies against one shared pool rather than one search per ask: `query: "*"` with `afterDateTime` at the oldest ask's `createdDateTime`, up to 5 pages. An ask is answered when the pool holds a later message in the same `chatId` from someone else; an answered ask only counts under `answered`, and neither it nor its reply becomes an item or an update. Asks past `waiting_check_cap`, or older than the pool reached before it ran out of pages, are not yet checked.
+- **E, watched channels:** for each `watch_channels` line, `teams_list_channel_messages(teamId, channelId, limit: 20)`. These come by latest activity with no date filter: follow `cursor` until a page holds only messages whose `lastModifiedDateTime` is before the state's `cutoff`. For each top-level message changed since `cutoff`, read its replies once (`parentMessageId`, `limit: 20`) and treat each reply as a message. `bodyPreview` is HTML of up to 1,000 characters, so strip the tags; read the full body (`bodyTruncated: true`) only for posts that may be worth a proposal. Drop the user's own posts and system events (`messageType` other than `message`, or no `from`).
 
-`candidate_channels` aren't scanned. When a candidate channel's posts keep turning up in pass A, propose watching it.
+Channels listed in `candidate_channels` aren't scanned. When posts in one of them keep turning up in pass A, propose watching it.
 
 ## Filters
 
 - **Mention filter** (pass A only), in order: drop messages from the user's addresses. In group chats, meeting chats and channels, keep a message only if its text has the user's first name or a handle (any case). When a summary ends in "..." and lacks them, read the full text once, oldest message first, within `mention_read_cap`; once the budget is spent, capture the rest from their summaries and count them under "Not yet checked". Keep every inbound 1:1 message.
 - After merging all passes by message `id`: drop pure acknowledgements ("thanks", "ok", an emoji), chats matching `exclude_chat`, text matching `exclude_text`, and the user's own messages outside D1 and D2.
-- A personal, religious or social chat is out of scope. When the whole chat is personal, `discern ignore` its container ref `teams|<chat20>|*` with `"container": true` and the reason "personal". Don't log single noise messages.
+- A personal, religious or social chat is out of scope. When the whole chat is personal, `discern ignore` its whole-chat source key `teams|<chat20>|*` with `"container": true` and the reason "personal". Don't log single noise messages.
 
-## Refs
+## Source keys
 
-`teams` scheme. A ref is `teams|<chat20>|<message id>`, where chat20 is the chat ID without its `19:` prefix, cut to 20 characters; `match` returns it, so copy refs from there. Each `discern match` item: `{"key": <id>, "scheme": "teams", "pass": <"ask" for D1 and D2, else "inbound">, "chat": <chatId>, "message": <id>, "sender": <from.email>, "sender_name": <from.displayName>, "when": <createdDateTime>}`; for channel posts `chat` is the channel ID. Add `subject` and `meeting_date` for a meeting with a known date. On a `related` outcome, judge whether the message is about the same work as that task: if so, propose an update; if not, clarify it as new.
+`teams` scheme. A source key is `teams|<chat20>|<message id>`, where chat20 is the chat ID without its `19:` prefix, cut to 20 characters; `match` returns it, so copy source keys from there. Each `discern match` candidate: `{"key": <id>, "scheme": "teams", "pass": <"ask" for D1 and D2, else "inbound">, "chat": <chatId>, "message": <id>, "sender": <from.email>, "sender_name": <from.displayName>, "when": <createdDateTime>}`, plus on the ask pass `"recipient_name"`: the name the ask addresses ("Gus, can you…"), or in a 1:1 chat the other person, so `match` returns the `who` for a waiting item; for channel posts `chat` is the channel ID. Add `subject` and `meeting_date` for a meeting with a known date. On a `related` outcome, judge whether the message is about the same work as that item: if so, propose an update; if not, assess it as new.
 
-## Clarify cues
+## Assess cues
 
-- Candidates: direct asks to the user ("could you", "please", a question), files they are expected to read or use (pass C, or a link in the text), scheduling asks, deadlines, decisions needing their input, and posts in watched channels that ask the team for something.
+- Worth a proposal: direct asks to the user ("could you", "please", a question), files they are expected to read or use (pass C, or a URL in the text), scheduling asks, due dates, decisions needing their input, and posts in watched channels that ask the team for something.
 - Information-only messages from priority people that teach something lasting (a process, a system, who owns what): `ty:FYI` or `ty:Process`, `urg:fyi` or `later`.
-- Several messages in one chat on one topic make one item, with every ref.
+- Several messages in one chat on one topic make one item, with every source key.
 - Someone not in `priority_people` who sent two or more actionable messages this run: propose adding them, under "People and settings proposed".
 
 ## Item specifics
@@ -71,4 +71,4 @@ For each of `windows`, run A to D1 together with `afterDateTime` and `beforeDate
 
 ## Fixtures
 
-With `fixture: <folder>` in the block, read instead of calling the connector: `mentions.json`, `priority.json`, `files.json`, `commitments.json`, `asks.json`, `pool.json` and `channels.json` (each holding that pass's results for every window of this run), and `resources.json` (full text, keyed by `uri`). `scenario.json` holds only the run time, which `discern state` uses; pass `--now <run_start>` to every later `discern` command.
+With `fixture: <folder>` in the block, read instead of calling the connector: `mentions.json`, `priority.json`, `files.json`, `commitments.json`, `asks.json`, `pool.json` and `channels.json` (each holding that pass's results for every window, or ask window, of this run), and `resources/<message id>.txt` (one message's full text). Opening one of those files is one read: open only as many as the budget allows, one at a time, and never list or open the folder as a whole. `scenario.json` holds only the run time, which `discern state` uses; pass `--now <run_start>` to every later `discern` command.

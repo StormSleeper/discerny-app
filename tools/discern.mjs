@@ -4,27 +4,35 @@
 // //<core> and //</core>), so the UI and this helper can never disagree about the format.
 //
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
+//   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
-// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, migrate.
+// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, migrate, upgrade, serve.
 // Input for match, add, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
+// Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
 //
 // The app (this helper, the UI, the skills) and the user's data live in separate folders. The data folder
-// is --dir, else $DISCERNY_DIR, else the path in data-folder.txt in the app folder, which connect and new write.
+// is --dir, else $DISCERNY_DIR, else data_folder in config.toml in the app folder, which connect and new write.
+// An app folder from an earlier build may still have data-folder.txt instead, which is read until the next connect or new.
 
 import fs from 'node:fs';
 import path from 'node:path';
+import http from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '..');
+const CONFIG = path.join(REPO, 'config.toml');
 const LINK = path.join(REPO, 'data-folder.txt');
+const MIGRATIONS = path.join(REPO, 'migrations');
 const STARTER = path.join(REPO, 'new_discerny_repo');
-const DAY = 864e5;
+const DAY = 864e5, HOUR = 36e5;
 
 // ---------------------------------------------------------------- arguments and output
 const argv = process.argv.slice(2);
-const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '' };
+const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '', port: '4790' };
 const ARGS = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -33,14 +41,82 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--zone') OPT.zone = argv[++i];
   else if (a === '--write') OPT.write = true;
   else if (a === '--dry-run') OPT.dry = true;
+  else if (a === '--one') OPT.one = true;
+  else if (a === '--done') OPT.done = argv[++i] || '';
+  else if (a === '--port') OPT.port = argv[++i] || '';
   else ARGS.push(a);
 }
+// ---------------------------------------------------------------- config.toml
+// The App folder's settings. The helper reads and writes a subset of TOML itself, with no dependencies:
+// comments, blank lines, [table] headings, and key = value with a basic or literal string, an integer or a boolean.
+const UNESCAPE = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\' };
+// The settings as { top: { key: { value, line } }, tables: { name: { key: { value, line } } }, firstTable, lines, eol }.
+// Throws an Error naming the line for anything outside the subset.
+function parseConfig(text) {
+  const eol = eolOf(text), lines = text.split(/\r?\n/);
+  const top = {}, tables = {};
+  let cur = top, firstTable = -1;
+  lines.forEach((ln, i) => {
+    const where = `config.toml line ${i + 1}`;
+    const rest = (s) => { if (!/^\s*(#.*)?$/.test(s)) throw new Error(`${where}: unexpected "${s.trim()}" after the value; put a comment after #`); };
+    if (/^\s*(#.*)?$/.test(ln)) return;
+    const h = /^\s*\[\s*([A-Za-z0-9_-]+)\s*\](.*)$/.exec(ln);
+    if (h) {
+      rest(h[2]);
+      if (tables[h[1]]) throw new Error(`${where}: [${h[1]}] appears twice; keep one`);
+      cur = tables[h[1]] = {};
+      if (firstTable < 0) firstTable = i;
+      return;
+    }
+    const kv = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.*)$/.exec(ln);
+    if (!kv) throw new Error(`${where}: "${ln.trim()}" is not key = value, a [table] heading or a # comment`);
+    const [, key, v] = kv;
+    let m, value;
+    if ((m = /^'([^'\r\n]*)'(.*)$/.exec(v))) value = m[1];
+    else if ((m = /^"((?:[^"\\]|\\.)*)"(.*)$/.exec(v))) {
+      value = m[1].replace(/\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)/g, (s, c) => {
+        if (c.length > 1) return String.fromCodePoint(parseInt(c.slice(1), 16));
+        if (!(c in UNESCAPE)) throw new Error(`${where}: \\${c} is not an escape TOML knows; write \\\\ for a backslash, or use single quotes`);
+        return UNESCAPE[c];
+      });
+    } else if ((m = /^([+-]?(?:0|[1-9](?:_?\d)*))(?![\w.:-])(.*)$/.exec(v))) value = Number(m[1].replace(/_/g, ''));
+    else if ((m = /^(true|false)(?![\w.-])(.*)$/.exec(v))) value = m[1] === 'true';
+    else throw new Error(`${where}: the value of ${key} must be a 'string', a "string", a whole number, true or false`);
+    rest(m[m.length - 1]);
+    if (cur[key]) throw new Error(`${where}: ${key} is set twice; keep one`);
+    cur[key] = { value, line: i };
+  });
+  return { top, tables, firstTable, lines, eol };
+}
+function configText() { try { return fs.readFileSync(CONFIG, 'utf8'); } catch (e) { return ''; } }
+// A TOML string: literal ('...') so Windows paths need no escaping, or basic ("...") when it holds a '.
+function tomlString(s) { return s.includes("'") ? `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : `'${s}'`; }
+// Sets data_folder in config.toml, changing no other line and making the file if it is missing, and retires data-folder.txt.
+// Throws, writing nothing, when config.toml can't be read.
+function connectTo(d) {
+  const text = configText();
+  const cfg = parseConfig(text ||'# Settings for this Discerny app folder. discern connect and discern new write data_folder; the rest is yours to edit.\n');
+  const { lines, eol } = cfg, line = `data_folder = ${tomlString(d)}`, had = cfg.top.data_folder;
+  if (had) lines[had.line] = line;
+  else if (cfg.firstTable >= 0) lines.splice(cfg.firstTable, 0, line);
+  else { while (lines.length && lines[lines.length - 1] === '') lines.pop(); lines.push(line, ''); }
+  fs.writeFileSync(CONFIG, lines.join(eol));
+  fs.rmSync(LINK, { force: true });
+}
 function linked() { try { return fs.readFileSync(LINK, 'utf8').trim(); } catch (e) { return ''; } }
+// The folder connect and new last recorded, and where: [folder, 'config.toml' | 'data-folder.txt'], or ['', ''].
+// Throws, as parseConfig does, when config.toml can't be read.
+function connected() {
+  const configured = (parseConfig(configText()).top.data_folder || {}).value;
+  return configured ? [path.resolve(REPO, configured), 'config.toml']
+    : linked() ? [path.resolve(REPO, linked()), 'data-folder.txt'] : ['', ''];
+}
 const [DIR, FROM] = OPT.dir ? [path.resolve(OPT.dir), '--dir']
   : process.env.DISCERNY_DIR ? [path.resolve(process.env.DISCERNY_DIR), 'DISCERNY_DIR']
-  : linked() ? [path.resolve(REPO, linked()), 'data-folder.txt'] : ['', ''];
+  : (() => { try { return connected(); } catch (e) { fail(e.message); } })();
 const NOT_CONNECTED = 'no data folder is connected. Ask the user which folder holds their Discerny data, then run: discern connect <folder>; or start one with: discern new <folder>';
 function isDataFolder(d) { return fs.existsSync(path.join(d, 'TASKS.md')); }
+function notDataFolder(d, want) { return `${d} has no TASKS.md, so it is not a Discerny data folder. To start a new one there, run: discern new ${want}`; }
 
 function out(obj) { process.stdout.write(JSON.stringify(obj, null, 2) + '\n'); }
 function fail(msg, code = 1) { out({ error: msg }); process.exit(code); }
@@ -53,18 +129,14 @@ function stdinJson() {
 
 // ---------------------------------------------------------------- the shared parser from the UI
 function loadCore() {
-  for (const name of ['discerny.html', 'discerny-old.html']) {
-    const p = path.join(REPO, name);
-    if (!fs.existsSync(p)) continue;
-    const html = fs.readFileSync(p, 'utf8');
-    const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-    if (a < 0 || b < a) continue;
-    const names = ['parse', 'serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS'];
-    const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
-    try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
-    catch (e) { fail(`the //<core> block in ${name} did not load: ${e.message}`); }
-  }
-  fail('no //<core> ... //</core> block found in discerny.html or discerny-old.html next to tools/');
+  const p = path.join(REPO, 'discerny.html');
+  const html = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
+  const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
+  if (a < 0 || b < a) fail('no //<core> ... //</core> block found in discerny.html next to tools/');
+  const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS', 'FILES', 'WATCH'];
+  const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
+  try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
+  catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
 }
 const C = loadCore();
 
@@ -189,7 +261,13 @@ function findPerson(q, P) {
   P = P || people();
   return P.find(p => csv(p.meta.em).some(e => e.toLowerCase() === s))
     || P.find(p => csv(p.meta.handle).some(h => h.toLowerCase() === s))
-    || P.find(p => p.name.toLowerCase() === s) || null;
+    || P.find(p => p.name.toLowerCase() === s) || firstNameOnly(s, P);
+}
+// A message often addresses someone by first name alone; that finds them only when no one else has it.
+function firstNameOnly(s, P) {
+  if (/\s|@/.test(s)) return null;
+  const hits = P.filter(p => p.name.toLowerCase().split(/\s+/)[0] === s);
+  return hits.length === 1 ? hits[0] : null;
 }
 
 // ---------------------------------------------------------------- refs
@@ -212,7 +290,7 @@ function loadIndex() {
   const recs = [];
   const add = (store, it) => {
     const st = it.meta.st || '';
-    C.getSub(it, 'ref').forEach(b => recs.push({ store, id: it.id, st, ty: it.meta.ty || '', due: it.meta.due || '', ref: b.v.trim() }));
+    C.getSub(it, 'ref').forEach(b => recs.push({ store, id: it.id, title: it.title, st, ty: it.meta.ty || '', due: it.meta.due || '', ref: b.v.trim() }));
   };
   C.parse(read('TASKS.md')).items.forEach(it => add(it.done ? 'done' : 'tasks', it));
   C.parse(read('INBOX.md')).items.forEach(it => add('inbox', it));
@@ -274,24 +352,90 @@ function matchTeams(c, recs) {
   return null;
 }
 
-function actionFor(res, pass, c) {
+// The calendar source skill tracks Meetings, so invitations and the replies to them are dropped, except
+// the replies the user has to answer: a decline for a small Meeting (4 or fewer invited, or a count the
+// agent couldn't find), a tentative proposing a new time, and any reply that asks something.
+function needsReply(invite, it) {
+  if (!['accepted', 'tentative', 'declined', 'reply'].includes(invite)) return false;
+  return !!it.asks || (invite === 'declined' && !(it.invited > 4)) || (invite === 'tentative' && !!it.new_time);
+}
+// When a reply to an invitation is due: a day after it was received, in the user's time zone, moving a
+// Saturday or Sunday to the Monday at the same time, and never after the Meeting starts. Bank holidays are ignored.
+function replyDue(received, start, tz) {
+  const l = local(toInstant(received), tz);
+  const next = new Date(Date.UTC(+l.slice(0, 4), +l.slice(5, 7) - 1, +l.slice(8, 10) + 1));
+  const wd = next.getUTCDay();
+  if (wd === 6 || wd === 0) next.setUTCDate(next.getUTCDate() + (wd === 6 ? 2 : 1));
+  const due = next.toISOString().slice(0, 10) + l.slice(10);
+  const starts = start ? local(toInstant(start), tz) : '';
+  return starts && starts < due ? starts : due;
+}
+
+// What an inbound candidate on a Meeting's thread is: an ask or commitment is work the Meeting needs, a Task of its own.
+// What a candidate on a Meeting's thread means for it. Work the Meeting needs, or a material change to it, is a Task of its own,
+// due before it starts; a new place or attendance updates the Meeting; its time and cancellation come from the calendar.
+function meetingRule(ids, meetings) {
+  const id = ids.join(', '), due = ids.length === 1 ? meetings.get(ids[0]) : '';
+  return { task: `a new Task related to ${id}, due before it starts${due ? ` (${due})` : ''}`, rest: `a new place or attendance is an update to ${id}; a new time or a cancellation needs nothing: the calendar keeps ${id} in step` };
+}
+const meetingAction = (ids, meetings) => { const m = meetingRule(ids, meetings); return `drop, unless it is an ask, a commitment or a material change (a new agenda, a pre-read): then assess it as ${m.task}; ${m.rest}`; };
+
+function actionFor(res, pass, c, meetings) {
   const id = res.ids && res.ids.length ? res.ids.join(', ') : '';
-  const ask = pass === 'ask';
+  const ask = pass === 'ask', onMeeting = res.ids && res.ids.length && res.ids.every(x => meetings.has(x)), onIds = res.ids || [];
   switch (res.outcome) {
     case 'drop': return 'drop';
-    case 'new': return ask ? 'classify: ask, commitment or neither' : 'clarify: capture it if actionable or FYI, otherwise ignore it';
+    case 'new': return ask ? 'classify: ask, commitment or neither' : 'assess: capture it if actionable or FYI, otherwise ignore it';
     case 'ignored': return 'drop';
     case 'done': return ask ? 'drop' : `drop, unless it reopens the work: then capture it with reopen:true and name ${id} in a note`;
-    case 'inbox': return ask ? 'drop' : `drop, unless it adds an ask or a date: then propose an update to ${id}`;
-    case 'open': return ask ? `report: you replied ${c.when || '<date>'}, consider closing ${id}` : `drop, unless it adds an ask, a date or an answer: then propose an update to ${id}`;
-    case 'waiting': return ask ? `report: ${id} chased ${c.when || '<date>'}` : `if it is from the person ${id} waits on: report "reply received, consider closing ${id}"; otherwise treat it as an update to an open task`;
-    case 'related': return ask ? (res.waiting ? `drop: ${id} already waits on this chat` : 'classify: ask, commitment or neither') : `same topic as ${id}: propose an update; another topic: clarify as new`;
-    case 'ambiguous': return ask ? 'classify: ask, commitment or neither' : `if it plainly continues one of ${id}, propose an update to that item; otherwise clarify it as new and name ${id} in a note`;
+    case 'inbox': return ask ? 'drop' : onMeeting ? meetingAction(onIds, meetings) : `drop, unless it adds an ask or a date: then propose an update to ${id}`;
+    case 'open': return ask ? `report: you replied ${c.when || '<date>'}, consider closing ${id}` : onMeeting ? meetingAction(onIds, meetings) : `drop, unless it adds an ask, a date or an answer: then propose an update to ${id}`;
+    case 'waiting': return ask ? `report: ${id} chased ${c.when || '<date>'}` : `if it is from the person ${id} waits on: report "reply received, consider closing ${id}"; otherwise treat it as an update to an open item`;
+    case 'related': return ask ? (res.waiting ? `drop: ${id} already waits on this chat` : 'classify: ask, commitment or neither') : `same topic as ${id}: propose an update; another topic: assess it as new`;
+    case 'ambiguous': {
+      if (ask) return 'classify: ask, commitment or neither';
+      const mtgIds = res.ids.filter(x => meetings.has(x)), mtg = mtgIds.join(', '), other = res.ids.filter(x => !meetings.has(x));
+      if (!mtg) return `if it plainly continues one of ${id}, propose an update to that item; otherwise assess it as new and name ${id} in a note`;
+      const onOther = other.length ? `if it plainly continues ${other.length > 1 ? `one of ${other.join(', ')}, propose an update to that item` : `${other[0]}, propose an update to it`}; ` : '';
+      const m = meetingRule(mtgIds, meetings);
+      return `${onOther}an ask, a commitment or a material change (a new agenda, a pre-read) about ${mtg} is assessed as ${m.task}: name ${id} in its note; ${m.rest}; otherwise assess it as new and name ${id} in a note`;
+    }
     case 'moved': return `report: ${id} moved to ${res.to}; propose that due; then run: discern ref ${res.ids[0]} "${res.newRef}"`;
     case 'cancelled': return `report: ${id} cancelled, consider closing`;
-    case 'notice': return `propose an update to ${id}: ${res.notice}`;
-    default: return 'clarify';
+    case 'reply': return `propose a Task "${res.title}" due ${res.due}`;
+    default: return 'assess';
   }
+}
+
+// The Format version a data folder records in DISCERNY.md, against this app's, and the message
+// to give when they differ (null when they are the same).
+function formatStanding(dir) {
+  const f = path.join(dir, 'DISCERNY.md');
+  const folder = C.formatOf(fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : ''), is = C.formatIs(folder);
+  const problem = is === 'same' ? null : `the data folder is in Format ${folder}, ${is} than this app's ${C.FORMAT}`;
+  return { format: { folder, app: C.FORMAT, is }, problem };
+}
+// What to do about a folder in a newer Format than this app's, which no Upgrade can fix.
+function newerAdvice(format) {
+  return format.folder === 'next'
+    ? 'An unreleased build of the app upgraded it, so no released app can read it. Tell the user to restore the backup the upgrade made beside the folder'
+    : 'Tell the user to get the newer app from https://github.com/StormSleeper/discerny-app before working on this folder';
+}
+// Why a command refuses a data folder in another Format, and what to do about it (null when it is in this app's).
+function formatRefusal(dir) {
+  const { format, problem } = formatStanding(dir);
+  if (!problem) return null;
+  return `${problem}. ` + (format.is === 'older'
+    ? 'Tell the user, and offer to upgrade it: they can ask you to "upgrade my Discerny folder", or run: discern upgrade'
+    : newerAdvice(format));
+}
+// Records a Format version in a data folder's DISCERNY.md, making the file if it is missing.
+function recordFormat(dir, version) {
+  const f = path.join(dir, 'DISCERNY.md'), t = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+  const comment = `<!-- format: ${version} -->`;
+  fs.writeFileSync(f, !t ? `# Discerny data folder\n\n${comment}\n\nThis folder holds one person's Discerny data, a task tracker kept as Markdown files whose app lives at https://github.com/StormSleeper/discerny-app.\n`
+    : /<!--\s*format:\s*\S+?\s*-->/.test(t) ? t.replace(/<!--\s*format:\s*\S+?\s*-->/, comment)
+    : t.replace(/^(#.*\r?\n)?/, `$1\n${comment}\n`));
 }
 
 // ---------------------------------------------------------------- commands
@@ -305,9 +449,11 @@ CMD.connect = function () {
     return;
   }
   const d = path.resolve(want);
-  if (!isDataFolder(d)) fail(`${d} has no TASKS.md, so it is not a Discerny data folder. To start a new one there, run: discern new ${want}`);
-  fs.writeFileSync(LINK, d + '\n');
-  const warnings = process.env.DISCERNY_DIR ? ['DISCERNY_DIR is set, and it overrides data-folder.txt until it is unset'] : [];
+  if (!isDataFolder(d)) fail(notDataFolder(d, want));
+  connectTo(d);
+  const warnings = process.env.DISCERNY_DIR ? ['DISCERNY_DIR is set, and it overrides config.toml until it is unset'] : [];
+  const { problem } = formatStanding(d);
+  if (problem) warnings.push(problem);
   out({ connected: d, warnings });
 };
 
@@ -318,7 +464,8 @@ CMD.new = function () {
   if (fs.existsSync(d) && fs.readdirSync(d).length) fail(`${d} is not empty: choose a new or empty folder, or run discern connect ${want} if it already holds Discerny data`);
   if (!isDataFolder(STARTER)) fail(`the starter folder ${STARTER} is missing`);
   fs.cpSync(STARTER, d, { recursive: true });
-  fs.writeFileSync(LINK, d + '\n');
+  recordFormat(d, C.FORMAT);
+  connectTo(d);
   out({ created: d, connected: d });
 };
 
@@ -360,26 +507,40 @@ CMD.state = function () {
     out(res); return;
   }
   const gap = val(b, 'gap');
-  let from, to, mode = 'normal';
+  let from, windows, mode = 'normal';
   if (gap) {
     const [g1, g2] = gap.split('/').map(s => new Date(s.trim()));
     if (isNaN(g1) || isNaN(g2) || g2 <= g1) fail(`gap: ${gap} must be <ISO start>/<ISO end>`);
-    from = g1; to = g2; mode = 'backfill';
+    from = g1; windows = dayWindows(g1.getTime(), g2.getTime()); mode = 'backfill';
   } else {
     const wm = val(b, 'watermark');
     if (!wm) { out({ ...res, next: `"${name}" has no watermark. Ask the user how far back to start, then run: discern commit ${name} watermark=<ISO time>` }); process.exit(2); }
-    from = new Date(new Date(wm).getTime() - parseDuration(val(b, 'overlap') || 'PT0S')); to = now;
+    from = new Date(new Date(wm).getTime() - parseDuration(val(b, 'overlap') || 'PT0S')); windows = runWindows(b, now.getTime());
   }
-  const windows = [];
-  for (let t = from.getTime(); t < to.getTime(); t += DAY) windows.push({ after: iso(t), before: iso(Math.min(t + DAY, to.getTime())) });
   res.mode = mode; res.windows = windows; res.cutoff = iso(from);
   if (mode === 'normal' && val(b, 'waiting_min_age') && val(b, 'waiting_max_age')) {
     const after = Math.max(val(b, 'waiting_checked_through') ? new Date(val(b, 'waiting_checked_through')).getTime() : 0, now.getTime() - parseDuration(val(b, 'waiting_max_age')));
     const before = now.getTime() - parseDuration(val(b, 'waiting_min_age'));
-    if (after < before) res.ask_window = { after: iso(after), before: iso(before) };
+    if (after < before) { res.ask_window = { after: iso(after), before: iso(before) }; res.ask_windows = dayWindows(after, before); }
   }
   out(res);
 };
+
+// Day-long windows from from to to, except the day from split (when given), which is cut into hours.
+function dayWindows(from, to, split) {
+  const windows = [];
+  for (let t = from, end; t < to; t = end) {
+    end = Math.min(to, t >= split && t < split + DAY ? t + HOUR : t < split ? Math.min(t + DAY, split) : t + DAY);
+    windows.push({ after: iso(t), before: iso(end) });
+  }
+  return windows;
+}
+// The windows state hands a stream source's Run that starts at now: from its watermark less overlap, with the
+// day a Run found too big in hours.
+function runWindows(b, now) {
+  const split = val(b, 'split') ? Date.parse(val(b, 'split')) : undefined;
+  return dayWindows(Date.parse(val(b, 'watermark')) - parseDuration(val(b, 'overlap') || 'PT0S'), now, split);
+}
 
 CMD.who = function () {
   const q = ARGS.slice(1).join(' ');
@@ -396,6 +557,7 @@ CMD.local = function () {
 
 CMD.match = function () {
   const items = stdinJson(), recs = loadIndex(), tz = timezone(), P = people(), u = userRecord(P);
+  const meetings = new Map(recs.filter(x => x.id && /^meeting$/i.test(x.ty)).map(x => [x.id, x.due]));
   const mine = new Set((u ? csv(u.meta.em) : []).map(e => e.toLowerCase()));
   const today = local(nowDate(), tz).slice(0, 10);
   out(items.map((it, i) => {
@@ -407,8 +569,10 @@ CMD.match = function () {
       const to = String(it.recipient || '').toLowerCase();
       if (to || it.recipient_name) { const p = findPerson(to, P) || findPerson(it.recipient_name, P); r.who = p ? p.name : null; }
     } else {
-      r.from_user = !!sender && mine.has(sender);
-      if (!r.from_user && (sender || it.sender_name)) { const p = findPerson(sender, P) || findPerson(it.sender_name, P); r.who = p ? p.name : null; }
+      // A calendar event the user organises is still theirs to prepare for, so only a message can be the user's own.
+      const own = !!sender && mine.has(sender);
+      if (scheme !== 'cal') r.from_user = own;
+      if (!own && (sender || it.sender_name)) { const p = findPerson(sender, P) || findPerson(it.sender_name, P); r.who = p ? p.name : null; }
     }
     const c = { when: it.when ? local(toInstant(it.when), tz).slice(0, 10) : '' };
     let res = null;
@@ -417,11 +581,11 @@ CMD.match = function () {
       c.norm = n.subject; r.ref = 'mail|' + n.subject; r.refs = [r.ref];
       if (n.notice) r.notice = n.notice;
       if (it.meeting_date) r.refs.push(calRef(it.meeting_date, n.subject));
-      if (n.notice === 'Accepted' || n.notice === 'Tentative') res = { outcome: 'drop', ids: [] };
+      const invite = String(it.invite || n.notice || '').toLowerCase().replace('canceled', 'cancelled');
+      if (invite) res = needsReply(invite, it) ? { outcome: 'reply', ids: [], title: `Reply to ${r.who || it.sender_name}: ${n.subject}`, due: replyDue(it.when, it.meeting_start, tz) } : { outcome: 'drop', ids: [] };
       else {
         res = matchMail(c, recs);
         if (!res && it.meeting_date) res = matchExact(r.refs[1], recs);
-        if (n.notice === 'Declined' || n.notice === 'Canceled') res = res && res.outcome !== 'ignored' && res.ids.length ? { outcome: 'notice', ids: res.ids, notice: n.notice } : { outcome: 'drop', ids: [] };
       }
     } else if (scheme === 'teams') {
       if (!it.chat || !it.message) fail(`item ${r.key}: a teams item needs chat and message`);
@@ -444,10 +608,22 @@ CMD.match = function () {
         }
       }
       if (it.cancelled) res = res && res.ids && res.ids.length && res.outcome !== 'ignored' && res.outcome !== 'done' ? { outcome: 'cancelled', ids: res.ids } : { outcome: 'drop', ids: [] };
+      // A free event is a Meeting only when it is tracked and the user declined it, and it never gets prep or an invite.
+      // Nothing is written for it here: discern meetings adds the calid source key to a declined one.
+      else if (it.free) {
+        r.refs = [];
+        res = !it.suffix && res && ['open', 'inbox', 'waiting'].includes(res.outcome) ? { ...res, free: true } : { outcome: 'drop', ids: [], free: true };
+      }
     } else fail(`item ${r.key}: scheme must be mail, teams or cal`);
     res = res || { outcome: 'new', ids: [] };
     if (r.from_user) res = { outcome: 'drop', ids: [] };
-    Object.assign(r, res); r.action = r.from_user ? "drop: the user's own message" : actionFor(res, pass, c);
+    Object.assign(r, res); r.action = r.from_user ? "drop: the user's own message" : actionFor(res, pass, c, meetings);
+    if (res.free) {
+      delete r.free;
+      r.action = res.ids.length
+        ? 'free: read it once, within the budget; if the user declined it, send it to discern meetings with "declined": true; otherwise drop it from every pass: no Meeting, prep or invite'
+        : 'drop: a free event that is not a tracked Meeting';
+    }
     return r;
   }));
 };
@@ -467,6 +643,21 @@ function insertSub(id, kind, text, after) {
     lines.splice((at >= 0 ? at : i) + 1, 0, `  - ${kind}: ${text.replace(/[\r\n]+/g, ' ')}`);
     write(f, lines.join(eol));
     return { file: f };
+  }
+  fail(`${id} is not in TASKS.md or INBOX.md`);
+}
+
+// Rewrites one item's line in TASKS.md or INBOX.md in place, keeping its sub-lines as they are.
+function rewriteItem(id, change) {
+  for (const f of ['TASKS.md', 'INBOX.md']) {
+    const t = read(f); if (!t) continue;
+    const eol = eolOf(t), lines = t.split(/\r?\n/);
+    const i = itemLine(lines, id); if (i < 0) continue;
+    const it = C.parse(lines[i]).items[0];
+    if (change(it) === false) return;
+    lines[i] = C.serItem({ ...it, subs: [] });
+    write(f, lines.join(eol));
+    return;
   }
   fail(`${id} is not in TASKS.md or INBOX.md`);
 }
@@ -541,19 +732,80 @@ CMD.add = function () {
   if (errors.length) fail('nothing was written. ' + errors.join(' | '));
   if (!built.length) { out({ added: [] }); return; }
   if (OPT.dry) { out({ dry_run: true, would_add: built.map(b => C.serItem({ id: 'T-????', done: false, title: b.title, meta: b.meta, subs: b.subs })) }); return; }
-  // Raise the counter first, so an interrupted run leaves a gap, never a duplicate ID.
+  const { start, next } = raiseCounter(built.length);
+  const added = built.map((b, k) => ({ id: 'T-' + String(start + k).padStart(4, '0'), ...b }));
+  appendLines('INBOX.md', added.map(a => C.serItem({ id: a.id, done: false, title: a.title, meta: a.meta, subs: a.subs })),
+    '# Inbox\n<!-- Proposals for new items from the discern-* source skills, waiting for the user to clarify them. Accept moves an item to TASKS.md; Dismiss logs it in IGNORED.md. IDs come from the next-id counter in TASKS.md. -->\n');
+  out({ added: added.map(a => ({ id: a.id, title: a.title, refs: a.subs.filter(s => s.k === 'ref').map(s => s.v) })), counter: next });
+};
+
+// Raise the counter first, so an interrupted run leaves a gap, never a duplicate ID.
+function raiseCounter(count) {
   let tasks = read('TASKS.md');
   if (!tasks.trim()) fail('TASKS.md is missing or empty');
   const maxId = t => C.parse(t).items.reduce((m, it) => Math.max(m, parseInt(it.id.slice(2), 10) + 1), 0);
   const start = Math.max(C.nextId(C.parse(tasks)), maxId(read('INBOX.md')), maxId(read('DONE.md')));
-  const next = start + built.length, eol = eolOf(tasks);
+  const next = start + count, eol = eolOf(tasks);
   if (/<!-- next-id: \d+ -->/.test(tasks)) tasks = tasks.replace(/<!-- next-id: \d+ -->/, `<!-- next-id: ${next} -->`);
   else { const ls = tasks.split(/\r?\n/); ls.splice(1, 0, `<!-- next-id: ${next} -->`); tasks = ls.join(eol); }
   write('TASKS.md', tasks);
-  const added = built.map((b, k) => ({ id: 'T-' + String(start + k).padStart(4, '0'), ...b }));
-  appendLines('INBOX.md', added.map(a => C.serItem({ id: a.id, done: false, title: a.title, meta: a.meta, subs: a.subs })),
-    '# Inbox\n<!-- Candidates proposed by the discern-* source skills. Accept moves an item to TASKS.md; Dismiss logs it in IGNORED.md. IDs come from the next-id counter in TASKS.md. -->\n');
-  out({ added: added.map(a => ({ id: a.id, title: a.title, refs: a.subs.filter(s => s.k === 'ref').map(s => s.v) })), counter: next });
+  return { start, next };
+}
+
+// The calendar source skill mirrors every Meeting in its window: one not yet tracked goes straight into
+// TASKS.md as an open Meeting Item, keyed on its cal and calid source keys.
+CMD.meetings = function () {
+  const events = stdinJson(), tz = timezone(), now = nowDate(), today = local(now, tz).slice(0, 10);
+  // Prep items once carried the Meeting's own cal source key, so they are never taken for the Meeting.
+  const P = people(), u = userRecord(P), recs = loadIndex().filter(x => !/^Prepare for /.test(x.title || ''));
+  const built = [], unchanged = [], moved = [], cancelled = [], dropped = [];
+  events.forEach((ev, i) => {
+    if (!ev.subject || !ev.start) fail(`event ${i}: an event needs subject and start`);
+    const title = String(ev.subject).replace(/[\r\n]+/g, ' ').replace(/[{}]/g, '').trim();
+    // A free event the user hasn't declined isn't one of their Meetings, even a tracked one, so nothing is written for it.
+    if (ev.free && !ev.cancelled && !ev.declined) { dropped.push(title); return; }
+    const due = local(toInstant(ev.start), tz), date = due.slice(0, 10);
+    const cal = calRef(date, title), calid = ev.event_id ? `calid|${ev.event_id}` : '';
+    const gone = !!(ev.cancelled || ev.declined);
+    const hits = recs.filter(x => x.ref.toLowerCase() === cal.toLowerCase() || (calid && x.ref === calid));
+    if (hits.length) {
+      const hit = hits.find(x => x.id);
+      if (!hit) return;
+      const id = hit.id, open = hit.store === 'tasks' || hit.store === 'inbox';
+      if (calid && open && !hits.some(x => x.ref === calid)) insertSub(id, 'ref', calid, [['ref'], ['link', 'note', 'src']]);
+      // A cancelled or declined Meeting stays open for the user to deal with, and no Run closes it.
+      if (open && gone) {
+        let retitled = '';
+        rewriteItem(id, it => { if (/^Cancelled: /.test(it.title)) return false; retitled = it.title = `Cancelled: ${it.title}`; });
+        if (retitled) { insertSub(id, 'note', `Found cancelled by the calendar Run on ${local(now, tz)}`, [['note'], ['src']]); cancelled.push({ id, title: retitled }); }
+        else unchanged.push(id);
+      // The calendar is the record for a mirrored Meeting's time and title: one moved or renamed takes both.
+      } else if (open && (hit.due !== due || !hits.some(x => x.ref.toLowerCase() === cal.toLowerCase()))) {
+        rewriteItem(id, it => { it.title = title; it.meta.due = due; });
+        insertSub(id, 'ref', cal, [['ref'], ['link', 'note', 'src']]);
+        moved.push({ id, title, from: hit.due, to: due });
+      } else unchanged.push(id);
+      return;
+    }
+    if (gone) return;
+    const days = Math.round((Date.parse(date) - Date.parse(today)) / DAY);
+    const p = findPerson(ev.organizer, P) || findPerson(ev.organizer_name, P);
+    const meta = { ty: 'Meeting', who: p && p !== u ? p.name : undefined, urg: days <= 0 ? 'today' : days <= 7 ? 'week' : days <= 14 ? 'soon' : 'later',
+      p: '2', due, asg: local(now, tz) };
+    Object.keys(meta).forEach(k => { if (meta[k] === undefined) delete meta[k]; });
+    const subs = [{ k: 'src', v: `Calendar "${title}" organised by ${ev.organizer_name || (p && p.name) || ev.organizer || 'unknown'}` }];
+    if (ev.web_link) subs.push({ k: 'link', v: `[Outlook event](${ev.web_link})` });
+    subs.push({ k: 'ref', v: cal });
+    if (calid) subs.push({ k: 'ref', v: calid });
+    built.push({ title, meta, subs });
+  });
+  const added = [];
+  if (built.length) {
+    const { start } = raiseCounter(built.length);
+    built.forEach((b, k) => added.push({ id: 'T-' + String(start + k).padStart(4, '0'), ...b }));
+    appendLines('TASKS.md', added.map(a => C.serItem({ id: a.id, done: false, title: a.title, meta: a.meta, subs: a.subs })));
+  }
+  out({ added: added.map(a => ({ id: a.id, title: a.title, due: a.meta.due })), moved, cancelled, unchanged, dropped });
 };
 
 CMD.ignore = function () {
@@ -568,7 +820,7 @@ CMD.ignore = function () {
     have.add(ref.toLowerCase());
     lines.push(`${ref} | ${date} | ${String(r.reason || 'not actionable').replace(/\|/g, '/').replace(/[\r\n]+/g, ' ').trim()}`);
   });
-  if (lines.length) appendLines('IGNORED.md', lines, '# Ignored\n<!-- One line per thread judged non-actionable: ref | YYYY-MM-DD | reason. Parse from the right (the ref may contain " | "). -->\n');
+  if (lines.length) appendLines('IGNORED.md', lines, '# Ignored\n<!-- One line per source key never to be proposed again, ignored by a source skill or dismissed by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). -->\n');
   out({ ignored: lines.length, skipped });
 };
 
@@ -580,6 +832,13 @@ CMD.commit = function () {
   if (!text.trim()) text = '# Sources\n';
   const eol = eolOf(text);
   let S = parseSources(text), lines = S.lines;
+  // A Run's watermark must stay where it was or be the end of one of the windows state handed it, so it can never
+  // skip a day not yet read.
+  const old = S.blocks[name], wm = (pairs.find(([k]) => k === 'watermark') || [])[1], lr = (pairs.find(([k]) => k === 'last_run') || [])[1];
+  if (val(old, 'watermark') && wm && lr) {
+    const ends = runWindows(old, Date.parse(lr)).map(w => w.before);
+    if (![val(old, 'watermark'), ...ends].some(e => Date.parse(e) === Date.parse(wm))) fail(`watermark ${wm} is not the end of a window this Run was given, so it could skip days not yet read. Send the end of the last window every pass finished, or the watermark it has (${val(old, 'watermark')}) if none was: ${ends.join(', ')}`);
+  }
   if (!S.blocks[name]) {
     while (lines.length && lines[lines.length - 1] === '') lines.pop();
     lines.push('', `## ${name}`);
@@ -596,9 +855,26 @@ CMD.commit = function () {
     } else if (v) lines.splice(b.end + 1, 0, `- ${k}: ${v}`);
     changed.push(k);
   });
+  // The day a Run found too big is read in hours until the watermark is past it.
+  const nb = parseSources(lines.join('\n')).blocks[name], split = nb.keys.split;
+  if (split && Date.parse(val(nb, 'watermark')) >= Date.parse(split.value) + DAY) { lines.splice(split.line, 1); changed.push('split'); }
   write('SOURCES.md', lines.join(eol).replace(/(\r?\n)?$/, eol));
-  out({ source: name, changed });
+  const b = parseSources(lines.join('\n')).blocks[name], res = { source: name, changed };
+  if (changed.includes('last_run') && val(b, 'watermark')) res.behind = behind(name, b);
+  out(res);
 };
+
+// How far a stream source is behind after a Run: the day-long windows of that Run still unread past its watermark,
+// or past its ask cursor in the ask window, whichever is more.
+function behind(name, b) {
+  const end = Date.parse(val(b, 'last_run')), daysFrom = (a, z) => Math.max(0, Math.ceil((z - a) / DAY));
+  let days = daysFrom(Date.parse(val(b, 'watermark')), end);
+  if (val(b, 'waiting_min_age') && val(b, 'waiting_max_age') && val(b, 'waiting_checked_through')) {
+    const asks = Math.max(Date.parse(val(b, 'waiting_checked_through')), end - parseDuration(val(b, 'waiting_max_age')));
+    days = Math.max(days, daysFrom(asks, end - parseDuration(val(b, 'waiting_min_age'))));
+  }
+  return { days, report: days ? `${name}: ${days} day${days > 1 ? 's' : ''} still to read, run again` : `${name}: caught up` };
+}
 
 CMD.log = function () {
   const text = readStdin().trim();
@@ -645,7 +921,9 @@ CMD.check = function () {
   const S = sources();
   if (!S.blocks.defaults) warnings.push('SOURCES.md has no "## defaults" block');
   else if (!val(S.blocks.defaults, 'timezone')) warnings.push('SOURCES.md defaults has no timezone');
-  out({ ok: !errors.length, errors, warnings, items: all.size, next_id: counter ? +counter : null });
+  const { format, problem } = formatStanding(DIR);
+  if (problem) errors.push(problem);
+  out({ ok: !errors.length, errors, warnings, format, items: all.size, next_id: counter ? +counter : null });
   if (errors.length) process.exit(1);
 };
 
@@ -681,13 +959,179 @@ CMD.migrate = function () {
   out({ written: OPT.write, changes, next: OPT.write || !changes.length ? undefined : 'run again with --write to apply' });
 };
 
+// ---------------------------------------------------------------- the Upgrade (see migrations/README.md)
+// The Migrations newer than a Format version, oldest first, with next last, and what each one holds.
+function pendingMigrations(format) {
+  const names = fs.existsSync(MIGRATIONS) ? fs.readdirSync(MIGRATIONS).filter(n => (n === 'next' || /^\d+(\.\d+)*$/.test(n)) && fs.statSync(path.join(MIGRATIONS, n)).isDirectory()) : [];
+  return names.filter(n => C.versionCmp(n, format) > 0).sort(C.versionCmp).map(version => {
+    const d = path.join(MIGRATIONS, version), ins = path.join(d, 'INSTRUCTIONS.md');
+    let instructions = null;
+    if (fs.existsSync(ins)) {
+      const m = /^Optional:\s*(yes|no)\s*$/mi.exec(fs.readFileSync(ins, 'utf8'));
+      if (!m) fail(`migrations/${version}/INSTRUCTIONS.md does not say at the top whether it is optional (Optional: yes, or Optional: no)`);
+      instructions = m[1].toLowerCase() === 'yes' ? 'optional' : 'required';
+    }
+    return { version, script: fs.existsSync(path.join(d, 'migrate.mjs')), instructions };
+  });
+}
+// Runs a Migration's script on the data folder: a preview, or the changes themselves with write.
+function runMigration(version, write) {
+  const r = spawnSync(process.execPath, [path.join(MIGRATIONS, version, 'migrate.mjs'), DIR, ...(write ? ['--write'] : [])], { encoding: 'utf8' });
+  return { ok: r.status === 0, out: (r.stdout || '') + (r.stderr || '') };
+}
+
+CMD.upgrade = function () {
+  const { format, problem } = formatStanding(DIR);
+  if (format.is === 'newer') fail(`${problem}. ${newerAdvice(format)}`, 2);
+  const pending = pendingMigrations(format.folder);
+  if (format.is === 'same') { out({ folder: format.folder, app: format.app, pending, message: `the data folder is up to date: it is in Format ${format.app}, the same as this app` }); return; }
+  if (OPT.done) {
+    if (!pending.length || pending[0].version !== OPT.done) fail(`${OPT.done} is not the next pending Migration: ${pending.length ? pending[0].version + ' is' : 'none is pending'}`);
+    recordFormat(DIR, OPT.done);
+    out({ folder: format.folder, app: format.app, recorded: OPT.done, pending: pending.slice(1) });
+    return;
+  }
+  if (!OPT.write) {
+    out({ folder: format.folder, app: format.app, pending, preview: pending[0] && pending[0].script ? runMigration(pending[0].version, false).out : null });
+    return;
+  }
+  if (!pending.length) { out({ folder: format.folder, app: format.app, pending, applied: [] }); return; }
+  const backup = path.join(path.dirname(DIR), `${path.basename(DIR)}.backup-${format.folder}`);
+  if (!fs.existsSync(backup)) fs.cpSync(DIR, backup, { recursive: true });
+  const res = { folder: format.folder, app: format.app, backup, applied: [], declined: [] };
+  for (const m of OPT.one ? pending.slice(0, 1) : pending) {
+    const r = m.script ? runMigration(m.version, true) : { ok: true };
+    if (!r.ok) fail(`migrations/${m.version}/migrate.mjs failed, so the Upgrade stopped with the folder recorded as Format ${res.applied.at(-1) || format.folder}. Its backup is ${backup}. It said: ${r.out.trim()}`);
+    if (OPT.one && m.instructions) {
+      out({ ...res, ran: m.version, next: `carry out migrations/${m.version}/INSTRUCTIONS.md with the user${m.instructions === 'optional' ? ' (they may decline it)' : ''}, then run: discern upgrade --done ${m.version}` });
+      return;
+    }
+    if (m.instructions === 'required') {
+      out({ ...res, stopped: m.version, next: `Migration ${m.version} needs judgement: carry out migrations/${m.version}/INSTRUCTIONS.md with the user, then run: discern upgrade --done ${m.version}` });
+      process.exit(2);
+    }
+    recordFormat(DIR, m.version);
+    res.applied.push(m.version);
+    if (m.instructions === 'optional') res.declined.push(m.version);
+  }
+  out(res);
+};
+
+// Serves the UI and the data folder to it on 127.0.0.1 until it is stopped, so the page works in any
+// browser and an Agent can open it. Prints {url, folder, problem} once listening. It starts with no usable
+// folder too, when it can switch to one, and then serves no data files until it has one.
+CMD.serve = function () {
+  const send = (res, code, body, headers = {}) => {
+    res.writeHead(code, { 'Content-Type': typeof body === 'string' ? 'text/plain; charset=utf-8' : 'application/json', ...headers });
+    res.end(typeof body === 'string' ? body : JSON.stringify(body));
+  };
+  // Only the files the page reads or writes, matched as written in the URL, so no name is ever resolved against the disk.
+  const NAMES = new Set([...Object.values(C.FILES), ...C.WATCH]);
+  const mtime = (f) => Math.floor(fs.statSync(f).mtimeMs);
+  const MAX_PUT = 10 * 1024 * 1024;
+  const bodyText = async (req) => { const chunks = []; let size = 0; for await (const c of req) { size += c.length; if (size <= 64e3) chunks.push(c); } return Buffer.concat(chunks).toString('utf8'); };
+  // The folder being served, null when there is none, and the session the page must name so that a tab
+  // still open on an earlier folder can't read or write this one. A new session each time a folder is opened.
+  const open = { dir: null, session: null };
+  const openFolder = (d) => { open.dir = d; open.session = d ? randomUUID() : null; };
+  openFolder(SERVE_WITHOUT_FOLDER ? null : DIR);
+  const fp = (f) => path.join(open.dir, f);
+  // What stops the page using the folder: 'none', 'format', or undefined when nothing does.
+  const problem = () => !open.dir ? 'none' : formatRefusal(open.dir) ? 'format' : undefined;
+  const server = http.createServer(async (req, res) => {
+    // A web page can reach 127.0.0.1 through DNS rebinding, but its requests then carry its own Host.
+    const port = server.address().port;
+    if (![`127.0.0.1:${port}`, `localhost:${port}`].includes(req.headers.host)) return send(res, 403, 'forbidden');
+    // A same-origin fetch always names the page's origin, so a PUT without it came from somewhere else.
+    if (req.method === 'PUT' && ![`http://127.0.0.1:${port}`, `http://localhost:${port}`].includes(req.headers.origin)) return send(res, 403, 'forbidden');
+    if (req.method === 'GET' && req.url === '/') return send(res, 200, fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'), { 'Content-Type': 'text/html; charset=utf-8' });
+    if (req.method === 'GET' && req.url === '/api/info') {
+      return send(res, 200, { folder: open.dir, name: open.dir && path.basename(open.dir), version: C.VERSION, session: open.session, problem: problem(), canSwitch: CAN_SWITCH });
+    }
+    // Suggestions for Change folder: the connected folder and the Example beside the App folder, when each is a data folder.
+    if (req.method === 'GET' && req.url === '/api/folders') {
+      let mine = '';
+      try { [mine] = connected(); } catch (e) { /* a config.toml edited into something unreadable suggests nothing */ }
+      const found = [...new Set([mine, path.resolve(REPO, '..', 'discerny-example')])].filter(d => d && isDataFolder(d));
+      return send(res, 200, found.map(d => ({ folder: d, name: path.basename(d) })));
+    }
+    if (req.method === 'PUT' && req.url === '/api/folder') {
+      let want;
+      try { want = JSON.parse(await bodyText(req)).path; } catch (e) { /* answered below */ }
+      if (!CAN_SWITCH) return send(res, 409, `this server was started with ${FROM === '--dir' ? '--dir' : 'DISCERNY_DIR set'}, which overrides config.toml, so it can't switch folders: stop it, run discern connect <folder>, and start it again${FROM === 'DISCERNY_DIR' ? ' with DISCERNY_DIR unset' : ''}`);
+      if (typeof want !== 'string' || !want.trim()) return send(res, 400, 'send {"path": "<folder>"} as JSON');
+      const d = path.resolve(REPO, want.trim());
+      if (!isDataFolder(d)) return send(res, 400, notDataFolder(d, want.trim()));
+      const refusal = formatRefusal(d);
+      if (refusal) return send(res, 409, refusal);
+      try { connectTo(d); } catch (e) { return send(res, 409, e.message); }
+      openFolder(d);
+      return send(res, 200, { folder: d, name: path.basename(d) });
+    }
+    // While the folder can't be used, nothing in it is read or written but DISCERNY.md, which the page's Format gate reads.
+    const stop = problem();
+    if (stop === 'none') return send(res, 409, 'no data folder is open: choose one with Change folder');
+    if (stop === 'format' && !(req.method === 'GET' && req.url === '/api/file/DISCERNY.md')) return send(res, 409, formatRefusal(open.dir));
+    if (req.headers['x-discerny-session'] !== open.session) return send(res, 412, 'the server now serves another folder: reload the page');
+    if (req.method === 'GET' && req.url === '/api/mtimes') return send(res, 200, Object.fromEntries([...NAMES].map(n => [n, fs.existsSync(fp(n)) ? mtime(fp(n)) : 0])));
+    if (req.method === 'GET' && req.url === '/api/drafts') {
+      const dr = fp('drafts');
+      const names = fs.existsSync(dr) ? fs.readdirSync(dr, { withFileTypes: true }).filter(e => e.isFile() && /\.(md|txt)$/i.test(e.name)).map(e => e.name) : [];
+      return send(res, 200, names.sort().map(n => ({ name: n, text: fs.readFileSync(path.join(dr, n), 'utf8'), mod: mtime(path.join(dr, n)) })));
+    }
+    const file = /^\/api\/file\/([^/]+)$/.exec(req.url);
+    if (!file || !NAMES.has(file[1])) return send(res, 404, 'not found');
+    const f = fp(file[1]);
+    if (req.method === 'GET') {
+      if (!fs.existsSync(f)) return send(res, 404, 'not found');
+      return send(res, 200, fs.readFileSync(f, 'utf8'), { 'X-Mtime': String(mtime(f)) });
+    }
+    if (req.method === 'PUT') {
+      if (!/^text\/plain\s*(;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, 'send the file as text/plain');
+      // The whole body is read even when it is too big, so the page gets the answer rather than a dropped connection.
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of req) { size += chunk.length; if (size <= MAX_PUT) chunks.push(chunk); }
+      if (size > MAX_PUT) return send(res, 413, `a file can be at most ${MAX_PUT} bytes`);
+      const body = Buffer.concat(chunks).toString('utf8');
+      // The page refuses to blank a file that has content, and so does the server.
+      if (!body.trim() && fs.existsSync(f) && fs.readFileSync(f, 'utf8').trim()) return send(res, 400, 'refusing to write an empty file over one with content');
+      const ifMtime = req.headers['if-mtime'];
+      if (ifMtime !== undefined && Number(ifMtime) !== (fs.existsSync(f) ? mtime(f) : 0)) return send(res, 409, 'the file changed since it was read');
+      const tmp = `${f}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, body);
+      fs.renameSync(tmp, f);
+      return send(res, 200, { mtime: mtime(f) });
+    }
+    send(res, 405, 'method not allowed');
+  });
+  server.listen(Number(OPT.port), '127.0.0.1', () => {
+    process.stdout.write(JSON.stringify({ url: `http://127.0.0.1:${server.address().port}/`, folder: open.dir,
+      problem: problem() === 'none' ? `${NOT_CONNECTED}; or open the page and use Change folder` : formatRefusal(open.dir) || undefined }) + '\n');
+  });
+};
+
 const cmd = ARGS[0];
+if (cmd === '--version' || cmd === 'version') {
+  process.stdout.write((C.VERSION || 'unknown') + '\n');
+  process.exit(0);
+}
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|ignore|note|ref|commit|log|check|migrate> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|meetings|ignore|note|ref|commit|log|check|migrate|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
-if (cmd !== 'connect' && cmd !== 'new') {
+// serve starts with no usable folder when it can switch to one, so the page can offer Change folder.
+const CAN_SWITCH = FROM !== '--dir' && FROM !== 'DISCERNY_DIR';
+const SERVE_WITHOUT_FOLDER = cmd === 'serve' && CAN_SWITCH && !(DIR && isDataFolder(DIR));
+if (cmd === 'serve' && !CAN_SWITCH && !isDataFolder(DIR)) fail(`${DIR} (from ${FROM}) has no TASKS.md, so it is not a Discerny data folder`, 2);
+if (cmd !== 'connect' && cmd !== 'new' && !SERVE_WITHOUT_FOLDER) {
   if (!DIR) fail(NOT_CONNECTED, 2);
   if (!isDataFolder(DIR)) fail(`${DIR} (from ${FROM}) has no TASKS.md, so it is not a Discerny data folder`);
+}
+// A folder in another Format is refused before any command reads or writes it, except those that show or fix that.
+// serve starts on one too, and its page shows the Format gate.
+if (!['connect', 'new', 'check', 'upgrade', 'serve'].includes(cmd)) {
+  const refusal = formatRefusal(DIR);
+  if (refusal) fail(refusal, 2);
 }
 CMD[cmd]();

@@ -1,0 +1,38 @@
+# Changelog
+
+What's changed in Discerny, newest first. Each line is one build. A dated section is a release, which you get by pulling `main`. The Unreleased section holds builds on `dev` that haven't been released yet. See the Version section of the README for what the numbers mean.
+
+## 0.1.1.19 (2026-10-21)
+
+No Upgrade is needed: data folders from v0.1.0.0 work as they are.
+
+### Use Discerny in any browser
+- Run `node tools/discern.mjs serve` and open the address it prints to use Discerny in any browser, Firefox and Safari included. Opening `discerny.html` in Chrome or Edge works as before.
+- In a served page, Change folder opens another data folder from inside the page, and `serve` starts even before a folder is connected.
+- The connected data folder is now kept as `data_folder` in the app folder's `config.toml`. An existing `data-folder.txt` moves over the next time you connect.
+- The earlier four-page UI, `discerny-old.html`, has been removed. `discerny.html` is now the only page.
+
+### Working with items
+- A new All items page lists everything open, grouped and sorted as you choose, with a tag filter and a search that shows every match.
+- Quick add can set the Urgency and a Description.
+- Mark an item done from its panel or straight from the inbox, and snooze a due date by a day, three days, a week or four weeks.
+- Add systems and URLs to an item, find done items when relating, and copy a person's, project's or system's ID from its page.
+- Labels match the docs: Urgency reads Today, This week, Soon, Later and FYI; an item's links are Relationships and its web addresses are URLs; dependencies show as "Depends on" and "Needed by"; and the Inbox asks you to clarify proposals.
+
+### Mail, Teams and calendar
+- Every meeting on your calendar for the coming days now goes straight into your open items, and stays up to date when it moves or is cancelled.
+- A meeting you declined but kept on your calendar shows as cancelled.
+- Asks and pre-reads about a meeting arrive as their own Task, due before the meeting. Calendar checks only suggest preparing for meetings they haven't seen before.
+- Mail leaves invitations to the calendar and proposes only the replies you need to answer, Accepted and Tentative ones included. If your mail settings filter those replies out, the mail check offers to remove the filter.
+- After time away, mail and Teams checks catch up over several runs and tell you how many days are still to read. Refresh keeps going until they're caught up.
+
+### Versions and Formats
+- The navigation panel shows which version of Discerny you're running, and `node tools/discern.mjs --version` prints it.
+- New data folders get a `DISCERNY.md` that records their Format, and `discern check` says whether a folder's Format matches the app's.
+- Discerny refuses to open a data folder in a different Format, and tells you how to upgrade it or which app to use instead.
+- From now on, Releases that change the Format can be applied with `node tools/discern.mjs upgrade`, which backs the folder up first. You can also ask your agent to "upgrade my Discerny folder" and it takes you through each change before making it.
+
+### Docs and the Example
+- The instructions, skills, README and file headers use one name for each thing throughout.
+- The Example's dates can be brought up to today with `node tools/refresh-dates.mjs` in its folder.
+- The Example has the same line endings on every platform, so the helper's tests pass on Windows too.

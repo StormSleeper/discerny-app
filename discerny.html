@@ -113,6 +113,7 @@ svg.i.s{width:13px;height:13px;stroke-width:2.1}
 .dot.err{background:var(--danger)}
 .foot-btn{display:flex;align-items:center;gap:8px;border:0;background:none;color:var(--ink-2);padding:6px;border-radius:7px;font-size:13px;text-align:left;min-height:32px}
 .foot-btn:hover{background:var(--hover)}
+.side-foot .ver{padding:6px 6px 0}
 .app.rail .side{padding:12px 6px;align-items:center}
 .app.rail .hide-rail{display:none}
 .app.rail .brand{padding:2px 0 10px}
@@ -169,6 +170,11 @@ textarea.in{resize:vertical;width:100%;line-height:1.45}
 select.in{padding-right:28px}
 input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);flex:none;cursor:pointer}
 .err-t{font-size:12.5px;color:var(--danger);margin-top:4px}
+.fform{display:flex;flex-direction:column;gap:12px}
+.fform .fl{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.fform .in{width:100%}
+.fsugs{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.fsugs .hint{margin-right:4px}
 .hint{font-size:12.5px;color:var(--muted)}
 
 /* ---------- badges ---------- */
@@ -231,6 +237,10 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .qa label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:0 0 6px}
 .qa-row{display:flex;gap:8px}
 .qa-row .in{flex:1;min-width:0;min-height:38px;font-size:15px}
+.qa-more{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start;margin-top:8px}
+.qa-more .fl{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--muted)}
+.qa-more .fl:last-child{flex:1;min-width:min(260px,100%)}
+.qa-more textarea{resize:vertical;font:inherit}
 .qa-prev{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
 .qa-type{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;padding:2px 9px;border-radius:999px;border:1px solid var(--accent-bd);background:var(--info-bg);color:var(--accent-ink)}
 .qa-title{font-size:13px;color:var(--ink-2);margin-top:6px}
@@ -274,6 +284,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .box{background:var(--surface-2);border:1px solid var(--line-3);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px}
 .pick{display:flex;gap:8px;align-items:baseline;width:100%;border:1px solid var(--line);border-radius:8px;background:var(--surface);min-height:34px;padding:6px 10px;text-align:left;color:var(--ink)}
 .pick:hover{border-color:var(--field)}
+[data-k="seg-snooze"] button{white-space:nowrap}
+.picks{display:flex;flex-direction:column;gap:4px;max-height:320px;overflow-y:auto}
 .ask{border-radius:10px;padding:10px 12px;border:1px solid var(--claude-bd);background:var(--claude-bg);display:flex;flex-direction:column;gap:6px}
 .ask .txt{white-space:pre-line;color:var(--ink-2);overflow-wrap:anywhere}
 .ask .ts{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted);align-items:center}
@@ -285,6 +297,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .entity{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:0 0 22px;display:flex;flex-direction:column;gap:12px}
 .pills{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .pills .sp{margin-left:auto}
+.row .pills{gap:4px;margin-top:4px}
+.row .pills .chipbtn{min-height:24px;padding:1px 8px;font-size:12px}
 .ent-note{font-size:15px;color:var(--ink-2);max-width:76ch}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px 22px}
 .fact .k{font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:3px}
@@ -386,10 +400,12 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var URG={today:'Today',week:'This week',soon:'Next 2 weeks',later:'Later',fyi:'FYI / awareness'};
+var VERSION='0.1.1.19'; // the app's version; tools/discern.mjs reads it from here
+var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
+var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','week','soon','later','fyi'];
 var TYPES=['Task','Meeting','Process','Document','FYI'];
-var TYPE_LABEL={Task:'Tasks',Meeting:'Meetings',Process:'Processes & SOPs',Document:'Documents to read',FYI:'FYI / awareness'};
+var TYPE_LABEL={Task:'Tasks',Meeting:'Meetings',Process:'Processes & SOPs',Document:'Documents to read',FYI:'FYI'};
 var STATUS=['To do','In progress','Waiting'];
 var ITEM_RE=/^- \[( |x)\] (T-\d+) (.*)$/;
 function parseMeta(s){var m={};s.split(';').forEach(function(p){var i=p.indexOf(':');if(i>0)m[p.slice(0,i).trim()]=p.slice(i+1).trim();else if(p.trim())(m[' bare']=m[' bare']||[]).push(p.trim());});return m;}
@@ -530,24 +546,96 @@ function rParse(text){var lines=String(text||'').replace(/\r/g,'').split('\n');i
 function kindOf(id){return String(id).split('-')[0];}
 var REL_PAIRS={'T|SYS':'concerns','T|P':'involves','P|SYS':'owns','PRJ|SYS':'uses'};
 function relLine(a,b){
-  if(a===b)return {err:'An item cannot be linked to itself.'};
+  if(a===b)return {err:'Nothing can be related to itself.'};
   var ka=kindOf(a),kb=kindOf(b);
   if(ka===kb&&ka!=='PRJ'){var s=[a,b].sort();return {line:'- '+s[0]+' ~ '+s[1]+' | related'};}
   var k1=ka+'|'+kb,k2=kb+'|'+ka;
   if(REL_PAIRS[k1])return {line:'- '+a+' -> '+b+' | '+REL_PAIRS[k1]};
   if(REL_PAIRS[k2])return {line:'- '+b+' -> '+a+' | '+REL_PAIRS[k2]};
-  return {err:'Cannot link '+ka+' to '+kb+' (projects are linked to tasks with the Project field).'};}
+  return {err:'Cannot relate '+ka+' to '+kb+' (an item joins a project through its Project field).'};}
+// versions compare part by part, a missing part counting as 0; 'next' (an unlanded Migration) is newer than any
+function versionCmp(a,b){if(a===b)return 0;if(a==='next')return 1;if(b==='next')return -1;
+  var x=String(a).split('.'),y=String(b).split('.');
+  for(var i=0;i<Math.max(x.length,y.length);i++){var d=(+x[i]||0)-(+y[i]||0);if(d)return d<0?-1:1;}return 0;}
+// DISCERNY.md records a data folder's Format version as <!-- format: <version> -->; no file or no comment means 0.1.0.0
+function formatOf(text){var m=/<!--\s*format:\s*(\S+?)\s*-->/.exec(String(text||''));return m?m[1]:'0.1.0.0';}
+// how a folder's Format version stands against this app's: 'same', 'older' or 'newer'
+function formatIs(v){var c=versionCmp(v,FORMAT);return c?(c<0?'older':'newer'):'same';}
+// the all-items workbench: items grouped and sorted as the User chooses -> [{key, label, items}]
+function workbench(items,o){
+  var by=o.group,groups={},keys=[];
+  function keysOf(i){if(by==='tag')return tagsOf(i).length?tagsOf(i):[''];if(by==='type')return [i.meta.ty||'Task'];
+    if(by==='project')return prjOf(i).length?prjOf(i):[''];
+    if(by==='person'){var w=i.meta.who||'';return [w==='Unassigned'?'':w];}return [i.meta.urg||'later'];}
+  if(o.tag)items=items.filter(function(i){return tagsOf(i).indexOf(o.tag)>=0;});
+  if(o.q)items=items.filter(function(i){return itemMatch(i,o.q,o.prjName)!==null;});
+  items.forEach(function(i){keysOf(i).forEach(function(k){if(!groups[k]){groups[k]=[];keys.push(k);}groups[k].push(i);});});
+  function label(k){if(by==='urg')return URG[k]||k;if(by==='type')return TYPE_LABEL[k]||k;
+    if(by==='project')return k?(o.prjName&&o.prjName(k))||k:'Not in a project';return k||(by==='person'?'Unassigned':'Untagged');}
+  var fixed=by==='urg'?URG_ORDER:by==='type'?TYPES:null;
+  function rank(k){var n=fixed.indexOf(k);return n<0?fixed.length:n;}
+  if(fixed)keys.sort(function(a,b){return rank(a)-rank(b)||a.localeCompare(b);});
+  else if(by==='project')keys.sort(function(a,b){return (a==='')-(b==='')||label(a).localeCompare(label(b));});
+  else keys.sort(function(a,b){return (a==='')-(b==='')||groups[b].length-groups[a].length||a.localeCompare(b);});
+  function urgRank(i){var n=URG_ORDER.indexOf(i.meta.urg||'later');return n<0?URG_ORDER.indexOf('later'):n;}
+  function byUrg(a,b){return urgRank(a)-urgRank(b);}
+  function byDue(a,b){return String(a.meta.due||'9999').localeCompare(String(b.meta.due||'9999'));}
+  function first(x,y){return function(a,b){return x(a,b)||y(a,b);};}
+  function byAsg(dir){return function(a,b){var x=String(a.meta.asg||''),y=String(b.meta.asg||'');return (!x)-(!y)||dir*x.localeCompare(y);};}
+  var lead=o.sort==='due'?first(byDue,byUrg):o.sort==='new'?byAsg(-1):o.sort==='old'?byAsg(1):first(byUrg,byDue);
+  function cmp(a,b){return lead(a,b)||((+a.meta.p||2)-(+b.meta.p||2))||(a.id<b.id?-1:a.id>b.id?1:0);}
+  return keys.map(function(k){return {key:k,label:label(k),items:groups[k].slice().sort(cmp)};});}
+// search: every word of the query must start a word in the item. Returns where it matched ('' for the ID, title, person
+// or tags) or null. Where is the first place holding every word, else the first holding a word the title line lacks.
+function tokensOf(hay){return String(hay).toLowerCase().split(/[^a-z0-9À-ɏ-]+/).filter(Boolean);}
+function itemMatch(i,q,prjName){
+  var words=tokensOf(q);if(!words.length)return '';
+  function sv(k){return getSub(i,k).map(function(b){return b.v;}).join(' ');}
+  var places=[['',i.id+' '+i.title+' '+(i.meta.who||'')+' '+tagsOf(i).join(' ')],
+    ['project',prjOf(i).map(function(p){return (prjName&&prjName(p))||p;}).join(' ')],
+    ['notes',sv('note')],['your notes',sv('my')],['sub-tasks',sv('sub')],['the source',sv('src')]]
+    .map(function(p){return {where:p[0],toks:tokensOf(p[1])};});
+  function has(p,w){return p.toks.some(function(t){return t.indexOf(w)===0;});}
+  if(!words.every(function(w){return places.some(function(p){return has(p,w);});}))return null;
+  var full=places.filter(function(p){return words.every(function(w){return has(p,w);});})[0];
+  if(full)return full.where;
+  var rest=words.filter(function(w){return !has(places[0],w);});
+  return places.filter(function(p){return rest.some(function(w){return has(p,w);});})[0].where;}
+// quick add: parseQuick's result plus what the User chose -> {title, meta, notes} for the new item
+function daysBetween(a,b){function t(s){var p=String(s).slice(0,10).split('-').map(Number);return Date.UTC(p[0],p[1]-1,p[2]);}return Math.round((t(b)-t(a))/86400000);}
+function urgForDue(due,today){var n=daysBetween(today,due);return n<=0?'today':(n<=7?'week':(n<=14?'soon':'later'));}
+// overdue: open and due on a day before today. A Meeting is overdue from the day after it takes place, not from its start time
+function isOverdue(i,today){return !i.done&&/^\d{4}-\d{2}-\d{2}/.test(String(i.meta.due||''))&&daysBetween(today,i.meta.due)<0;}
+// Snooze: the new due date is today plus the step in days, a Saturday or Sunday moved to the Monday, keeping the old due date's time of day
+function snooze(due,days,today){var p=String(today).slice(0,10).split('-').map(Number),d=new Date(Date.UTC(p[0],p[1]-1,p[2]+days));
+  var w=d.getUTCDay();if(w===6||w===0)d.setUTCDate(d.getUTCDate()+(w===6?2:1));
+  var t=/^\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/.exec(String(due||''));
+  return d.toISOString().slice(0,10)+(t?' '+t[1]:'');}
+function quickItem(q,o){
+  var due=q.date?q.date+(q.time?' '+q.time:''):'';
+  var meta={ty:q.ty};
+  if(q.who)meta.who=q.who;
+  if(q.prj.length)meta.prj=q.prj.join(',');
+  if(q.tags.length)meta.tg=q.tags.join(',');
+  meta.urg=o.urg||(q.ty==='FYI'?'fyi':(due?urgForDue(due,o.today):'week'));
+  meta.p=q.p||'2';
+  if(due)meta.due=due;
+  meta.asg=o.now;
+  var notes=String(o.description||'').split(/[\r\n\u2028\u2029\u0085]/).map(function(s){return s.trim();}).filter(Boolean);
+  return {title:q.title,meta:meta,notes:notes};}
+// The data folder files the page reads and writes; `discern serve` serves these and no others.
+var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', ignored: 'IGNORED.md' };
+var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
+// The header the page writes when it creates a missing RELATIONSHIPS.md or ASK-AGENT.md: the starter file's, word for word.
+var REL_HEAD = ['# Relationships', '<!-- One line per relationship, stored once (shown on both): `- A ~ B | related` (symmetric) or `- A -> B | type` (involves, concerns, owns, uses). Validate: both IDs exist, no duplicates, nothing related to itself. `dep:` on items is separate. -->', ''];
+var ASK_HEAD = ['# Ask agent queue', '<!-- The agent queue. One line per agent request: - ID | YYYY-MM-DD HH:MM | text. Written by discerny.html. The agent removes a line once it is actioned (skill: discern-ask-agent) and records it in ASK-AGENT-LOG.md. -->', ''];
 //</core>
 
-/* ===================== constants shared with discerny-old.html ===================== */
+/* ===================== constants ===================== */
 var EDEF = {
   PRJ: { file: 'PROJECTS.md', key: 'projects', word: 'project', Word: 'Project', types: ['Project', 'Workstream', 'Pod'], sts: ['Active', 'On hold', 'Done'], pk: 'parent' },
   SYS: { file: 'SYSTEMS.md', key: 'systems', word: 'system', Word: 'System', types: ['Platform', 'Pipeline', 'Registry', 'Application', 'Instrument', 'Other'], sts: ['Live', 'In build', 'Delayed', 'Retired'], pk: 'part-of' }
 };
-var REL_HEAD = ['# Relationships', '<!-- One line per link, stored once (shown on both items): `- A ~ B | related` (symmetric) or `- A -> B | type` (involves, concerns, owns, uses). Validate: both IDs exist, no duplicates, no self-links. `dep:` on tasks is separate. -->', ''];
-var ASK_HEAD = ['# Ask agent queue', '<!-- One line per pending note: - ID | YYYY-MM-DD HH:MM | text. Written by discerny.html. The agent removes a line once it is actioned (skill: discern-ask-agent) and records it in ASK-AGENT-LOG.md. -->', ''];
-var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', ignored: 'IGNORED.md' };
-var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md'];
 var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, ignored: function (t) { return { text: String(t || '') }; } };
 function serKey(k, m) {
   if (k === 'tasks' || k === 'inbox' || k === 'done') return serialize(m);
@@ -569,17 +657,19 @@ function lsJson(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.p
 
 /* ===================== app state ===================== */
 var S = {
-  m: null, ver: 0, ready: false, lost: false, lastSync: 0, fresh: new Set(), folder: '',
+  m: null, ver: 0, ready: false, lost: false, moved: false, lastSync: 0, fresh: new Set(), folder: '',
+  folderPath: '', folderErr: '', folderSugs: [], folderBusy: false,
   view: 'today', entity: null, sel: null, panel: false, tab: 'details',
   group: lsGet('discerny-group', 'project'), pf: 'all', pq: '', pgroup: lsGet('discerny-pgroup', 'none'),
-  qa: '', qaType: null, palette: false, palQ: '', palI: 0, dialog: null,
-  composer: {}, subDraft: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', suggestOn: {},
-  dismissFor: null, confirm: null, editAsk: null, editAskText: '', adding: null, addName: '', addGrp: '', addType: '',
+  wb: Object.assign({ group: 'urg', sort: 'urg', tag: '' }, lsJson('discerny-wb', {})), wq: '',
+  qa: '', qaType: null, qaMore: false, qaUrg: '', qaDesc: '', palette: false, palQ: '', palI: 0, dialog: null,
+  composer: {}, subDraft: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', linkKind: 'All', linkDone: false, sysQ: '', suggestOn: {},
+  dismissFor: null, snoozeFor: null, confirm: null, editAsk: null, editAskText: '', adding: null, addName: '', addGrp: '', addType: '',
   linkLabel: '', linkUrl: '', toasts: [], doneLimit: 60, copied: null,
   gate: { mode: 'pick', msg: '' }, side: lsGet('discerny-side', 'auto'), theme: lsGet('discerny-theme', 'system')
 };
 
-/* ===================== folder handle (shared with discerny-old.html) ===================== */
+/* ===================== folder handle ===================== */
 var dir = null;
 function idb() {
   return new Promise(function (res, rej) {
@@ -605,11 +695,49 @@ async function idbSet(k, v) {
 
 /* ===================== file input/output ===================== */
 var lastMod = {};
+// Set when the page is served by node tools/discern.mjs serve: {folder, name, version, session, problem, canSwitch}
+// from /api/info. The four functions below then go through the server instead of the folder handle.
+var srv = null;
+// Every request names the folder this page opened, so a server since switched to another folder refuses it (412).
+async function api(path, opts) {
+  opts = Object.assign({}, opts);
+  if (srv && srv.session) opts.headers = Object.assign({ 'X-Discerny-Session': srv.session }, opts.headers);
+  try { return await fetch(path, opts); }
+  catch (e) { var err = new Error('the Discerny server isn’t running'); err.name = 'ServerDown'; throw err; }
+}
+async function apiError(r) {
+  var e = new Error((await r.text()) || 'the server answered ' + r.status);
+  e.name = r.status === 409 ? 'ConflictError' : r.status === 412 ? 'FolderChanged' : 'ServerError';
+  return e;
+}
+async function serverInfo() {
+  try { var r = await fetch('/api/info'); if (!r.ok) return false; srv = await r.json(); return true; } catch (e) { return false; }
+}
+async function serverMtimes() {
+  var r = await api('/api/mtimes');
+  if (!r.ok) throw await apiError(r);
+  return await r.json();
+}
 async function readText(name) {
+  if (srv) {
+    var r = await api('/api/file/' + name);
+    if (r.status === 404) { lastMod[name] = 0; return ''; }
+    if (!r.ok) throw await apiError(r);
+    lastMod[name] = Number(r.headers.get('X-Mtime'));
+    return await r.text();
+  }
   try { var h = await dir.getFileHandle(name); var f = await h.getFile(); lastMod[name] = f.lastModified; return await f.text(); }
   catch (e) { if (e && e.name === 'NotFoundError') { lastMod[name] = 0; return ''; } throw e; }
 }
 async function writeText(name, text) {
+  if (srv) {
+    var hd = { 'Content-Type': 'text/plain; charset=utf-8' };
+    if (lastMod[name] !== undefined) hd['If-Mtime'] = String(lastMod[name]);
+    var r = await api('/api/file/' + name, { method: 'PUT', headers: hd, body: text });
+    if (!r.ok) throw await apiError(r);
+    lastMod[name] = (await r.json()).mtime;
+    return;
+  }
   var h = await dir.getFileHandle(name, { create: true });
   var w = await h.createWritable();
   try { await w.write(text); await w.close(); } catch (e) { try { await w.abort(); } catch (e2) { /* ignore */ } throw e; }
@@ -617,10 +745,12 @@ async function writeText(name, text) {
   lastMod[name] = f.lastModified;
 }
 async function modOf(name) {
+  if (srv) return (await serverMtimes())[name] || 0;
   try { var h = await dir.getFileHandle(name); return (await h.getFile()).lastModified; }
   catch (e) { if (e && e.name === 'NotFoundError') return 0; throw e; }
 }
 async function readDrafts() {
+  if (srv) { var r = await api('/api/drafts'); if (!r.ok) throw await apiError(r); return await r.json(); }
   var out = [];
   var d;
   try { d = await dir.getDirectoryHandle('drafts'); } catch (e) { return out; }
@@ -969,7 +1099,7 @@ var OPS = {
     });
   },
   addRel: function (line) {
-    return op('Link', ['rels'], function (M) { var R = M.rels, l = remapLine(line); if (R.lines.indexOf(l) >= 0) return; if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); });
+    return op('Relate', ['rels'], function (M) { var R = M.rels, l = remapLine(line); if (R.lines.indexOf(l) >= 0) return; if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); });
   },
   removeRel: function (line) {
     return op('Unlink', ['rels'], function (M) { var R = M.rels, k = R.lines.indexOf(remapLine(line)); if (k >= 0) { R.lines.splice(k, 1); relRefresh(R); } });
@@ -1068,11 +1198,11 @@ var OPS = {
     });
   },
   addEntLink: function (kind, id, v) {
-    return op('Add link to ' + id, [EDEF[kind].key], function (M) { var e = entIn(M, kind, id); if (e && !e.subs.some(function (s) { return s.k === 'link' && s.v === v; })) e.subs.push({ k: 'link', v: v }); });
+    return op('Add URL to ' + id, kind === 'T' ? ANY : [EDEF[kind].key], function (M) { var e = kind === 'T' ? (fItem(M, id) || {}).it : entIn(M, kind, id); if (e && !e.subs.some(function (s) { return s.k === 'link' && s.v === v; })) e.subs.push({ k: 'link', v: v }); });
   },
   removeEntLink: function (kind, id, v) {
-    return op('Remove link from ' + id, [EDEF[kind].key], function (M) {
-      var e = entIn(M, kind, id);
+    return op('Remove URL from ' + id, kind === 'T' ? ANY : [EDEF[kind].key], function (M) {
+      var e = kind === 'T' ? (fItem(M, id) || {}).it : entIn(M, kind, id);
       if (!e) return;
       var k = e.subs.findIndex(function (s) { return s.k === 'link' && s.v === v; });
       if (k >= 0) e.subs.splice(k, 1);
@@ -1137,14 +1267,29 @@ async function persist(job) {
     var changed = job.keys.filter(function (x) { return JSON.stringify(M[x]) !== snap[x]; }), moved = false;
     for (i = 0; i < changed.length && !moved; i++) if ((await modOf(FILES[changed[i]])) !== mods[changed[i]]) moved = true;
     if (moved) continue;
-    for (i = 0; i < changed.length; i++) await writeText(FILES[changed[i]], serKey(changed[i], M[changed[i]]));
+    var wrote = 0;
+    try { for (i = 0; i < changed.length; i++) { await writeText(FILES[changed[i]], serKey(changed[i], M[changed[i]])); wrote++; } }
+    catch (e) { if (e && e.name === 'ConflictError' && !wrote) continue; throw e; }
     job.keys.forEach(function (x) { BASE[x] = countOf(x, M[x]); });
     return;
   }
   throw new Error('another program kept changing the files while this was being saved');
 }
-function isPermErr(e) { return !!e && (e.name === 'NotAllowedError' || e.name === 'SecurityError'); }
+// Lost access to the folder: the browser's permission, or the server that was serving it.
+function isPermErr(e) { return !!e && (e.name === 'NotAllowedError' || e.name === 'SecurityError' || e.name === 'ServerDown'); }
+// The server now serves another folder than the one this page opened: nothing more is read or saved, and the page offers to reload.
+function isMoved(e) { return !!e && e.name === 'FolderChanged'; }
 function errText(e) { return (e && (e.message || e.name)) || 'unknown error'; }
+// The gate for a folder whose DISCERNY.md records a Format other than this app's, or null when they match.
+async function formatGate() {
+  var v = formatOf(await readText('DISCERNY.md')), is = formatIs(v);
+  return is === 'same' ? null : { mode: v === 'next' ? 'fmtnext' : is === 'older' ? 'fmtold' : 'fmtnew', msg: '', format: v };
+}
+// An open folder whose Format changed (an Upgrade ran while the page was open) is refused, not written to.
+function refuseFormat(g) {
+  if (Q.jobs.some(function (j) { return !j.sync; })) g.msg = 'Changes you had not saved yet were not written to it.';
+  Q.jobs = []; Q.blocked = null; S.ready = false; S.gate = g;
+}
 async function kick() {
   if (Q.running || Q.blocked) return;
   Q.running = true;
@@ -1152,13 +1297,16 @@ async function kick() {
   while (Q.jobs.length && !Q.blocked) {
     var job = Q.jobs[0];
     try {
+      var g = await formatGate();
+      if (g) { refuseFormat(g); break; }
       if (job.sync) { var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now(); }
       else { await persist(job); Q.wrote = true; Q.lastSaved = Date.now(); }
       Q.jobs.shift();
       applyAliasNews();
     } catch (e) {
       console.error(e);
-      if (isPermErr(e)) { S.lost = true; Q.blocked = { job: job, msg: 'The browser no longer has permission to use the folder.' }; }
+      if (isMoved(e)) { S.moved = true; Q.blocked = { job: job, msg: errText(e) }; }
+      else if (isPermErr(e)) { S.lost = true; Q.blocked = { job: job, msg: 'The browser no longer has permission to use the folder.' }; }
       else if (job.sync) { Q.jobs.shift(); toastShow('Couldn’t read the folder: ' + errText(e)); }
       else Q.blocked = { job: job, msg: errText(e) };
     }
@@ -1168,6 +1316,14 @@ async function kick() {
   render();
 }
 async function regainAccess() {
+  if (srv) {
+    // A server started again on another folder: reload rather than save this folder's changes into it.
+    var was = srv.folder;
+    if (!(await serverInfo())) return false;
+    if (srv.folder !== was) { location.reload(); return false; }
+    S.lost = false;
+    return true;
+  }
   try { var p = await dir.requestPermission({ mode: 'readwrite' }); if (p === 'granted') { S.lost = false; return true; } } catch (e) { /* not allowed without a click */ }
   return false;
 }
@@ -1214,13 +1370,14 @@ function applyLoaded(m) {
   applyAliasNews();
 }
 async function poll() {
-  if (!S.ready || Q.running || Q.jobs.length || Q.blocked || document.hidden) return;
+  if (!S.ready || S.moved || Q.running || Q.jobs.length || Q.blocked || document.hidden) return;
   try {
     var changed = false;
-    for (var i = 0; i < WATCH.length; i++) { var t = await modOf(WATCH[i]); if (t !== (lastMod[WATCH[i]] || 0)) { changed = true; break; } }
+    var mt = srv ? await serverMtimes() : null;
+    for (var i = 0; i < WATCH.length; i++) { var t = mt ? mt[WATCH[i]] || 0 : await modOf(WATCH[i]); if (t !== (lastMod[WATCH[i]] || 0)) { changed = true; break; } }
     if (changed) requestSync(true);
     else if (Date.now() - (S.lastSync || 0) > 30000) requestSync(false);
-  } catch (e) { if (isPermErr(e)) { S.lost = true; render(); } }
+  } catch (e) { if (isMoved(e)) { S.moved = true; render(); } else if (isPermErr(e)) { S.lost = true; render(); } }
 }
 
 /* A record saved under a different number than the screen showed: rename it on screen and follow it. */
@@ -1411,7 +1568,7 @@ function whoLabel(i) { return isWaiting(i) ? 'Waiting on' : (i.meta.ty === 'Meet
 function realWho(i) { var w = i.meta.who || ''; return w === 'Unassigned' ? '' : w; }
 
 /* "When" is worked out from due; urg only matters when there is no due date. */
-var URGW = { today: ['Today, no date', 'warn', 1], week: ['This week', 'soft', 2], soon: ['Next 2 weeks', 'soft', 3], later: ['Later', 'soft', 5], fyi: ['FYI', 'soft', 6] };
+var URGW = { today: ['Today, no date', 'warn', 1], week: ['This week', 'soft', 2], soon: ['Soon', 'soft', 3], later: ['Later', 'soft', 5], fyi: ['FYI', 'soft', 6] };
 function when(i) {
   var due = i.meta.due || '';
   if (isDay(due)) {
@@ -1424,7 +1581,7 @@ function when(i) {
   var u = URGW[i.meta.urg] || URGW.later;
   return { label: u[0], tone: u[1], bucket: u[2], key: '9999-' + u[2] };
 }
-function urgFor(due) { var n = dd(due); return n <= 0 ? 'today' : (n <= 7 ? 'week' : (n <= 14 ? 'soon' : 'later')); }
+function urgFor(due) { return urgForDue(due, todayStr()); }
 function sortItems(list) {
   return list.slice().sort(function (a, b) {
     var wa = when(a), wb = when(b);
@@ -1655,7 +1812,7 @@ function reviewState() {
 function reviewSteps() {
   var rs = reviewState().done, open = openList();
   var inbox = S.m.inbox.items.length;
-  var overdue = open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) < 0 && i.meta.ty !== 'FYI'; }).length;
+  var overdue = open.filter(function (i) { return isOverdue(i, todayStr()) && i.meta.ty !== 'FYI'; }).length;
   var dueToday = todayItems().length;
   var waiting = open.filter(isWaiting), long = waiting.filter(function (i) { return age(i) >= 14; }).length;
   var active = entsOf('PRJ').filter(function (p) { return (p.meta.st || 'Active') === 'Active'; });
@@ -1665,14 +1822,14 @@ function reviewSteps() {
   var gp = activePeople().filter(function (p) { return gaps(p).length; }).length;
   var asks = S.m.asks.notes.length;
   var defs = [
-    ['inbox', 'Empty the inbox', 'Accept, correct or dismiss everything the agent proposed.', inbox ? inbox + ' to triage' : 'Clear', inbox ? 'warn' : 'ok', 'Open Inbox', 'inbox'],
+    ['inbox', 'Empty the inbox', 'Accept, correct or dismiss everything the agent proposed.', inbox ? inbox + ' to clarify' : 'Clear', inbox ? 'warn' : 'ok', 'Open Inbox', 'inbox'],
     ['today', 'Deal with overdue items', 'Re-date anything that slipped. Nothing should stay overdue.', overdue ? overdue + ' overdue' : 'None overdue · ' + dueToday + ' due today', overdue ? 'danger' : 'ok', 'Open Today', 'today'],
     ['waiting', 'Chase what you are waiting for', 'Anything waiting more than two weeks probably needs a nudge.', waiting.length + ' waiting · ' + long + ' over 14 days', long ? 'warn' : 'ok', 'Open Waiting for', 'waiting'],
     ['projects', 'Give every project a next action', 'A project without a next action is stuck.', stuck ? plural(stuck, 'project') + ' without a next action' : 'All ' + active.length + ' have one', stuck ? 'danger' : 'ok', 'Open Projects', 'projects'],
     ['undated', 'Date or park undated actions', 'Give each one a due date, or set it to Later to park it.', undated ? undated + ' without a date' : 'All dated or parked', undated ? 'warn' : 'ok', 'Open Next actions', 'next'],
     ['fyi', 'File the FYIs', 'Read them, then acknowledge so they leave your lists.', fyi ? fyi + ' to file' : 'Nothing to file', fyi ? 'warn' : 'ok', 'Open FYI', 'fyi'],
     ['people', 'Fill in missing people details', 'Colleagues need organisation, department, job title and manager.', gp ? gp + ' missing details' : 'All complete', gp ? 'warn' : 'ok', 'Open People', 'people-gaps'],
-    ['claude', 'Clear the agent queue', 'Run discern-ask-agent so the agent works through your notes.', asks ? plural(asks, 'note') + ' queued' : 'Queue empty', asks ? 'warn' : 'ok', 'Open Agent', 'claude']
+    ['claude', 'Clear the agent queue', 'Run discern-ask-agent so the agent works through your requests.', asks ? plural(asks, 'request') + ' queued' : 'Queue empty', asks ? 'warn' : 'ok', 'Open Agent', 'claude']
   ];
   return defs.map(function (x, k) { return { key: x[0], n: k + 1, title: x[1], help: x[2], count: x[3], tone: x[4], attention: x[4] !== 'ok', done: !!rs[x[0]], action: x[5], go: x[6] }; });
 }
@@ -1680,12 +1837,11 @@ function reviewSteps() {
 /* ===================== search everything ===================== */
 var CMDS = [
   ['Go to Today', 'go', 'today'], ['Go to Inbox', 'go', 'inbox'], ['Go to Next actions', 'go', 'next'], ['Go to Waiting for', 'go', 'waiting'],
-  ['Go to Upcoming', 'go', 'upcoming'], ['Go to FYI', 'go', 'fyi'], ['Go to Projects', 'go', 'projects'], ['Go to People', 'go', 'people'],
+  ['Go to Upcoming', 'go', 'upcoming'], ['Go to FYI', 'go', 'fyi'], ['Go to All items', 'go', 'all'], ['Go to Projects', 'go', 'projects'], ['Go to People', 'go', 'people'],
   ['Go to Systems', 'go', 'systems'], ['Start the weekly review', 'go', 'review'], ['Go to Done', 'go', 'done'], ['Open the agent queue', 'go', 'claude'],
-  ['Add a task', 'cmd', 'quickadd'], ['Appearance: follow Windows', 'cmd', 'theme-system'], ['Appearance: light', 'cmd', 'theme-light'], ['Appearance: dark', 'cmd', 'theme-dark'],
+  ['Add an item', 'cmd', 'quickadd'], ['Appearance: follow Windows', 'cmd', 'theme-system'], ['Appearance: light', 'cmd', 'theme-light'], ['Appearance: dark', 'cmd', 'theme-dark'],
   ['Sidebar: expand or collapse', 'cmd', 'side'], ['Keyboard shortcuts', 'cmd', 'keys'], ['Read the folder again', 'cmd', 'sync']
 ];
-function tokensOf(hay) { return String(hay).toLowerCase().split(/[^a-z0-9À-ɏ-]+/).filter(Boolean); }
 function search(qs) {
   var words = String(qs || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
   var groups = [];
@@ -1695,21 +1851,18 @@ function search(qs) {
   var tasks = [];
   [['open', S.m.tasks.items], ['inbox', S.m.inbox.items], ['done', S.m.done.items]].forEach(function (src) {
     src[1].forEach(function (i) {
+      var where = itemMatch(i, qs, prjName);
+      if (where === null) return;
       var lab = has(i.id + ' ' + i.title);
-      var fields = [['', i.id + ' ' + i.title + ' ' + (i.meta.who || '') + ' ' + tagsOf(i).join(' ')], ['notes', notesOf(i).join(' ')], ['your notes', myOf(i).join(' ')], ['sub-tasks', subsOf(i).map(function (x) { return x.v; }).join(' ')], ['the source', srcOf(i).join(' ')]];
-      if (!has(fields.map(function (f) { return f[1]; }).join(' '))) return;
-      var full = fields.filter(function (f) { return has(f[1]); })[0];
-      var part = fields.filter(function (f) { var t = tokensOf(f[1]); return words.some(function (w) { return t.some(function (x) { return x.indexOf(w) === 0; }); }); })[0];
-      var hit = full || part;
       var bits = [listName(i)];
       if (src[0] === 'open') bits.push(when(i).label);
       if (src[0] === 'done' && i.meta.done) bits.push('done ' + fmt(i.meta.done));
-      if (hit && hit[0]) bits.push('matched in ' + hit[0]);
+      if (where) bits.push('matched in ' + where);
       tasks.push({ label: i.title, sub: bits.join(' · '), id: i.id, act: 'open', arg: i.id, lab: lab, rank: (src[0] === 'open' ? 0 : src[0] === 'inbox' ? 1 : 2) + (lab ? 0 : 3) });
     });
   });
   tasks.sort(function (a, b) { return a.rank - b.rank || (a.id < b.id ? -1 : 1); });
-  if (tasks.length) groups.push({ title: 'Tasks', items: tasks.slice(0, 8), more: tasks.length - 8, lab: tasks[0].lab });
+  if (tasks.length) groups.push({ title: 'Tasks', items: tasks.slice(0, 8).concat(tasks.length > 8 ? [{ label: 'Show all ' + tasks.length + ' matching items', sub: 'On All items, with inbox and done', id: '', act: 'all', arg: String(qs).trim() }] : []), more: tasks.length - 8, lab: tasks[0].lab });
   var people = S.m.people.people.filter(function (p) { return has(p.name + ' ' + Object.keys(p.meta).map(function (k) { return p.meta[k]; }).join(' ') + ' ' + p.grp + ' ' + notesOf(p).join(' ')); })
     .map(function (p) { return { label: p.name, sub: [p.meta.title, p.meta.co, p.meta.st === 'Left' ? 'left' : ''].filter(Boolean).join(' · ') || 'Person', id: p.meta.id || '', act: 'person', arg: p.meta.id || '', lab: has(p.name) }; })
     .sort(function (a, b) { return (b.lab - a.lab) || a.label.localeCompare(b.label); });
@@ -1746,6 +1899,7 @@ var ICONS = {
   waiting: '<path d="M5 22h14M5 2h14M17 22v-4.2a2 2 0 0 0-.6-1.4L12 12l-4.4 4.4a2 2 0 0 0-.6 1.4V22M7 2v4.2a2 2 0 0 0 .6 1.4L12 12l4.4-4.4a2 2 0 0 0 .6-1.4V2"/>',
   upcoming: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
   fyi: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/>',
+  all: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/>',
   projects: '<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
   people: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>',
   systems: '<rect x="2" y="3" width="20" height="8" rx="2"/><rect x="2" y="13" width="20" height="8" rx="2"/><path d="M6 7h.01M6 17h.01"/>',
@@ -1793,7 +1947,7 @@ function vRow(i, o) {
   if (S.fresh.has(i.id)) badges += badge('Updated', 'info');
   if (!done) {
     var bl = openBlockers(i);
-    if (bl.length) badges += badge('Blocked by ' + bl.join(', '), 'danger');
+    if (bl.length) badges += badge('Depends on ' + bl.join(', '), 'danger');
     if (waiting && !inbox) { var a = age(i); badges += badge('Waiting ' + plural(a, 'day'), a >= 14 ? 'warn' : 'info'); }
     if (i.meta.st === 'In progress') badges += badge('In progress');
     if (i.meta.p === '1') badges += badge('High', 'flag');
@@ -1809,18 +1963,25 @@ function vRow(i, o) {
   var lead = (inbox || fyi) ? '<span class="pip' + (fyi ? ' grey' : '') + '" aria-hidden="true"></span>'
     : '<input type="checkbox" data-ch="done" data-id="' + i.id + '"' + (done ? ' checked' : '') + ' aria-label="' + esc((done ? 'Reopen: ' : 'Mark done: ') + i.title) + '">';
   var acts = '';
-  if (inbox) acts = bt('Accept', 'accept', { id: i.id, cls: 'primary sm' }) + bt('Dismiss…', 'dismiss-open', { id: i.id, cls: 'sm', attrs: ' aria-expanded="' + (S.dismissFor === i.id) + '"' });
+  if (inbox) acts = bt('Accept', 'accept', { id: i.id, cls: 'primary sm' }) + doneBtn(i, 'sm') + bt('Dismiss…', 'dismiss-open', { id: i.id, cls: 'sm', attrs: ' aria-expanded="' + (S.dismissFor === i.id) + '"' });
+  else if (o.snooze && canSnooze(i)) acts = bt('Snooze…', 'snooze-open', { id: i.id, cls: 'sm', attrs: ' aria-expanded="' + (S.snoozeFor === i.id) + '"' });
   else if (!done && o.waiting && waiting) acts = bt('Chase', 'chase', { id: i.id, cls: 'sm' }) + bt('Got it', 'gotit', { id: i.id, cls: 'sm' });
   else if (fyi) acts = bt('Acknowledge', 'ack', { id: i.id, cls: 'sm' }) + bt('Make it a task', 'maketask', { id: i.id, cls: 'sm quiet' });
-  var reasons = inbox && S.dismissFor === i.id && S.dismissAt !== 'panel' ? vReasons(i.id) : '';
+  var reasons = inbox && S.dismissFor === i.id && S.dismissAt !== 'panel' ? vReasons(i.id) : (o.snooze && S.snoozeFor === i.id && canSnooze(i) ? '<div class="reasons">' + vSnooze(i.id) + lk('Cancel', 'snooze-cancel') + '</div>' : '');
   var sel = S.sel === i.id && S.panel;
   return '<div class="row' + (sel ? ' sel' : '') + (S.cur === i.id ? ' cur' : '') + (done ? ' done' : '') + '" data-k="r-' + i.id + '" data-row="' + i.id + '">' +
     '<div class="lead">' + lead + '</div>' +
     '<div class="body"><button type="button" class="t" data-act="open" data-id="' + i.id + '"' + (sel ? ' aria-current="true"' : '') + '>' + (time ? '<span class="tm">' + time + '</span>' : '') + esc(title) + '</button>' +
-    (meta.length ? '<div class="meta">' + esc(meta.join(' · ')) + '</div>' : '') + reasons + '</div>' +
+    (meta.length ? '<div class="meta">' + esc(meta.join(' · ')) + '</div>' : '') +
+    (o.showTags && tagsOf(i).length ? '<div class="pills">' + tagsOf(i).map(function (t) { return '<button type="button" class="chipbtn" data-act="wb-tag" data-v="' + esc(t) + '"' + pressed(S.wb.tag === t) + ' title="Show only #' + esc(t) + '">#' + esc(t) + '</button>'; }).join('') + '</div>' : '') + reasons + '</div>' +
     '<div class="right">' + badges + (showWhen ? '<span class="b when' + (wh.tone ? ' ' + wh.tone : '') + '">' + esc(whenLabel) + '</span>' : '') + acts + '<span class="id">' + i.id + '</span></div></div>';
 }
 var REASONS = ['Not actionable', 'Already handled', 'Duplicate', 'Not mine'];
+// Done: on an FYI it reads Acknowledge; on a Proposal it accepts and marks done in one step
+function doneBtn(i, cls) { return bt(i.meta.ty === 'FYI' ? 'Acknowledge' : 'Done', 'done-now', { id: i.id, cls: cls, attrs: whereOf(i.id) === 'inbox' ? ' title="Accept and mark done"' : '' }); }
+var SNOOZE = [[1, '+1 day'], [3, '+3 days'], [7, '+1 week'], [28, '+4 weeks']];
+function canSnooze(i) { return whereOf(i.id) === 'open' && isDay(i.meta.due) && i.meta.ty !== 'Meeting'; }
+function vSnooze(id) { return '<div class="seg" data-k="seg-snooze" role="group" aria-label="Snooze ' + id + ' from today">' + SNOOZE.map(function (x) { return '<button type="button" data-act="snooze" data-id="' + id + '" data-v="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>'; }
 function vReasons(id) {
   return '<div class="reasons" data-k="reasons" role="group" aria-label="Why are you dismissing ' + id + '?"><span class="hint">Why?</span>' +
     REASONS.map(function (r) { return '<button type="button" class="chipbtn" data-act="dismiss" data-id="' + id + '" data-v="' + esc(r) + '">' + esc(r) + '</button>'; }).join('') +
@@ -1845,13 +2006,13 @@ function rowsOf(list, o) { return list.map(function (i) { return vRow(i, o); });
 /* ===================== focus lists ===================== */
 function viewToday() {
   var open = openList().filter(function (i) { return i.meta.ty !== 'FYI' && !isWaiting(i); });
-  var overdue = sortItems(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) < 0; }));
+  var overdue = sortItems(open.filter(function (i) { return isOverdue(i, todayStr()); }));
   var dueToday = sortByDue(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) === 0; }));
   var planned = sortItems(open.filter(function (i) { return !isDay(i.meta.due) && i.meta.urg === 'today'; }));
   var horizon = addWorkdays(todayStr(), 3);
   var coming = sortByDue(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) > 0 && i.meta.due.slice(0, 10) <= horizon; }));
   var b = '';
-  if (overdue.length) b += vSec('overdue', 'Overdue', rowsOf(overdue));
+  if (overdue.length) b += vSec('overdue', 'Overdue', rowsOf(overdue, { snooze: true }));
   b += vSec('duetoday', 'Due today', rowsOf(dueToday, { timeFirst: true }), { empty: 'Nothing is due today.' });
   if (planned.length) b += vSec('planned', 'Planned for today', rowsOf(planned), { hint: 'marked Today, no date set' });
   b += vSec('coming', 'Coming up', rowsOf(coming), { hint: 'next 3 working days', empty: 'Nothing dated in the next 3 working days.', link: lk('See everything upcoming', 'go', { v: 'upcoming' }) });
@@ -1872,18 +2033,24 @@ function vCards() {
   var card = function (k, v, vcls, s, act, a) { return '<button type="button" class="card" data-act="' + act + '"' + dv(act === 'open' ? 'id' : 'v', a) + '><span class="k">' + esc(k) + '</span><span class="v' + (vcls ? ' ' + vcls : '') + '">' + esc(v) + '</span><span class="s">' + esc(s) + '</span></button>'; };
   return '<div class="cards" data-k="cards">' +
     card('Meetings', meetToday.length ? meetToday.length + ' today' : 'None today', '', nextM ? 'Next: ' + when(nextM).label + ', ' + clip(nextM.title, 60) : 'Nothing scheduled', nextM ? 'open' : 'go', nextM ? nextM.id : 'upcoming') +
-    card('Inbox', inbox ? inbox + ' to triage' : 'Clear', inbox ? 'accent' : '', 'Proposed by your source skills', 'go', 'inbox') +
+    card('Inbox', inbox ? inbox + ' to clarify' : 'Clear', inbox ? 'accent' : '', 'Proposed by your source skills', 'go', 'inbox') +
     card('Waiting for', waiting.length + ' open', '', waiting.length ? 'Oldest: ' + (realWho(waiting[0]) || 'someone') + ', ' + plural(age(waiting[0]), 'day') : 'Nobody', 'go', 'waiting') +
-    card('Agent', plural(asks, 'note') + ' queued', 'claude', drafts ? plural(drafts, 'draft') + ' ready to review' : 'No drafts waiting', 'go', 'claude') +
+    card('Agent', plural(asks, 'request') + ' queued', 'claude', drafts ? plural(drafts, 'draft') + ' ready to review' : 'No drafts waiting', 'go', 'claude') +
     '</div>';
 }
 function vQuick() {
   var text = S.qa || '', q = text.trim() ? parseQuick(text, S.qaType) : null;
-  var h = '<div class="qa" data-k="qa"><label for="qa-in">Add a task</label><div class="qa-row">' +
+  var h = '<div class="qa" data-k="qa"><label for="qa-in">Add an item</label><div class="qa-row">' +
     '<input id="qa-in" class="in" type="text" autocomplete="off" spellcheck="true" data-in="qa" data-kd="qa" value="' + esc(text) + '" placeholder="Call @Sam about the budget +launch #finance mon 10:00 !high" aria-describedby="qa-help">' +
-    bt('Add', 'qa-add', { cls: 'primary' }) + '</div>';
+    bt('More', 'qa-more', { attrs: ' aria-expanded="' + S.qaMore + '" aria-controls="qa-more"' }) + bt('Add', 'qa-add', { cls: 'primary' }) + '</div>';
+  if (S.qaMore) {
+    h += '<div class="qa-more" id="qa-more" data-k="qa-more"><label class="fl" for="qa-urg">Urgency<select id="qa-urg" class="in" data-ch="qa-urg">' +
+      opts([['', 'From the due date']].concat(URG_ORDER.map(function (u) { return [u, URG[u]]; })), S.qaUrg) + '</select></label>' +
+      '<label class="fl" for="qa-desc">Description<textarea id="qa-desc" class="in" rows="3" data-in="qaDesc" placeholder="What it is and anything worth knowing (optional)">' + esc(S.qaDesc) + '</textarea></label></div>';
+  }
   if (q && q.title) {
     var chips = '';
+    if (S.qaUrg) chips += badge(URG[S.qaUrg]);
     if (q.date) chips += badge('Due ' + fmt(q.date) + (q.time ? ' ' + q.time : ''));
     if (q.who) chips += badge(q.who + (q.whoNew ? ' (not in People)' : ''), q.whoNew ? 'warn' : '');
     q.prj.forEach(function (p) { var e = entById(p); chips += badge(e ? e.name : p, 'info'); });
@@ -1901,8 +2068,8 @@ function vQuick() {
 function viewInbox() {
   var l = inboxList(), r = lastRefresh();
   return {
-    title: 'Inbox', sub: plural(l.length, 'proposal') + (r ? ' · last refresh ' + r : ''),
-    body: '<div class="list">' + vSec('triage', 'To triage', rowsOf(l), { hint: 'oldest first', empty: 'Inbox zero. Nothing is waiting to be triaged.' }) + '</div>'
+    title: 'Inbox', sub: plural(l.length, 'proposal') + (r ? ' · last run ' + r : ''),
+    body: '<div class="list">' + vSec('triage', 'To clarify', rowsOf(l), { hint: 'oldest first', empty: 'Inbox zero. Nothing is waiting to be clarified.' }) + '</div>'
   };
 }
 function viewNext() {
@@ -1927,12 +2094,12 @@ function viewNext() {
   } else {
     b += vSec('all', 'All actions', rowsOf(sortItems(ready)), { empty: 'Nothing to do. Enjoy it.' });
   }
-  if (blocked.length) b += vSec('blocked', 'Blocked', rowsOf(sortItems(blocked)), { hint: 'starts when the blocking task is done' });
+  if (blocked.length) b += vSec('blocked', 'Waiting on a dependency', rowsOf(sortItems(blocked)), { hint: 'each can start when its dependency is done' });
   if (!b) b = vSec('all', 'All actions', [], { empty: 'Nothing to do. Enjoy it.' });
   var tools = '<div class="seg" role="group" aria-label="Group by">' + [['project', 'By project'], ['kind', 'By kind'], ['none', 'One list']].map(function (g) {
     return '<button type="button" data-act="group" data-v="' + g[0] + '"' + pressed(S.group === g[0]) + '>' + g[1] + '</button>';
   }).join('') + '</div>';
-  return { title: 'Next actions', sub: ready.length + ' you can do now · ' + blocked.length + ' blocked', tools: tools, qa: true, body: '<div class="list">' + b + '</div>' };
+  return { title: 'Next actions', sub: ready.length + ' you can do now · ' + blocked.length + ' waiting on a dependency', tools: tools, qa: true, body: '<div class="list">' + b + '</div>' };
 }
 function viewWaiting() {
   var list = openList().filter(isWaiting), by = {};
@@ -1951,11 +2118,11 @@ function viewWaiting() {
 }
 function viewUpcoming() {
   var list = openList().filter(function (i) { return isDay(i.meta.due) && i.meta.ty !== 'FYI'; });
-  var overdue = sortByDue(list.filter(function (i) { return dd(i.meta.due) < 0; }));
+  var overdue = sortByDue(list.filter(function (i) { return isOverdue(i, todayStr()); }));
   var days = {}, order = [];
   sortByDue(list.filter(function (i) { return dd(i.meta.due) >= 0; })).forEach(function (i) { var k = i.meta.due.slice(0, 10); if (!days[k]) { days[k] = []; order.push(k); } days[k].push(i); });
   var b = '';
-  if (overdue.length) b += vSec('u-overdue', 'Overdue', rowsOf(overdue));
+  if (overdue.length) b += vSec('u-overdue', 'Overdue', rowsOf(overdue, { snooze: true }));
   order.forEach(function (k) {
     var n = dd(k), t = (n === 0 ? 'Today, ' : (n === 1 ? 'Tomorrow, ' : '')) + fmtLong(k);
     b += vSec('u-' + k, t, days[k].map(function (i) { return vRow(i, { timeFirst: true, hideWhen: true, waiting: isWaiting(i) }); }), { count: '' });
@@ -1969,6 +2136,34 @@ function viewUpcoming() {
 function viewFyi() {
   var l = sortItems(openList().filter(function (i) { return i.meta.ty === 'FYI'; }));
   return { title: 'FYI', sub: plural(l.length, 'thing') + ' to know. Acknowledge them to file them away.', body: '<div class="list">' + vSec('fyi', 'To read and file', rowsOf(l), { empty: 'Nothing to file.' }) + '</div>' };
+}
+function prjName(id) { return entById(id) ? entPath(id) : id; }
+function setWb(p) { for (var k in p) S.wb[k] = p[k]; lsSet('discerny-wb', JSON.stringify(S.wb)); render(); }
+var WB_GROUPS = [['urg', 'Urgency'], ['type', 'Type'], ['person', 'Person'], ['project', 'Project'], ['tag', 'Tag']];
+var WB_SORTS = [['urg', 'Sort: urgency'], ['due', 'Sort: due date'], ['new', 'Sort: assigned, newest first'], ['old', 'Sort: assigned, oldest first']];
+function viewAll() {
+  var o = { group: S.wb.group, sort: S.wb.sort, tag: S.wb.tag, q: S.wq.trim(), prjName: prjName };
+  var groups = workbench(openList(), o), ro = { showTags: true, hideProject: o.group === 'project', hidePerson: o.group === 'person' };
+  var seen = {}, n = 0, extra = [], b = '';
+  var also = function (key, title, list) {
+    var l = list.filter(function (i) { return (!o.tag || tagsOf(i).indexOf(o.tag) >= 0) && itemMatch(i, o.q, prjName) !== null; });
+    if (l.length) extra.push(l.length + ' ' + (key === 'wb-inbox' ? 'in the inbox' : 'done'));
+    return l.length ? vSec(key, title, rowsOf(l, { showTags: true })) : '';
+  };
+  /* a search also looks in the inbox and in done, so that no match is hidden */
+  if (o.q) b += also('wb-inbox', 'Inbox', inboxList());
+  groups.forEach(function (g) { g.items.forEach(function (i) { if (!seen[i.id]) { seen[i.id] = 1; n++; } }); b += vSec('wb-' + g.key, g.label, rowsOf(g.items, ro)); });
+  if (o.q) b += also('wb-done', 'Done', S.m.done.items.slice().reverse());
+  if (!b) b = '<div class="empty">' + (o.q || o.tag ? 'Nothing matches.' : 'No open items.') + '</div>';
+  var tags = allTags(); if (o.tag && tags.indexOf(o.tag) < 0) tags.push(o.tag);
+  var tools = '<div class="seg" role="group" aria-label="Group by">' + WB_GROUPS.map(function (g) {
+    return '<button type="button" data-act="wb-group" data-v="' + g[0] + '"' + pressed(o.group === g[0]) + '>' + g[1] + '</button>';
+  }).join('') + '</div>';
+  var bar = '<div class="toolbar" data-k="toolbar"><label class="sr" for="wb-q">Search items</label><input id="wb-q" class="in" type="search" autocomplete="off" data-in="wq" value="' + esc(S.wq) + '" placeholder="Search items, notes, people, projects…" style="min-width:min(320px,100%)">' +
+    '<label class="sr" for="wb-sort">Sort within each group</label><select id="wb-sort" class="in" data-ch="wb-sort">' + opts(WB_SORTS, o.sort) + '</select>' +
+    '<label class="sr" for="wb-tag">Show only one tag</label><select id="wb-tag" class="in" data-ch="wb-tag">' + opts([['', 'All tags']].concat(tags.map(function (t) { return [t, '#' + t]; })), o.tag) + '</select></div>';
+  var sub = o.q || o.tag ? [plural(n, 'open item') + ' match' + (n === 1 ? 'es' : '')].concat(extra).join(' · ') : plural(n, 'open item');
+  return { title: 'All items', sub: sub, tools: tools, qa: true, body: bar + '<div class="list">' + b + '</div>' };
 }
 function viewDone() {
   var list = S.m.done.items.slice().sort(function (a, b) { return String(b.meta.done || '').localeCompare(String(a.meta.done || '')) || (a.id < b.id ? 1 : -1); });
@@ -2010,12 +2205,12 @@ function viewProject(id) {
   var uses = relsOf(id).filter(function (r) { return kindOf(r.other) === 'SYS'; }).map(function (r) { return r.other; });
   var hasNext = open.some(isNext), blocked = open.filter(function (i) { return openBlockers(i).length; }).length;
   var st = e.meta.st || 'Active';
-  var pills = badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + (hasNext ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) + (blocked ? badge(blocked + ' blocked', 'danger') : '') + '<span class="sp id">' + id + '</span>';
+  var pills = badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + (hasNext ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) + (blocked ? badge(blocked + ' waiting on a dependency', 'danger') : '') + '<span class="sp">' + copyId(id) + '</span>';
   var parent = e.meta.parent ? entById(e.meta.parent) : null, kids = kidsOf(id);
   var facts = fact('Next date', [dated[0] ? fv(when(dated[0]).label + ', ' + dated[0].title, 'open', dated[0].id) : fv('Nothing dated')]) +
     fact('Key meeting', [meeting ? fv(when(meeting).label + ', ' + meeting.title, 'open', meeting.id) : fv('None scheduled')]) +
     fact('People involved', people.length ? people.map(function (n) { var p = personByName(n); return p && p.meta.id ? fv(n, 'person', p.meta.id) : fv(n); }) : [fv('Nobody yet')]) +
-    fact('Uses', uses.length ? uses.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No systems linked')]);
+    fact('Uses', uses.length ? uses.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No systems related')]);
   if (parent) facts += fact('Part of', [fv(parent.name, 'ent', parent.meta.id)]);
   if (kids.length) facts += fact('Sub-projects', kids.map(function (k) { return fv(k.name, 'ent', k.meta.id); }));
   var ls = linksOf(e);
@@ -2044,12 +2239,12 @@ function viewSystem(id) {
   var projects = relsOf(id).filter(function (r) { return kindOf(r.other) === 'PRJ'; }).map(function (r) { return r.other; });
   var owners = relsOf(id).filter(function (r) { return r.type === 'owns' && kindOf(r.other) === 'P'; }).map(function (r) { return r.other; }).filter(function (pid) { var p = personById(pid); return !(p && owner && p === owner); });
   var st = e.meta.st || '';
-  var facts = fact('Owner', [owner && owner.meta.id ? fv(owner.name, 'person', owner.meta.id) : fv(e.meta.owner || 'Not set')].concat(owners.map(function (x) { return fv((labelOf(x) || x) + ' (linked)', 'person', x); }))) +
+  var facts = fact('Owner', [owner && owner.meta.id ? fv(owner.name, 'person', owner.meta.id) : fv(e.meta.owner || 'Not set')].concat(owners.map(function (x) { return fv((labelOf(x) || x) + ' (related)', 'person', x); }))) +
     fact('Part of', [parent ? fv(parent.name, 'ent', parent.meta.id) : fv('Stands alone')]) +
     fact('Parts', parts.length ? parts.map(function (x) { return fv(x.name, 'ent', x.meta.id); }) : [fv('None')]) +
-    fact('Used by', projects.length ? projects.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No projects linked')]);
+    fact('Used by', projects.length ? projects.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No projects related')]);
   var ls = linksOf(e);
-  var box = '<div class="entity" data-k="entity"><div class="pills">' + (st ? badge(st, ST_TONE[st]) : badge('No status', 'soft')) + badge(e.meta.type || 'System') + '<span class="sp id">' + id + '</span></div>' +
+  var box = '<div class="entity" data-k="entity"><div class="pills">' + (st ? badge(st, ST_TONE[st]) : badge('No status', 'soft')) + badge(e.meta.type || 'System') + '<span class="sp">' + copyId(id) + '</span></div>' +
     notesOf(e).map(function (t) { return '<div class="ent-note">' + esc(t) + '</div>'; }).join('') + '<div class="facts">' + facts + '</div>' +
     (ls.length ? '<div class="links">' + ls.map(linkA).join('') + '</div>' : '') + vAsksBox(id) + '</div>';
   var items = sysItems(id);
@@ -2073,9 +2268,9 @@ function viewPerson(id) {
   var reports = S.m.people.people.filter(function (x) { return x.meta.mgr === p.name && x.meta.st !== 'Left'; });
   var owns = systemsOwnedBy(p), g = gaps(p);
   var pills = (isExt(p) ? badge('External', 'info') : '') + (p.meta.st === 'Left' ? badge('Left') : '') +
-    (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : (p.meta.st === 'Left' ? '' : badge('Details complete', 'ok'))) + (p.grp ? badge(p.grp, 'soft') : '') + '<span class="sp id">' + esc(id) + '</span>';
+    (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : (p.meta.st === 'Left' ? '' : badge('Details complete', 'ok'))) + (p.grp ? badge(p.grp, 'soft') : '') + '<span class="sp">' + copyId(id) + '</span>';
   var facts = fact('Organisation', [fv([p.meta.co, p.meta.dept].filter(Boolean).join(' › ') || 'Not set')]) +
-    fact('Reports to', chain.length ? chain : [fv(isExt(p) ? 'External contact' : 'Not set')]) +
+    fact('Reports to', chain.length ? chain : [fv(isExt(p) ? 'External' : 'Not set')]) +
     fact('Direct reports', reports.length ? reports.map(function (x) { return fv(x.name, x.meta.id ? 'person' : '', x.meta.id); }) : [fv('None')]) +
     fact('Owns', owns.length ? owns.map(function (x) { return fv(x.name, 'ent', x.meta.id); }) : [fv('No systems')]) +
     fact('Last checked', [fv(p.meta.chk ? fmtY(p.meta.chk) : 'Never')]);
@@ -2094,7 +2289,7 @@ function viewPerson(id) {
   var inbox = theirs.filter(function (i) { return whereOf(i.id) === 'inbox' && !isWaiting(i); });
   if (inbox.length) b += vSec('pi', 'In your inbox', rowsOf(inbox, { hidePerson: true }));
   var linked = relsOf(id).filter(function (r) { return kindOf(r.other) === 'T'; }).map(function (r) { return item(r.other); }).filter(function (i) { return i && whereOf(i.id) === 'open' && i.meta.who !== name; });
-  if (linked.length) b += vSec('pl', 'Linked to ' + first, rowsOf(linked));
+  if (linked.length) b += vSec('pl', 'Related to ' + first, rowsOf(linked));
   var shown = {};
   theirs.concat(linked).forEach(function (i) { shown[i.id] = 1; });
   var re = new RegExp('\\b' + reEsc(first) + '\\b');
@@ -2143,7 +2338,7 @@ function viewProjects() {
     var blocked = open.filter(function (i) { return openBlockers(i).length; }).length;
     var dated = sortByDue(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) >= 0; }));
     var st = e.meta.st || 'Active', live = st === 'Active';
-    var badges = (live ? (next.length ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) : '') + (blocked ? badge(blocked + ' blocked', 'danger') : '') + (waiting.length ? badge(waiting.length + ' waiting', 'info') : '') + (inbox.length ? badge(inbox.length + ' in inbox') : '') + (asksFor(id).length ? badge(asksFor(id).length + ' for agent', 'claude') : '');
+    var badges = (live ? (next.length ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) : '') + (blocked ? badge(blocked + ' waiting on a dependency', 'danger') : '') + (waiting.length ? badge(waiting.length + ' waiting', 'info') : '') + (inbox.length ? badge(inbox.length + ' in inbox') : '') + (asksFor(id).length ? badge(asksFor(id).length + ' for agent', 'claude') : '');
     return '<article class="ecard" data-k="c-' + id + '"' + (o.dep ? ' style="margin-left:' + Math.min(o.dep, 3) * 18 + 'px"' : '') + '><div class="pills">' + badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + '<span class="sp id">' + id + '</span></div>' +
       (e.meta.parent && entById(e.meta.parent) ? '<div class="path">Part of ' + esc(entPath(e.meta.parent)) + '</div>' : '') +
       '<button type="button" class="nm" data-act="ent" data-id="' + id + '">' + esc(e.name) + '</button>' +
@@ -2186,7 +2381,7 @@ function viewPeople() {
     var g = gaps(p), pid = p.meta.id || '';
     return '<div class="tr" role="listitem" data-k="p-' + esc(pid || p.name) + '"><div><button type="button" class="nm" data-act="person" data-id="' + esc(pid) + '"' + (pid ? '' : ' disabled') + '>' + esc(p.name + (isMe(p) ? ' (you)' : '')) + '</button><div class="hint">' + esc(p.meta.title || 'No job title') + '</div></div>' +
       '<div class="c2">' + esc([p.meta.co, p.meta.dept].filter(Boolean).join(' › ') || 'Not set') + (isExt(p) ? ' ' + badge('External', 'info') : '') + '</div>' +
-      '<div class="c3">' + esc(p.meta.mgr || (isExt(p) ? 'External contact' : 'Not set')) + '</div>' +
+      '<div class="c3">' + esc(p.meta.mgr || (isExt(p) ? 'External' : 'Not set')) + '</div>' +
       '<div class="r">' + (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : '') + (p.meta.st === 'Left' ? badge('Left') : '') + '<span class="hint">' + personOpenCount(p) + ' open</span></div></div>';
   };
   var sorted = list.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
@@ -2247,19 +2442,19 @@ function viewClaude() {
     return '<div class="logrow" data-k="l-' + esc(l.raw) + '"><span class="when">' + esc(fmtDT(l.at)) + '</span><div class="grow" style="flex:1 1 260px;min-width:0"><div>' + esc(l.did) + '</div><div class="hint">You asked: ' + esc(l.note) + '</div></div>' + (exists(l.id) ? lk(l.id, 'any', { id: l.id }) : '<span class="id">' + esc(l.id) + '</span>') + '</div>';
   }).join('') + '</div>'] : [], { count: log.length, empty: 'Nothing yet.' });
   var r = lastClaudeRun();
-  return { title: 'Agent', sub: plural(q.length, 'note') + ' queued' + (r ? ' · last actioned ' + r : ''), body: '<div class="list">' + b + '</div>' };
+  return { title: 'Agent', sub: plural(q.length, 'request') + ' queued' + (r ? ' · last actioned ' + r : ''), body: '<div class="list">' + b + '</div>' };
 }
 
 /* ===================== the details panel ===================== */
+function copyId(id) { var copied = S.copied === id; return '<button type="button" class="idbtn" data-act="copy" data-id="' + esc(id) + '" aria-label="' + (copied ? 'Copied ' : 'Copy ID ') + esc(id) + '">' + ic(copied ? 'check' : 'copy', 's') + (copied ? 'Copied' : esc(id)) + '</button>'; }
 function panelHead(id, kindText, openPage) {
-  var copied = S.copied === id;
-  return '<div class="ph"><button type="button" class="idbtn" data-act="copy" data-id="' + esc(id) + '" aria-label="' + (copied ? 'Copied ' : 'Copy ID ') + esc(id) + '">' + ic(copied ? 'check' : 'copy', 's') + (copied ? 'Copied' : esc(id)) + '</button>' +
+  return '<div class="ph">' + copyId(id) +
     '<span class="hint" style="flex:1;min-width:0">' + esc(kindText) + '</span>' + (S.fresh.has(id) ? badge('Updated', 'info') : '') +
     (openPage ? '<button type="button" class="btn sm quiet" data-act="any-page" data-id="' + esc(id) + '">Open page</button>' : '') +
     '<button type="button" class="xbtn" data-act="close" aria-label="Close details" title="Close (Esc)">' + ic('x') + '</button></div>';
 }
 function vTabs(id, nLinks, nAsks) {
-  return '<div class="tabs" data-k="tabs" role="tablist" aria-label="Sections">' + [['details', 'Details'], ['links', 'Links' + (nLinks ? ' (' + nLinks + ')' : '')], ['claude', 'Agent' + (nAsks ? ' (' + nAsks + ')' : '')]].map(function (t) {
+  return '<div class="tabs" data-k="tabs" role="tablist" aria-label="Sections">' + [['details', 'Details'], ['links', 'Relationships' + (nLinks ? ' (' + nLinks + ')' : '')], ['claude', 'Agent' + (nAsks ? ' (' + nAsks + ')' : '')]].map(function (t) {
     var on = S.tab === t[0];
     return '<button type="button" role="tab" class="tab" id="tab-' + t[0] + '"' + (on ? ' aria-controls="tp-' + t[0] + '"' : '') + ' aria-selected="' + on + '" tabindex="' + (on ? '0' : '-1') + '" data-act="tab" data-v="' + t[0] + '">' + esc(t[1]) + '</button>';
   }).join('') + '</div>';
@@ -2268,36 +2463,63 @@ function tabPanel(name, html) { return '<div role="tabpanel" id="tp-' + name + '
 function fRow(label, forId, ctl, top) { return '<div class="f' + (top ? ' top' : '') + '" data-k="row-' + slug(forId || label) + '">' + (forId ? '<label class="lbl" for="' + forId + '">' + esc(label) + '</label>' : '<span class="lbl">' + esc(label) + '</span>') + '<div class="ctl">' + ctl + '</div></div>'; }
 function vLinked(id) {
   var rels = relsOf(id);
-  return '<section data-k="sec-linked"><h3 class="h3">Linked</h3>' + (rels.length ? rels.map(function (r) {
+  return '<section data-k="sec-linked"><h3 class="h3">Related</h3>' + (rels.length ? rels.map(function (r) {
     var lab = labelOf(r.other);
     return '<div class="lrow" data-k="l-' + esc(r.raw) + '"><span class="kind">' + esc(relWord(r)) + '</span><button type="button" class="grow" data-act="any" data-id="' + r.other + '">' + esc(lab === null ? r.other + ' (not found)' : lab) + '</button><span class="id">' + r.other + '</span>' +
-      '<button type="button" class="xbtn" data-act="rel-del" data-v="' + esc(r.raw) + '" aria-label="Remove link to ' + r.other + '">' + ic('x', 's') + '</button></div>';
-  }).join('') : '<div class="empty">No links yet.</div>') + '</section>';
+      '<button type="button" class="xbtn" data-act="rel-del" data-v="' + esc(r.raw) + '" aria-label="Remove relationship with ' + r.other + '">' + ic('x', 's') + '</button></div>';
+  }).join('') : '<div class="empty">No relationships yet.</div>') + '</section>';
 }
-function linkCands(id, mode) {
-  var q = S.linkQ.trim().toLowerCase();
+// the relate search: o.kind ('All', an Item type, 'Person', 'Project' or 'System') and o.done (search DONE.md too) -> {list, more} or null
+var LINK_KINDS = ['All', 'Task', 'Meeting', 'Process', 'Document', 'FYI', 'Person', 'Project', 'System'], LINK_MAX = 50;
+function linkCands(id, mode, q, o) {
+  o = o || {};
+  q = String(q || '').trim().toLowerCase();
   if (!q) return null;
-  var linked = {};
+  var linked = {}, blocked = mode === 'blocked', kind = o.kind || 'All';
   relsOf(id).forEach(function (r) { linked[r.other] = 1; });
   var t = kindOf(id) === 'T' ? item(id) : null;
   if (t) depList(t).forEach(function (x) { linked[x] = 1; });
   var c = [];
-  openList().concat(S.m.inbox.items).forEach(function (x) { if (x.id !== id && !linked[x.id] && (mode !== 'blocked' || !dependsOn(x.id, id))) c.push({ id: x.id, label: x.title, kind: 'Task', hay: x.id + ' ' + x.title }); });
-  if (mode !== 'blocked') {
-    activePeople().forEach(function (p) { if (p.meta.id && !linked[p.meta.id]) c.push({ id: p.meta.id, label: p.name, kind: 'Person', hay: p.meta.id + ' ' + p.name + ' ' + (p.meta.title || '') }); });
-    entsOf('PRJ').concat(entsOf('SYS')).forEach(function (x) { if (x.meta.id && !linked[x.meta.id]) c.push({ id: x.meta.id, label: x.name, kind: KIND_WORD[kindOf(x.meta.id)], hay: x.meta.id + ' ' + x.name }); });
+  function addItem(x, done) { if (x.id !== id && !linked[x.id] && (!blocked || !dependsOn(x.id, id))) c.push({ id: x.id, label: x.title, kind: x.meta.ty || 'Task', done: done, at: String((done ? x.meta.done : x.meta.asg) || ''), hay: x.id + ' ' + x.title }); }
+  openList().concat(S.m.inbox.items).forEach(function (x) { addItem(x, false); });
+  if (!blocked && o.done) S.m.done.items.forEach(function (x) { addItem(x, true); });
+  if (!blocked) {
+    activePeople().forEach(function (p) { if (p.meta.id && !linked[p.meta.id]) c.push({ id: p.meta.id, label: p.name, kind: 'Person', at: '', hay: p.meta.id + ' ' + p.name + ' ' + (p.meta.title || '') }); });
+    entsOf('PRJ').concat(entsOf('SYS')).forEach(function (x) { if (x.meta.id && !linked[x.meta.id]) c.push({ id: x.meta.id, label: x.name, kind: KIND_WORD[kindOf(x.meta.id)], at: '', hay: x.meta.id + ' ' + x.name }); });
   }
-  c = c.filter(function (x) { return x.id !== id && (mode === 'blocked' || !relLine(id, x.id).err); });
-  return c.filter(function (x) { return q.split(/\s+/).every(function (w) { return x.hay.toLowerCase().indexOf(w) >= 0; }); }).slice(0, 7);
+  var words = q.split(/\s+/);
+  c = c.filter(function (x) {
+    return x.id !== id && (blocked || !relLine(id, x.id).err) && (kind === 'All' || x.kind === kind) &&
+      words.every(function (w) { return x.hay.toLowerCase().indexOf(w) >= 0; });
+  });
+  function rank(x) { return x.id.toLowerCase() === q ? 0 : (x.label.toLowerCase().indexOf(q) === 0 ? 1 : 2); }
+  function num(x) { return parseInt(x.id.split('-')[1], 10) || 0; }
+  c.sort(function (a, b) { return rank(a) - rank(b) || (!!a.done - !!b.done) || (a.at < b.at ? 1 : a.at > b.at ? -1 : 0) || num(b) - num(a); });
+  return { list: c.slice(0, LINK_MAX), more: Math.max(0, c.length - LINK_MAX) };
+}
+function vPicks(res, act, none) {
+  if (!res) return '';
+  if (!res.list.length) return '<div class="hint">' + none + '</div>';
+  return '<div class="picks" data-k="picks">' + res.list.map(function (x) {
+    return '<button type="button" class="pick" data-act="' + act + '" data-v="' + x.id + '"><span class="kind hint">' + esc(x.kind) + '</span><span style="flex:1;min-width:0">' + esc(x.label) + '</span>' + (x.done ? badge('Done', 'ok') : '') + '<span class="id">' + x.id + '</span></button>';
+  }).join('') + '</div>' + (res.more ? '<div class="hint">' + res.more + ' more, refine your search.</div>' : '');
 }
 function vLinkAdd(id, allowBlocked) {
-  var mode = allowBlocked ? S.linkMode : 'related';
-  var res = linkCands(id, mode);
+  var mode = allowBlocked ? S.linkMode : 'related', blocked = mode === 'blocked';
+  var kinds = blocked ? LINK_KINDS.slice(0, 6) : LINK_KINDS, kind = kinds.indexOf(S.linkKind) >= 0 ? S.linkKind : 'All';
+  var res = linkCands(id, mode, S.linkQ, { kind: kind, done: S.linkDone });
   var h = '<section class="box" data-k="sec-linkadd"><div class="ctl" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span class="lbl" style="font-weight:600">Add</span>';
-  if (allowBlocked) h += '<div class="seg" role="group" aria-label="Kind of link">' + [['related', 'Link to item'], ['blocked', 'Blocked by']].map(function (m) { return '<button type="button" data-act="link-mode" data-v="' + m[0] + '"' + pressed(mode === m[0]) + '>' + m[1] + '</button>'; }).join('') + '</div>';
-  h += '</div><label class="sr" for="f-linkq">Find an item to link</label><input id="f-linkq" class="in" type="search" autocomplete="off" data-in="linkQ" data-kd="linkq" value="' + esc(S.linkQ) + '" placeholder="' + (mode === 'blocked' ? 'Find the task this is waiting on' : 'Find a task, person, project or system') + '">';
-  if (res) h += res.length ? res.map(function (x) { return '<button type="button" class="pick" data-act="link-add" data-v="' + x.id + '"><span class="kind hint">' + esc(x.kind) + '</span><span style="flex:1;min-width:0">' + esc(x.label) + '</span><span class="id">' + x.id + '</span></button>'; }).join('') : '<div class="hint">No match' + (mode === 'blocked' ? ' (tasks that already depend on this one are left out, to avoid a loop)' : '') + '.</div>';
+  if (allowBlocked) h += '<div class="seg" role="group" aria-label="Kind of relationship">' + [['related', 'Relate to item'], ['blocked', 'Depends on']].map(function (m) { return '<button type="button" data-act="link-mode" data-v="' + m[0] + '"' + pressed(mode === m[0]) + '>' + m[1] + '</button>'; }).join('') + '</div>';
+  h += '</div><div class="pills" role="group" aria-label="Search only">' + kinds.map(function (k) { return '<button type="button" class="chipbtn" data-act="link-kind" data-v="' + k + '"' + pressed(kind === k) + '>' + k + '</button>'; }).join('') +
+    (blocked ? '' : '<label class="hint" style="display:inline-flex;gap:6px;align-items:center"><input type="checkbox" data-ch="link-done"' + (S.linkDone ? ' checked' : '') + '>Include done</label>') + '</div>';
+  h += '<label class="sr" for="f-linkq">Find an item to relate</label><input id="f-linkq" class="in" type="search" autocomplete="off" data-in="linkQ" data-kd="linkq" value="' + esc(S.linkQ) + '" placeholder="' + (blocked ? 'Find the item this depends on' : 'Find an item, person, project or system') + '">';
+  h += vPicks(res, 'link-add', 'No match' + (blocked ? ' (open items that already depend on this one are left out, to avoid a loop)' : '') + '.');
   return h + '</section>';
+}
+// the URLs on an Item or Record (link: lines), each removable, and a form to add one
+function vUrls(id, ls) {
+  return '<section data-k="sec-weblinks"><h3 class="h3">URLs</h3>' + ls.map(function (l) { return '<div class="lrow" data-k="wl-' + esc(l.raw) + '">' + linkA(l) + '<span style="flex:1"></span><button type="button" class="xbtn" data-act="e-link-del" data-id="' + id + '" data-v="' + esc(l.raw) + '" aria-label="Remove URL ' + esc(l.label) + '">' + ic('x', 's') + '</button></div>'; }).join('') +
+    '<div class="pills" style="margin-top:6px"><label class="sr" for="ef-ll">URL label</label><input id="ef-ll" class="in" type="text" data-in="linkLabel" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkLabel) + '" placeholder="Label" style="width:120px"><label class="sr" for="ef-lu">URL</label><input id="ef-lu" class="in" type="url" data-in="linkUrl" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkUrl) + '" placeholder="https://…" style="flex:1;min-width:140px">' + bt('Add URL', 'e-link-add', { id: id, cls: 'sm' }) + '</div></section>';
 }
 function vClaudeTab(id) {
   var asks = asksFor(id), drafts = draftsFor(id), log = logFor(id);
@@ -2316,15 +2538,15 @@ function panelTask(i) {
   if (inbox) h += '<div class="note" data-k="note-inbox">Proposed by the agent from ' + esc(srcKind(i)) + (i.meta.asg ? ' on ' + esc(fmtDT(i.meta.asg)) : '') + '. Correct anything below, then accept or dismiss.</div>';
   if (done) h += '<div class="note ok" data-k="note-done" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">Done on ' + esc(i.meta.done ? fmt(i.meta.done) : 'an earlier date') + '.</span>' + bt('Reopen', 'reopen', { id: id, cls: 'sm' }) + '</div>';
   h += '<label class="sr" for="f-title">Title</label><textarea id="f-title" class="title-in" rows="2" data-ch="title" data-kd="title" data-id="' + id + '">' + esc(i.title) + '</textarea>';
-  if (!done) h += '<div class="seg" data-k="seg-status" role="group" aria-label="Status" style="align-self:flex-start">' + STATUS.map(function (x) { return '<button type="button" data-act="status" data-id="' + id + '" data-v="' + x + '"' + pressed((i.meta.st || 'To do') === x) + '>' + x + '</button>'; }).join('') + '</div>';
+  if (!done) h += '<div class="pills" data-k="row-status"><div class="seg" data-k="seg-status" role="group" aria-label="Status">' + STATUS.map(function (x) { return '<button type="button" data-act="status" data-id="' + id + '" data-v="' + x + '"' + pressed((i.meta.st || 'To do') === x) + '>' + x + '</button>'; }).join('') + '</div>' + doneBtn(i, '') + '</div>';
   h += vTabs(id, rels.length + deps.length, asks.length);
   if (S.tab === 'links') {
-    var x = '<section data-k="sec-blockers"><h3 class="h3">Blocked by</h3>' + (deps.length ? deps.map(function (d) {
+    var x = '<section data-k="sec-blockers"><h3 class="h3">Depends on</h3>' + (deps.length ? deps.map(function (d) {
       var t = item(d), op = whereOf(d) === 'open';
       return '<div class="lrow" data-k="dep-' + d + '">' + badge(t ? (op ? 'Open' : (whereOf(d) === 'done' ? 'Done' : 'In inbox')) : 'Not found', op ? 'danger' : 'ok') + '<button type="button" class="grow" data-act="open" data-id="' + d + '">' + esc(t ? t.title : d) + '</button><span class="id">' + d + '</span>' +
         '<button type="button" class="xbtn" data-act="dep-del" data-id="' + id + '" data-v="' + d + '" aria-label="Remove dependency on ' + d + '">' + ic('x', 's') + '</button></div>';
     }).join('') : '<div class="empty">Nothing. This can start now.</div>') + '</section>';
-    x += '<section data-k="sec-blocks"><h3 class="h3">Waiting on this</h3>' + (blocks.length ? blocks.map(function (b) { return '<div class="lrow" data-k="blk-' + b.id + '"><button type="button" class="grow" data-act="open" data-id="' + b.id + '">' + esc(b.title) + '</button><span class="id">' + b.id + '</span></div>'; }).join('') : '<div class="empty">No other task waits on this one.</div>') + '</section>';
+    x += '<section data-k="sec-blocks"><h3 class="h3">Needed by</h3>' + (blocks.length ? blocks.map(function (b) { return '<div class="lrow" data-k="blk-' + b.id + '"><button type="button" class="grow" data-act="open" data-id="' + b.id + '">' + esc(b.title) + '</button><span class="id">' + b.id + '</span></div>'; }).join('') : '<div class="empty">Nothing depends on this one.</div>') + '</section>';
     x += vLinked(id) + vLinkAdd(id, true);
     h += tabPanel('links', x);
   } else if (S.tab === 'claude') {
@@ -2333,8 +2555,8 @@ function panelTask(i) {
     var who = realWho(i), known = !who || !!personByName(who);
     var whenText = 'No due date';
     if (isDay(due)) whenText = fmt(due) + ', ' + relDays(dd(due));
-    var f = fRow('Due', 'f-due', '<input id="f-due" class="in" type="date" data-ch="due" data-id="' + id + '" value="' + esc(due.slice(0, 10)) + '"><label class="sr" for="f-time">Due time</label><input id="f-time" class="in" type="time" data-ch="due-time" data-id="' + id + '" value="' + esc(timeOf(due)) + '"><span class="hint">' + esc(whenText) + '</span>');
-    if (!isDay(due)) f += fRow('When, no date', 'f-urg', '<select id="f-urg" class="in" data-ch="urg" data-id="' + id + '">' + opts([['today', 'Today'], ['week', 'This week'], ['soon', 'Next 2 weeks'], ['later', 'Later'], ['fyi', 'FYI']], i.meta.urg || 'later') + '</select>');
+    var f = fRow('Due', 'f-due', '<input id="f-due" class="in" type="date" data-ch="due" data-id="' + id + '" value="' + esc(due.slice(0, 10)) + '"><label class="sr" for="f-time">Due time</label><input id="f-time" class="in" type="time" data-ch="due-time" data-id="' + id + '" value="' + esc(timeOf(due)) + '"><span class="hint">' + esc(whenText) + '</span>' + (canSnooze(i) ? '<div style="flex-basis:100%">' + vSnooze(id) + '</div>' : ''));
+    if (!isDay(due)) f += fRow('Urgency', 'f-urg', '<select id="f-urg" class="in" data-ch="urg" data-id="' + id + '">' + opts([['today', 'Today'], ['week', 'This week'], ['soon', 'Soon'], ['later', 'Later'], ['fyi', 'FYI']], i.meta.urg || 'later') + '</select>');
     f += fRow('Priority', 'f-p', '<select id="f-p" class="in" data-ch="p" data-id="' + id + '">' + opts([['1', 'High'], ['2', 'Normal'], ['3', 'Low']], i.meta.p || '2') + '</select>');
     var ty = i.meta.ty || 'Task', tyl = [['Task', 'Task'], ['Meeting', 'Meeting'], ['Document', 'Read or review'], ['Process', 'Process'], ['FYI', 'FYI']];
     if (TYPES.indexOf(ty) < 0) tyl.push([ty, ty]);
@@ -2349,6 +2571,13 @@ function panelTask(i) {
     }).join('');
     f += fRow('Projects', 'f-prj', chips + '<input id="f-prj" class="in" type="text" list="dl-prj" autocomplete="off" data-in="newPrj" data-kd="prj" data-id="' + id + '" value="' + esc(S.newPrj) + '" placeholder="Add to a project, Enter" style="width:100%">' +
       (pq ? '<div class="hint" style="flex-basis:100%">' + (hit ? (ps.indexOf(hit.meta.id) >= 0 ? 'Already in “' + esc(hit.name) + '”.' : 'Enter adds it to “' + esc(hit.name) + '”.') : 'Enter creates a new project “' + esc(cleanName(pq)) + '”.') + '</div>' : ''), true);
+    var sysRels = rels.filter(function (r) { return kindOf(r.other) === 'SYS'; });
+    f += fRow('Systems', 'f-sys', sysRels.map(function (r) {
+      var e = entById(r.other);
+      return '<span class="tag">' + (e ? '<button type="button" class="tl" data-act="ent" data-id="' + r.other + '" title="Open ' + esc(e.name) + '">' + esc(short(e.name, 34)) + '</button>' : esc(r.other) + ' (missing)') +
+        '<button type="button" class="xbtn" data-act="rel-del" data-v="' + esc(r.raw) + '" aria-label="Remove ' + esc(e ? e.name : r.other) + '">' + ic('x', 's') + '</button></span>';
+    }).join('') + '<input id="f-sys" class="in" type="search" autocomplete="off" data-in="sysQ" data-kd="sys" data-id="' + id + '" value="' + esc(S.sysQ) + '" placeholder="Find a system" style="width:100%">' +
+      '<div style="flex-basis:100%">' + vPicks(linkCands(id, 'related', S.sysQ, { kind: 'System' }), 'sys-add', 'No system matches.') + '</div>', true);
     f += fRow('Tags', 'f-tag', tagsOf(i).map(function (t) { return '<span class="tag">' + esc(t) + '<button type="button" class="xbtn" data-act="tag-del" data-id="' + id + '" data-v="' + esc(t) + '" aria-label="Remove tag ' + esc(t) + '">' + ic('x', 's') + '</button></span>'; }).join('') +
       '<input id="f-tag" class="in" type="text" list="dl-tags" autocomplete="off" data-in="tagDraft" data-kd="tag" data-id="' + id + '" value="' + esc(S.tagDraft) + '" placeholder="Add tag, Enter" style="width:150px">', true);
     f += fRow('Assigned', 'f-asg', '<input id="f-asg" class="in" type="datetime-local" data-ch="asg" data-id="' + id + '" value="' + esc(isDay(i.meta.asg) ? String(i.meta.asg).slice(0, 16).replace(' ', 'T') : '') + '"><span class="hint">from ' + esc(srcKind(i)) + '</span>');
@@ -2359,7 +2588,7 @@ function panelTask(i) {
         '<button type="button" class="xbtn" data-act="sub-del" data-id="' + id + '" data-i="' + k + '" aria-label="Remove sub-task: ' + esc(s.v) + '">' + ic('x', 's') + '</button></div>';
     }).join('') + '<label class="sr" for="f-sub">New sub-task</label><input id="f-sub" class="in" type="text" autocomplete="off" data-in="subDraft" data-kd="sub" data-id="' + id + '" value="' + esc(S.subDraft) + '" placeholder="Add a sub-task and press Enter" style="width:100%"></section>';
     var src = srcOf(i), notes = notesOf(i), ls = linksOf(i);
-    var ctx = src.length + notes.length + ls.length ? '<section data-k="sec-ctx"><h3 class="h3">Context</h3>' + src.map(function (t) { return '<div class="ctx src">Source: ' + esc(t) + '</div>'; }).join('') + notes.map(function (t) { return '<div class="ctx">' + esc(t) + '</div>'; }).join('') + (ls.length ? '<div class="links">' + ls.map(linkA).join('') + '</div>' : '') + '</section>' : '';
+    var ctx = (src.length + notes.length ? '<section data-k="sec-ctx"><h3 class="h3">Context</h3>' + src.map(function (t) { return '<div class="ctx src">Source: ' + esc(t) + '</div>'; }).join('') + notes.map(function (t) { return '<div class="ctx">' + esc(t) + '</div>'; }).join('') + '</section>' : '') + vUrls(id, ls);
     var my = '<section data-k="sec-my"><label class="h3" for="f-my" style="display:block">Your notes</label><textarea id="f-my" class="in" rows="4" data-ch="my" data-id="' + id + '" placeholder="Anything you want to remember about this">' + esc(myOf(i).join('\n')) + '</textarea></section>';
     var tail = '';
     if (inbox) {
@@ -2367,7 +2596,7 @@ function panelTask(i) {
       if (sg.length) tail += '<div class="box" data-k="sug"><div class="h3" style="margin:0">Looks related</div>' + sg.map(function (g) {
         var cid = 'sg-' + g.id, on = !!S.suggestOn[id + '|' + g.id];
         return '<div class="subrow"><input type="checkbox" id="' + cid + '" data-ch="suggest" data-id="' + id + '" data-v="' + g.id + '"' + (on ? ' checked' : '') + '><label for="' + cid + '"><span class="id">' + g.id + '</span> ' + esc(g.title) + ' <span class="hint">· ' + esc(g.why) + '</span></label></div>';
-      }).join('') + '<div class="hint">Tick an item to link it when you accept.</div></div>';
+      }).join('') + '<div class="hint">Tick an item to relate it when you accept.</div></div>';
       tail += '<div class="foot" data-k="foot-inbox">' + bt('Accept', 'accept', { id: id, cls: 'primary' }) + bt('Dismiss…', 'dismiss-open', { id: id, attrs: ' aria-expanded="' + (S.dismissFor === id) + '"' }) + (pos >= 0 ? '<span class="hint">' + (pos + 1) + ' of ' + il.length + ' in the inbox</span>' : '') + '</div>';
       if (S.dismissFor === id && S.dismissAt === 'panel') tail += vReasons(id);
     } else if (!done) {
@@ -2420,11 +2649,10 @@ function panelEnt(e) {
     f += fRow('Group', 'ef-grp', '<input id="ef-grp" class="in" type="text" list="dl-egrp-' + kind + '" autocomplete="off" data-ch="e-grp" data-id="' + id + '" value="' + esc(e.grp) + '" style="width:100%">');
     f += '<section data-k="sec-enotes"><label class="h3" for="ef-notes" style="display:block">Notes</label><textarea id="ef-notes" class="in" rows="5" data-ch="e-notes" data-id="' + id + '" placeholder="Notes (saved as note: lines)">' + esc(notesOf(e).join('\n')) + '</textarea></section>';
     var ls = linksOf(e);
-    f += '<section data-k="sec-weblinks"><h3 class="h3">Web links</h3>' + ls.map(function (l) { return '<div class="lrow" data-k="wl-' + esc(l.raw) + '">' + linkA(l) + '<span style="flex:1"></span><button type="button" class="xbtn" data-act="e-link-del" data-id="' + id + '" data-v="' + esc(l.raw) + '" aria-label="Remove link ' + esc(l.label) + '">' + ic('x', 's') + '</button></div>'; }).join('') +
-      '<div class="pills" style="margin-top:6px"><label class="sr" for="ef-ll">Link label</label><input id="ef-ll" class="in" type="text" data-in="linkLabel" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkLabel) + '" placeholder="Label" style="width:120px"><label class="sr" for="ef-lu">Link address</label><input id="ef-lu" class="in" type="url" data-in="linkUrl" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkUrl) + '" placeholder="https://…" style="flex:1;min-width:140px">' + bt('Add link', 'e-link-add', { id: id, cls: 'sm' }) + '</div></section>';
+    f += vUrls(id, ls);
     if (S.confirm === 'del:' + id) {
       var nt = kind === 'PRJ' ? allItems().filter(function (i) { return prjOf(i).indexOf(id) >= 0; }).length : 0;
-      f += '<div class="confirm" data-k="confirm" role="alert"><span style="flex:1;min-width:200px">Delete ' + id + '? Its ' + plural(rels.length, 'link') + ' will be removed' + (nt ? ' and ' + plural(nt, 'task') + ' will lose this project' : '') + '. You can undo straight after.</span>' + bt('Delete', 'e-del-yes', { id: id, cls: 'danger sm' }) + bt('Cancel', 'e-del-no', { cls: 'sm' }) + '</div>';
+      f += '<div class="confirm" data-k="confirm" role="alert"><span style="flex:1;min-width:200px">Delete ' + id + '? Its ' + plural(rels.length, 'relationship') + ' will be removed' + (nt ? ' and ' + plural(nt, 'task') + ' will lose this project' : '') + '. You can undo straight after.</span>' + bt('Delete', 'e-del-yes', { id: id, cls: 'danger sm' }) + bt('Cancel', 'e-del-no', { cls: 'sm' }) + '</div>';
     } else f += '<div class="foot" data-k="foot-e">' + bt('Delete ' + D.word, 'e-del', { id: id, cls: 'danger sm' }) + '</div>';
     h += tabPanel('details', f);
   }
@@ -2442,14 +2670,15 @@ function vPanel() {
 
 /* ===================== shell ===================== */
 var NAV = [
-  ['Focus', [['today', 'Today'], ['inbox', 'Inbox'], ['next', 'Next actions'], ['waiting', 'Waiting for'], ['upcoming', 'Upcoming'], ['fyi', 'FYI']]],
-  ['Knowledge', [['projects', 'Projects'], ['people', 'People'], ['systems', 'Systems']]],
+  ['Focus', [['today', 'Today'], ['inbox', 'Inbox'], ['next', 'Next actions'], ['waiting', 'Waiting for'], ['upcoming', 'Upcoming'], ['fyi', 'FYI'], ['all', 'All items']]],
+  ['Knowledge base', [['projects', 'Projects'], ['people', 'People'], ['systems', 'Systems']]],
   ['Reflect', [['review', 'Weekly review'], ['done', 'Done'], ['claude', 'Agent']]]
 ];
 var NAV_COUNTS = { today: 1, inbox: 1, next: 1, waiting: 1, fyi: 1, review: 1, claude: 1 };
 function navOn(k) { var v = S.view; return v === k || (k === 'projects' && v === 'project') || (k === 'people' && v === 'person') || (k === 'systems' && v === 'system'); }
 function saveState() {
-  if (Q.blocked || S.lost) return { cls: 'err', text: S.lost ? 'No folder access' : 'Not saved' };
+  if (S.moved) return { cls: 'err', text: 'Folder changed' };
+  if (Q.blocked || S.lost) return { cls: 'err', text: S.lost ? (srv ? 'Server not running' : 'No folder access') : 'Not saved' };
   var n = Q.jobs.filter(function (j) { return !j.sync; }).length;
   if (n) return { cls: 'busy', text: 'Saving…' };
   return { cls: '', text: 'All changes saved' };
@@ -2457,7 +2686,7 @@ function saveState() {
 var THEME_WORD = { system: 'System', light: 'Light', dark: 'Dark' };
 function vSide(c) {
   var rail = isRail();
-  var h = '<nav class="side" data-k="side" aria-label="Lists and pages"><div class="brand"><span class="logo" aria-hidden="true">' + ic('check') + '</span><span class="brand-t hide-rail"><b>Discerny</b><span title="' + esc(S.folder) + '">' + esc(S.folder) + '</span></span></div>' +
+  var h = '<nav class="side" data-k="side" aria-label="Lists and pages"><div class="brand"><span class="logo" aria-hidden="true"' + (rail ? ' title="Discerny, version ' + VERSION + '"' : '') + '>' + ic('check') + '</span><span class="brand-t hide-rail"><b>Discerny</b><span title="' + esc(S.folder) + '">' + esc(S.folder) + '</span></span></div>' +
     '<button type="button" class="searchbtn" data-act="palette" aria-label="Search or jump to (Ctrl K)"' + (rail ? ' title="Search or jump to (Ctrl K)"' : '') + '>' + ic('search') + '<span class="hide-rail st" aria-hidden="true">Search…</span><span class="kbd hide-rail" aria-hidden="true">Ctrl K</span></button>';
   NAV.forEach(function (g) {
     h += '<div class="navh">' + g[0] + '</div>';
@@ -2471,10 +2700,13 @@ function vSide(c) {
     '<button type="button" class="foot-btn" data-act="folder" aria-label="Change folder"' + (rail ? ' title="Change folder"' : '') + '>' + ic('folder') + '<span class="hide-rail" aria-hidden="true">Change folder</span></button>' +
     '<button type="button" class="foot-btn" data-act="theme" aria-label="Theme: ' + THEME_WORD[S.theme] + '. Click to change"' + (rail ? ' title="Theme: ' + THEME_WORD[S.theme] + '"' : '') + '>' + ic(S.theme === 'dark' ? 'moon' : S.theme === 'light' ? 'sun' : 'auto') + '<span class="hide-rail" aria-hidden="true">Theme: ' + THEME_WORD[S.theme] + '</span></button>' +
     '<button type="button" class="foot-btn" data-act="side" aria-label="' + (rail ? 'Expand sidebar' : 'Collapse sidebar') + '"' + (rail ? ' title="Expand sidebar"' : '') + '>' + ic(rail ? 'sideOpen' : 'sideClose') + '<span class="hide-rail" aria-hidden="true">Collapse sidebar</span></button>' +
-    '<button type="button" class="foot-btn" data-act="keys" aria-label="Keyboard shortcuts"' + (rail ? ' title="Keyboard shortcuts (?)"' : '') + '>' + ic('keys') + '<span class="hide-rail" aria-hidden="true">Keyboard shortcuts</span></button></div></nav>';
+    '<button type="button" class="foot-btn" data-act="keys" aria-label="Keyboard shortcuts"' + (rail ? ' title="Keyboard shortcuts (?)"' : '') + '>' + ic('keys') + '<span class="hide-rail" aria-hidden="true">Keyboard shortcuts</span></button>' +
+    '<span class="ver hide-rail">Version ' + VERSION + '</span></div></nav>';
   return h;
 }
 function vBanner() {
+  if (S.moved) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The Discerny server now serves another folder, so this page no longer reads or saves “' + esc(S.folder) + '”. ' + (Q.jobs.filter(function (j) { return !j.sync; }).length ? 'Your unsaved changes are kept on screen, and were not written to the other folder. ' : '') + 'Reload to open the folder it serves now.</span>' + bt('Reload', 'reload', { cls: 'primary sm' }) + '</div>';
+  if (S.lost && srv) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The Discerny server isn’t running. Nothing is lost. ' + (Q.jobs.filter(function (j) { return !j.sync; }).length ? 'Your unsaved changes are kept on screen. ' : '') + 'Start it again with node tools/discern.mjs serve, then retry.</span>' + bt('Retry', 'reconnect', { cls: 'primary sm' }) + '</div>';
   if (S.lost) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The browser no longer has permission to use the folder. Nothing is lost: ' + (Q.jobs.filter(function (j) { return !j.sync; }).length ? 'your unsaved changes are kept on screen until you reconnect.' : 'reconnect to carry on.') + '</span>' + bt('Reconnect', 'reconnect', { cls: 'primary sm' }) + '</div>';
   if (!Q.blocked) return '';
   var n = Q.jobs.filter(function (j) { return !j.sync; }).length;
@@ -2489,6 +2721,7 @@ function viewFor() {
     case 'waiting': return viewWaiting();
     case 'upcoming': return viewUpcoming();
     case 'fyi': return viewFyi();
+    case 'all': return viewAll();
     case 'done': return viewDone();
     case 'projects': return viewProjects();
     case 'systems': return viewSystems();
@@ -2529,11 +2762,32 @@ function vPalette() {
     bt('Esc', 'dlg-close', { cls: 'sm', attrs: ' aria-label="Close search"' }) + '</div><div class="dlg-b" id="pal-list" role="listbox" aria-label="Results">' + body + '</div>' +
     '<div class="dlg-f" aria-hidden="true"><span>↑ ↓ to move</span><span>Enter to open</span><span>Esc to close</span></div></div></div>';
 }
-var KEYMAP = [['Ctrl K or /', 'Search everything and run commands'], ['N', 'Add a task (quick add)'], ['J  K', 'Move down and up the list'], ['Enter', 'Open the highlighted item'], ['X', 'Mark done or reopen (Undo appears)'], ['A  D', 'Accept or dismiss in the inbox'], ['C', 'Ask the agent about the open item'], ['G then T I N W U F', 'Go to Today, Inbox, Next, Waiting, Upcoming, FYI'], ['G then P E S R C', 'Go to Projects, People, Systems, Review, Agent'], ['Ctrl Z', 'Undo the last change (outside text boxes)'], ['Esc', 'Close the dialog, then the panel'], ['?', 'This list']];
+var KEYMAP = [['Ctrl K or /', 'Search everything and run commands'], ['N', 'Add an item (quick add)'], ['J  K', 'Move down and up the list'], ['Enter', 'Open the highlighted item'], ['X', 'Mark done or reopen (Undo appears)'], ['A  D', 'Accept or dismiss in the inbox'], ['C', 'Ask the agent about the open item'], ['G then T I N W U F A', 'Go to Today, Inbox, Next, Waiting, Upcoming, FYI, All items'], ['G then P E S R C', 'Go to Projects, People, Systems, Review, Agent'], ['Ctrl Z', 'Undo the last change (outside text boxes)'], ['Esc', 'Close the dialog, then the panel'], ['?', 'This list']];
 function vKeys() {
   return '<div class="dlg-scrim" data-k="dlg-keys" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="keys-h"><div class="dlg-h"><h2 id="keys-h" style="margin:0;flex:1;font-size:16px">Keyboard shortcuts</h2>' +
     '<button type="button" class="xbtn" data-act="dlg-close" aria-label="Close">' + ic('x') + '</button></div><div class="dlg-pad"><div class="kgrid">' +
     KEYMAP.map(function (k) { return '<span class="mono">' + esc(k[0]) + '</span><span>' + esc(k[1]) + '</span>'; }).join('') + '</div><p class="hint" style="margin:14px 0 0">Single-letter keys work when you are not typing in a box.</p></div></div></div>';
+}
+// When served, the folder is the server's. A server started on a folder of its own (--dir or DISCERNY_DIR) can't
+// switch, so say how to restart it; otherwise the Change folder form asks the server to switch.
+function srvSwitch() { return 'This server was started on a folder of its own, so it can’t switch. To open another folder, stop the server (Ctrl C where it runs), run node tools/discern.mjs connect <folder> in the Discerny app folder, and start it again with node tools/discern.mjs serve.'; }
+function vFolderForm() {
+  var sugs = S.folderSugs.filter(function (s) { return s.folder !== srv.folder; });
+  return '<form class="fform" data-sub="folder-switch" data-k="fform">' +
+    (srv.folder ? '<div><span class="hint">Open now</span><p class="mono" style="margin:2px 0 0;overflow-wrap:anywhere">' + esc(srv.folder) + '</p></div>' : '') +
+    '<label class="fl" for="folder-path">Folder to open<input id="folder-path" class="in mono" type="text" autocomplete="off" spellcheck="false" data-in="folderPath" value="' + esc(S.folderPath) + '" placeholder="The full path of a folder with TASKS.md in it" required' + (S.folderErr ? ' aria-describedby="folder-err" aria-invalid="true"' : '') + '></label>' +
+    (S.folderErr ? '<p class="err-t" id="folder-err" role="alert" style="margin:0">' + esc(S.folderErr) + '</p>' : '') +
+    (sugs.length ? '<div class="fsugs"><span class="hint">Suggestions</span>' + sugs.map(function (s) { return '<button type="button" class="chipbtn" data-act="folder-sug" data-v="' + esc(s.folder) + '" title="' + esc(s.folder) + '">' + esc(s.name) + '</button>'; }).join('') + '</div>' : '') +
+    '<p class="hint" style="margin:0">Your agent works on the folder you open here too.</p>' +
+    '<div class="acts"><button type="submit" class="btn primary"' + (S.folderBusy ? ' disabled' : '') + '>' + (S.folderBusy ? 'Opening…' : 'Open folder') + '</button></div></form>';
+}
+function vFolder() {
+  return '<div class="dlg-scrim" data-k="dlg-folder" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="folder-h"><div class="dlg-h"><h2 id="folder-h" style="margin:0;flex:1;font-size:16px">' + (srv.canSwitch ? 'Change folder' : 'Your data folder') + '</h2>' +
+    '<button type="button" class="xbtn" data-act="dlg-close" aria-label="Close">' + ic('x') + '</button></div><div class="dlg-pad">' +
+    (srv.canSwitch ? vFolderForm() : '<p class="mono" style="margin:0 0 12px;overflow-wrap:anywhere">' + esc(srv.folder) + '</p><p class="hint" style="margin:0">' + esc(srvSwitch()) + '</p>') + '</div></div></div>';
+}
+async function loadFolderSugs() {
+  try { var r = await fetch('/api/folders'); if (r.ok) { S.folderSugs = await r.json(); render(); } } catch (e) { /* no suggestions */ }
 }
 function vDatalists() {
   var uniq = function (arr) { var o = {}, out = []; arr.forEach(function (v) { if (v && !o[v]) { o[v] = 1; out.push(v); } }); return out.sort(function (a, b) { return a.localeCompare(b); }); };
@@ -2549,16 +2803,22 @@ var GATE = {
   wrong: ['That folder has no TASKS.md', 'Pick your Discerny data folder: the one with TASKS.md and PEOPLE.md in it. To start a new one, copy the new_discerny_repo folder that comes with Discerny, and pick the copy.', 'Choose folder…', 'pick'],
   denied: ['Permission wasn’t given', 'Discerny can’t read or save your files without it. Try again and choose Allow.', 'Try again', 'regrant'],
   error: ['Something went wrong', '%s', 'Try again', 'pick'],
+  fmtold: ['This folder needs an upgrade', '“%s” is in Format %f, older than the Format %a this version of Discerny reads and writes. Ask your agent to “upgrade my Discerny folder”, or run node tools/discern.mjs upgrade in the Discerny app folder. Then reload this page.', 'Choose a different folder', 'refolder'],
+  fmtnew: ['This folder needs a newer Discerny', '“%s” is in Format %f, newer than the Format %a this version of Discerny reads and writes. Get the newer Discerny from github.com/StormSleeper/discerny-app and open the folder with that.', 'Choose a different folder', 'refolder'],
+  fmtnext: ['This folder was upgraded by an unreleased Discerny', '“%s” is in Format next: a test build of Discerny upgraded it, so no released version can read it. This version reads and writes Format %a. Restore the backup copy the upgrade made beside the folder.', 'Choose a different folder', 'refolder'],
+  nofolder: ['No folder connected', 'Choose the Discerny data folder to open: the one with TASKS.md and PEOPLE.md in it.', '', ''],
+  srvdown: ['The Discerny server isn’t running', 'Start it again with node tools/discern.mjs serve in the Discerny app folder, then retry.', 'Retry', 'srvretry'],
   nosupport: ['Open this file in Chrome or Edge', 'This browser can’t edit files in a folder. Discerny needs Google Chrome or Microsoft Edge.', '', ''],
   loading: ['Opening your folder…', 'Reading your files.', '', '']
 };
 function vGate() {
-  var g = GATE[S.gate.mode] || GATE.pick, msg = g[1].replace('%s', S.gate.mode === 'error' ? (S.gate.msg || 'Unknown error') : S.folder);
-  var h = '<div class="gate" data-k="gate"><main class="gate-c" aria-labelledby="gate-h"><div class="brand" style="padding:0"><span class="logo" aria-hidden="true">' + ic('check') + '</span><span class="brand-t"><b>Discerny</b><span>Version 2</span></span></div>' +
+  var g = GATE[S.gate.mode] || GATE.pick, msg = g[1].replace('%s', S.gate.mode === 'error' ? (S.gate.msg || 'Unknown error') : S.folder).replace('%f', S.gate.format).replace('%a', FORMAT);
+  var h = '<div class="gate" data-k="gate"><main class="gate-c" aria-labelledby="gate-h"><div class="brand" style="padding:0"><span class="logo" aria-hidden="true">' + ic('check') + '</span><span class="brand-t"><b>Discerny</b><span>Version ' + VERSION + '</span></span></div>' +
     '<h1 id="gate-h">' + esc(g[0]) + '</h1><p>' + esc(msg) + '</p>' + (S.gate.msg && S.gate.mode !== 'error' ? '<p class="err-t">' + esc(S.gate.msg) + '</p>' : '');
-  if (g[2]) h += '<div class="acts">' + bt(g[2], g[3], { cls: 'primary lg' }) + (S.gate.mode === 'reconnect' || S.gate.mode === 'denied' ? bt('Choose a different folder', 'pick', { cls: 'lg' }) : '') + '</div>';
+  if (srv && (g[3] === 'refolder' || S.gate.mode === 'nofolder')) h += srv.canSwitch ? vFolderForm() : '<p class="hint">' + esc(srvSwitch()) + '</p>';
+  else if (g[2]) h += '<div class="acts">' + bt(g[2], g[3], { cls: 'primary lg' }) + (S.gate.mode === 'reconnect' || S.gate.mode === 'denied' ? bt('Choose a different folder', 'pick', { cls: 'lg' }) : '') + '</div>';
   if (S.gate.mode === 'pick' || S.gate.mode === 'reconnect') h += '<p class="hint">Your browser will ask to let this page view and edit files in the folder. If it offers <strong>Allow on every visit</strong>, choose that and Discerny will open straight in next time.</p>';
-  return h + '</main></div>';
+  return h + '</main></div>' + vToasts();
 }
 
 /* ===================== extra operations used by the panel ===================== */
@@ -2648,7 +2908,7 @@ function vApp() {
   var c = counts(), open = panelOpen(), drawer = open && isDrawer();
   return '<div class="app' + (isRail() ? ' rail' : '') + (drawer ? ' drawer' : '') + '" data-k="app">' + vSide(c) + vMain(c) + vPanel() +
     (drawer ? '<div class="scrim" data-k="scrim" data-act="close" aria-hidden="true"></div>' : '') + '</div>' + vToasts() +
-    (S.dialog === 'palette' ? vPalette() : S.dialog === 'keys' ? vKeys() : '') + vDatalists();
+    (S.dialog === 'palette' ? vPalette() : S.dialog === 'keys' ? vKeys() : S.dialog === 'folder' ? vFolder() : '') + vDatalists();
 }
 function renderNow() {
   renderQ = false;
@@ -2714,7 +2974,7 @@ function select(id, o) {
   o = o || {};
   if (S.sel !== id) {
     S.tab = o.tab || 'details';
-    S.subDraft = ''; S.tagDraft = ''; S.newPrj = ''; S.linkQ = ''; S.dismissFor = null; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
+    S.subDraft = ''; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
   } else if (o.tab) S.tab = o.tab;
   S.sel = id; S.panel = true;
   if (kindOf(id) === 'T') S.cur = id;
@@ -2792,8 +3052,32 @@ function accept(id) {
   var nx = nextInbox(id);
   S.dismissFor = null;
   commit(OPS.accept(id, rl));
-  toastShow('Accepted ' + id + ' into ' + listName(item(id)) + (rl.length ? ', linked to ' + rl.length + ' related item' + (rl.length > 1 ? 's' : '') : '') + '.', OPS.unaccept(id, rl));
+  toastShow('Accepted ' + id + ' into ' + listName(item(id)) + (rl.length ? ', related to ' + rl.length + ' item' + (rl.length > 1 ? 's' : '') : '') + '.', OPS.unaccept(id, rl));
   afterTriage(id, nx);
+}
+// a Proposal done in two minutes: accepted and marked done in one step, keeping its ID
+function acceptDone(id) {
+  var i = item(id);
+  if (!i || whereOf(id) !== 'inbox') return;
+  var a = OPS.accept(id, []), c = OPS.complete(id, todayStr()), nx = nextInbox(id);
+  var un = OPS.unaccept(id, []), ro = OPS.reopen(id);
+  S.dismissFor = null;
+  commit(op('Accept and complete ' + id, ['tasks', 'inbox', 'rels', 'done'], function (M) { a.fn(M); c.fn(M); }));
+  toastShow('Done: ' + clip(i.title, 60), op('Undo done ' + id, ['tasks', 'done', 'inbox', 'rels'], function (M) { ro.fn(M); un.fn(M); }));
+  afterTriage(id, nx);
+}
+function doneNow(id) {
+  var i = item(id), w = whereOf(id);
+  if (!i) return;
+  if (w === 'inbox') acceptDone(id);
+  else if (w === 'open') { if (i.meta.ty === 'FYI') acknowledge(id); else toggleDone(id); }
+}
+function snoozeItem(id, days) {
+  var i = item(id);
+  if (!i || !canSnooze(i) || !days) return;
+  var was = i.meta.due, due = snooze(was, days, todayStr());
+  S.snoozeFor = null;
+  patch(id, { due: due }, 'Snoozed ' + id + ' to ' + fmtDT(due) + '.', OPS.meta(id, { due: was }));
 }
 function dismiss(id, reason) {
   var i = item(id);
@@ -2836,18 +3120,10 @@ function makeTask(id) {
 function addQuick() {
   var q = parseQuick(S.qa || '', S.qaType);
   if (!q.title) { focusLater('#qa-in'); return; }
-  var due = q.date ? q.date + (q.time ? ' ' + q.time : '') : '';
-  var meta = { ty: q.ty };
-  if (q.who) meta.who = q.who;
-  if (q.prj.length) meta.prj = q.prj.join(',');
-  if (q.tags.length) meta.tg = q.tags.join(',');
-  meta.urg = q.ty === 'FYI' ? 'fyi' : (due ? urgFor(due) : 'week');
-  meta.p = q.p || '2';
-  if (due) meta.due = due;
-  meta.asg = nowStamp();
+  var it0 = quickItem(q, { urg: S.qaUrg, description: S.qaDesc, today: todayStr(), now: nowStamp() });
   var out = {};
-  commit(OPS.addTask({ title: q.title, meta: meta, date: todayStr(), notes: [], newProjects: q.prjNew }, out));
-  S.qa = ''; S.qaType = null; forceClear('qa-in');
+  commit(OPS.addTask({ title: it0.title, meta: it0.meta, date: todayStr(), notes: it0.notes, newProjects: q.prjNew }, out));
+  S.qa = ''; S.qaType = null; S.qaUrg = ''; S.qaDesc = ''; S.qaMore = false; forceClear('qa-in'); forceClear('qa-desc');
   var it = out.id ? item(out.id) : null;
   if (it) toastShow('Added ' + out.id + ' to ' + listName(it) + ' · ' + when(it).label + (q.prjNew.length ? ' · new project ' + q.prjNew.join(', ') : ''), OPS.removeAdded(out.id));
   render();
@@ -2869,14 +3145,21 @@ function queueAsk(id) {
   forceClear('f-composer');
   commit(OPS.addAsk(line), { toast: 'Queued for the agent on ' + id + '.', undo: OPS.removeAsk(line) });
 }
+function addSystem(id, sys) {
+  var r = id ? relLine(id, sys) : null;
+  if (!r || r.err) { if (r) toastShow(r.err); return; }
+  commit(OPS.addRel(r.line), { toast: 'Relationship added.', undo: OPS.removeRel(r.line) });
+  S.sysQ = ''; forceClear('f-sys');
+  focusLater('#f-sys');
+}
 function addLink(id, other) {
   if (S.linkMode === 'blocked' && kindOf(id) === 'T') {
     if (dependsOn(other, id)) { toastShow(other + ' already depends on ' + id + '. That would make a loop.'); return; }
-    commit(OPS.addDep(id, other), { toast: id + ' is now blocked by ' + other + '.', undo: OPS.removeDep(id, other) });
+    commit(OPS.addDep(id, other), { toast: id + ' now depends on ' + other + '.', undo: OPS.removeDep(id, other) });
   } else {
     var r = relLine(id, other);
     if (r.err) { toastShow(r.err); return; }
-    commit(OPS.addRel(r.line), { toast: 'Linked ' + id + ' and ' + other + '.', undo: OPS.removeRel(r.line) });
+    commit(OPS.addRel(r.line), { toast: 'Relationship added.', undo: OPS.removeRel(r.line) });
   }
   S.linkQ = ''; forceClear('f-linkq');
   focusLater('#f-linkq');
@@ -2893,10 +3176,10 @@ function entSnapshot(id) {
 }
 function addEntityLink(id) {
   var label = String(S.linkLabel || '').replace(/[\[\]\n]/g, ' ').trim(), url = String(S.linkUrl || '').trim().replace(/\s/g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
-  if (!url) { toastShow('Type the link address first.'); focusLater('#ef-lu'); return; }
+  if (!url) { toastShow('Type the URL first.'); focusLater('#ef-lu'); return; }
   if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = 'https://' + url;
   var v = '[' + (label || url) + '](' + url + ')';
-  commit(OPS.addEntLink(kindOf(id), id, v), { toast: 'Link added.', undo: OPS.removeEntLink(kindOf(id), id, v) });
+  commit(OPS.addEntLink(kindOf(id), id, v), { toast: 'URL added.', undo: OPS.removeEntLink(kindOf(id), id, v) });
   S.linkLabel = ''; S.linkUrl = ''; forceClear('ef-ll'); forceClear('ef-lu');
 }
 function setTheme(t) {
@@ -2920,6 +3203,7 @@ function runResult(it) {
   S.dialog = null; S.dlgReturn = null;
   if (it.act === 'go') { if (it.arg === 'people-gaps') { go('people'); S.pf = 'gaps'; } else go(it.arg); return; }
   if (it.act === 'open') { select(it.arg); return; }
+  if (it.act === 'all') { S.wq = it.arg; forceClear('wb-q'); go('all'); return; }
   if (it.act === 'person' && it.arg) { go('person', it.arg); return; }
   if (it.act === 'ent') { goAny(it.arg); return; }
   if (it.act === 'cmd') {
@@ -2934,7 +3218,7 @@ function runResult(it) {
 function syncNow() { requestSync(true); }
 async function reconnect() {
   var ok = await regainAccess();
-  if (!ok) { toastShow('Permission wasn’t given. Your changes are still kept on screen.'); render(); return; }
+  if (!ok) { toastShow((srv ? 'The Discerny server still isn’t running.' : 'Permission wasn’t given.') + ' Your changes are still kept on screen.'); render(); return; }
   Q.blocked = null;
   requestSync(false);
   kick();
@@ -2966,6 +3250,10 @@ var ACT = {
   },
   status: function (el) { var v = dvv(el); patch(did(el), { st: v === 'To do' ? '' : v }); },
   accept: function (el) { accept(did(el)); },
+  'done-now': function (el) { doneNow(did(el)); },
+  snooze: function (el) { snoozeItem(did(el), +dvv(el)); },
+  'snooze-open': function (el) { var id = did(el); S.snoozeFor = S.snoozeFor === id ? null : id; if (S.snoozeFor) focusLater('.main [data-row="' + id + '"] .reasons button'); else render(); },
+  'snooze-cancel': function () { S.snoozeFor = null; render(); },
   'dismiss-open': function (el) { var id = did(el), at = el.closest('.panel') ? 'panel' : 'row'; if (S.dismissFor === id && S.dismissAt === at) { S.dismissFor = null; render(); return; } S.dismissFor = id; S.dismissAt = at; focusLater(at === 'panel' ? '.panel .reasons .chipbtn' : '.main [data-row="' + id + '"] .reasons .chipbtn'); },
   'dismiss-cancel': function () { S.dismissFor = null; render(); },
   dismiss: function (el) { dismiss(did(el), dvv(el)); },
@@ -2994,9 +3282,11 @@ var ACT = {
   },
   'hide-who': function (el) { var a = lsJson('discerny-hide-who', []); a.push(dvv(el)); lsSet('discerny-hide-who', JSON.stringify(a)); toastShow('“' + dvv(el) + '” won’t be suggested for People again.'); },
   del: function (el) { deleteTask(did(el)); },
-  'dep-del': function (el) { var id = did(el), d = dvv(el); commit(OPS.removeDep(id, d), { toast: 'Removed: blocked by ' + d + '.', undo: OPS.addDep(id, d) }); },
-  'rel-del': function (el) { var raw = dvv(el); commit(OPS.removeRel(raw), { toast: 'Link removed.', undo: OPS.addRel(raw) }); },
-  'link-mode': function (el) { S.linkMode = dvv(el); S.linkQ = ''; forceClear('f-linkq'); focusLater('#f-linkq'); },
+  'dep-del': function (el) { var id = did(el), d = dvv(el); commit(OPS.removeDep(id, d), { toast: id + ' no longer depends on ' + d + '.', undo: OPS.addDep(id, d) }); },
+  'rel-del': function (el) { var raw = dvv(el); commit(OPS.removeRel(raw), { toast: 'Relationship removed.', undo: OPS.addRel(raw) }); },
+  'link-kind': function (el) { S.linkKind = dvv(el); focusLater('#f-linkq'); },
+  'sys-add': function (el) { addSystem(S.sel, dvv(el)); },
+  'link-mode': function (el) { S.linkMode = dvv(el); S.linkKind = 'All'; S.linkQ = ''; forceClear('f-linkq'); focusLater('#f-linkq'); },
   'link-add': function (el) { if (S.sel) addLink(S.sel, dvv(el)); },
   prompt: function (el) {
     var id = S.sel, label = dvv(el), base;
@@ -3029,6 +3319,9 @@ var ACT = {
   'discard-yes': function () { S.confirm = null; discardPending(); toastShow('Unsaved changes discarded. Showing what is in your files.'); },
   'discard-no': function () { S.confirm = null; render(); },
   group: function (el) { S.group = dvv(el); lsSet('discerny-group', S.group); render(); },
+  'wb-group': function (el) { setWb({ group: dvv(el) }); },
+  'wb-tag': function (el) { var t = dvv(el); setWb({ tag: S.wb.tag === t ? '' : t }); if (S.view !== 'all') go('all'); },
+  'qa-more': function () { S.qaMore = !S.qaMore; render(); if (S.qaMore) focusLater('#qa-urg'); },
   pf: function (el) { S.pf = dvv(el); render(); },
   'add-open': function (el) { S.adding = dvv(el); S.addName = ''; S.addGrp = ''; S.addType = ''; focusLater('#add-name'); },
   'add-cancel': function () { S.adding = null; render(); },
@@ -3066,9 +3359,14 @@ var ACT = {
     commit(OPS.deleteEnt(kind, id), { toast: 'Deleted ' + id + '.', undo: OPS.restoreEnt(kind, snap) });
   },
   'e-link-add': function (el) { addEntityLink(did(el)); },
-  'e-link-del': function (el) { var id = did(el), v = dvv(el); commit(OPS.removeEntLink(kindOf(id), id, v), { toast: 'Link removed.', undo: OPS.addEntLink(kindOf(id), id, v) }); },
+  'e-link-del': function (el) { var id = did(el), v = dvv(el); commit(OPS.removeEntLink(kindOf(id), id, v), { toast: 'URL removed.', undo: OPS.addEntLink(kindOf(id), id, v) }); },
   pick: function () { pickFolder(); },
+  // From a folder refused after it was open, switching reloads the page so nothing of it carries over.
+  refolder: function () { if (S.m || srv) changeFolder(); else pickFolder(); },
   folder: function () { changeFolder(); },
+  'folder-sug': function (el) { S.folderPath = dvv(el); S.folderErr = ''; render(); focusLater('#folder-path'); },
+  reload: function () { location.reload(); },
+  srvretry: function () { openFolder(); },
   regrant: function () { regrant(); }
 };
 function fallbackCopy(text) {
@@ -3090,6 +3388,7 @@ var CH = {
   asg: function (el) { var v = el.value ? el.value.replace('T', ' ').slice(0, 16) : ''; patch(did(el), { asg: v }); },
   my: function (el) { var id = did(el), i = item(id), l = linesOf(el.value); if (i && !same(l, myOf(i))) commit(OPS.my(id, l)); },
   sub: function (el) { var id = did(el), k = +el.getAttribute('data-i'), i = item(id), s = i ? subsOf(i)[k] : null; if (s) commit(OPS.setSub(id, k, s.v, el.checked)); },
+  'link-done': function (el) { S.linkDone = el.checked; render(); },
   suggest: function (el) { S.suggestOn[did(el) + '|' + dvv(el)] = el.checked; render(); },
   review: function (el) { var st = reviewState(); st.done[dvv(el)] = el.checked; lsSet('discerny-review', JSON.stringify(st)); render(); },
   'tag-add': function (el) { addTagFrom(el); },
@@ -3110,6 +3409,9 @@ var CH = {
   'e-grp': function (el) { var e = entById(did(el)), v = cleanName(el.value); if (e && v !== e.grp) commit(OPS.entGroup(kindOf(did(el)), did(el), v)); },
   'e-notes': function (el) { var id = did(el), e = entById(id), l = linesOf(el.value); if (e && !same(l, notesOf(e))) commit(OPS.entNotes(kindOf(id), id, l)); },
   pgroup: function (el) { S.pgroup = el.value; lsSet('discerny-pgroup', S.pgroup); render(); },
+  'wb-sort': function (el) { setWb({ sort: el.value }); },
+  'wb-tag': function (el) { setWb({ tag: el.value }); },
+  'qa-urg': function (el) { S.qaUrg = el.value; render(); },
   addType: function (el) { S.addType = el.value; }
 };
 function addPrjFrom(el, mayCreate) {
@@ -3136,8 +3438,11 @@ var IN = {
   qa: function (el) { S.qa = el.value; S.qaType = null; render(); },
   palQ: function (el) { S.palQ = el.value; S.palI = 0; render(); },
   linkQ: function (el) { S.linkQ = el.value; render(); },
+  sysQ: function (el) { S.sysQ = el.value; render(); },
   pq: function (el) { S.pq = el.value; render(); },
   eq: function (el) { S.eq = el.value; render(); },
+  wq: function (el) { S.wq = el.value; render(); },
+  qaDesc: function (el) { S.qaDesc = el.value; },
   composer: function (el) { if (S.sel) S.composer[S.sel] = el.value; },
   subDraft: function (el) { S.subDraft = el.value; },
   tagDraft: function (el, ev) { S.tagDraft = el.value; if (ev && ev.inputType === 'insertReplacementText') addTagFrom(el); },
@@ -3146,9 +3451,23 @@ var IN = {
   addGrp: function (el) { S.addGrp = el.value; },
   linkLabel: function (el) { S.linkLabel = el.value; },
   linkUrl: function (el) { S.linkUrl = el.value; },
-  editAskText: function (el) { S.editAskText = el.value; }
+  editAskText: function (el) { S.editAskText = el.value; },
+  folderPath: function (el) { S.folderPath = el.value; }
 };
 var SUB = {
+  // Asks the server to open another folder, which it also records for the agent, then reloads on it.
+  'folder-switch': async function () {
+    if (S.folderBusy) return;
+    if (Q.jobs.some(function (j) { return !j.sync; })) { S.folderErr = 'Wait until your changes are saved, then change folder.'; render(); return; }
+    var p = S.folderPath.trim();
+    if (!p) { focusLater('#folder-path'); return; }
+    S.folderErr = ''; S.folderBusy = true; render();
+    var r;
+    try { r = await api('/api/folder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) }); }
+    catch (e) { S.folderBusy = false; S.folderErr = 'The Discerny server isn’t running. Start it again with node tools/discern.mjs serve, then try again.'; render(); return; }
+    if (r.ok) { location.reload(); return; }
+    S.folderBusy = false; S.folderErr = (await r.text()) || 'The server answered ' + r.status + '.'; render(); focusLater('#folder-path');
+  },
   'add-ent': function (f) {
     var kind = f.getAttribute('data-v'), D = EDEF[kind], name = cleanName(S.addName);
     if (!name) { focusLater('#add-name'); return; }
@@ -3207,8 +3526,12 @@ var KD = {
   },
   composer: function (el, ev) { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); if (S.sel) queueAsk(S.sel); } },
   linkq: function (el, ev) {
-    if (ev.key === 'Enter') { ev.preventDefault(); var r = S.sel ? linkCands(S.sel, kindOf(S.sel) === 'T' ? S.linkMode : 'related') : null; if (r && r.length) addLink(S.sel, r[0].id); }
+    if (ev.key === 'Enter') { ev.preventDefault(); var lm = S.sel && kindOf(S.sel) === 'T' ? S.linkMode : 'related', r = S.sel ? linkCands(S.sel, lm, S.linkQ, { kind: S.linkKind, done: S.linkDone && lm !== 'blocked' }) : null; if (r && r.list.length) addLink(S.sel, r.list[0].id); }
     else if (ev.key === 'Escape' && el.value) { ev.preventDefault(); S.linkQ = ''; forceClear(el.id); render(); }
+  },
+  sys: function (el, ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); var r = S.sel ? linkCands(S.sel, 'related', S.sysQ, { kind: 'System' }) : null; if (r && r.list.length) addSystem(S.sel, r.list[0].id); }
+    else if (ev.key === 'Escape' && el.value) { ev.preventDefault(); S.sysQ = ''; forceClear(el.id); render(); }
   },
   'e-link': function (el, ev) { if (ev.key === 'Enter') { ev.preventDefault(); addEntityLink(did(el)); } }
 };
@@ -3238,7 +3561,7 @@ function trapTab(ev) {
   if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
   else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
 }
-var GO_KEYS = { t: 'today', i: 'inbox', n: 'next', w: 'waiting', u: 'upcoming', f: 'fyi', p: 'projects', e: 'people', s: 'systems', r: 'review', c: 'claude', d: 'done' };
+var GO_KEYS = { t: 'today', i: 'inbox', n: 'next', w: 'waiting', u: 'upcoming', f: 'fyi', a: 'all', p: 'projects', e: 'people', s: 'systems', r: 'review', c: 'claude', d: 'done' };
 function onKey(ev) {
   var t = ev.target;
   var kd = t && t.closest ? t.closest('[data-kd]') : null;
@@ -3291,6 +3614,12 @@ async function pickFolder() {
 }
 // Switching data folders reloads the page, so nothing from the old folder (undo, selection, timestamps) carries over.
 async function changeFolder() {
+  if (srv) {
+    if (S.dialog !== 'folder') { S.dlgReturn = document.activeElement; S.folderPath = ''; S.folderErr = ''; }
+    S.dialog = 'folder'; render();
+    if (srv.canSwitch) { loadFolderSugs(); focusLater('#folder-path'); } else focusLater('.dlg .xbtn');
+    return;
+  }
   if (Q.jobs.some(function (j) { return !j.sync; })) { toastShow('Wait until your changes are saved, then change folder.'); return; }
   var h;
   try { h = await window.showDirectoryPicker({ id: 'discerny', mode: 'readwrite' }); }
@@ -3310,19 +3639,30 @@ async function regrant() {
   render();
 }
 async function openFolder() {
-  S.folder = dir.name;
-  try { await dir.getFileHandle('TASKS.md'); }
+  if (srv && srv.problem === 'none') { S.gate = { mode: 'nofolder', msg: '' }; render(); loadFolderSugs(); focusLater('#folder-path'); return; }
+  if (srv && srv.canSwitch) loadFolderSugs();
+  S.folder = srv ? srv.name : dir.name;
+  if (!srv) try { await dir.getFileHandle('TASKS.md'); }
   catch (e) {
     if (e && e.name === 'NotFoundError') S.gate = { mode: 'wrong', msg: '“' + dir.name + '” has no TASKS.md.' };
-    else if (isPermErr(e)) S.gate = { mode: 'reconnect', msg: '' };
+    else if (isPermErr(e)) S.gate = { mode: srv ? 'srvdown' : 'reconnect', msg: '' };
     else S.gate = { mode: 'error', msg: errText(e) };
     render();
     return;
   }
   S.gate = { mode: 'loading', msg: '' };
   render();
-  try { var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now(); }
-  catch (e) { console.error(e); S.gate = isPermErr(e) ? { mode: 'reconnect', msg: '' } : { mode: 'error', msg: errText(e) }; render(); return; }
+  try {
+    var g = await formatGate();
+    if (g) { S.gate = g; render(); return; }
+    var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now();
+  }
+  catch (e) {
+    console.error(e);
+    // The server switched folders between /api/info and these reads: open the folder it serves now.
+    if (isMoved(e)) { location.reload(); return; }
+    S.gate = isPermErr(e) ? { mode: srv ? 'srvdown' : 'reconnect', msg: '' } : { mode: 'error', msg: errText(e) }; render(); return;
+  }
   S.ready = true;
   if (S.view === 'inbox') go('inbox');
   startTimers();
@@ -3360,6 +3700,8 @@ async function boot() {
   }, true);
   window.addEventListener('resize', render);
   window.addEventListener('beforeunload', function (ev) { if (Q.jobs.some(function (j) { return !j.sync; })) { ev.preventDefault(); ev.returnValue = ''; } });
+  // Served by node tools/discern.mjs serve: the server reads and writes the folder, so no picker or permission.
+  if (location.protocol === 'http:' && (await serverInfo())) { openFolder(); return; }
   if (!('showDirectoryPicker' in window)) { S.gate = { mode: 'nosupport', msg: '' }; render(); return; }
   var h = await idbGet('dir');
   if (h && h.kind === 'directory') {

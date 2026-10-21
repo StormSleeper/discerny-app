@@ -1,10 +1,9 @@
 {
   "scenario": "fixtures/outlook-mail/basic",
-  "description": "One mail run over the test data folder: 14 inbound and 7 sent messages covering evals E1-E6, E8, E11, E13, E15 and E16.",
+  "description": "One mail run over the Example: 14 inbound and 7 sent messages covering evals E1-E6, E8, E11, E13, E15 and E16.",
   "setup": [
-    "Make a scratch data folder as README.md in this folder describes (a copy of the test data folder, discerny-example, as of its last commit), and connect the helper to it.",
-    "In its SOURCES.md, add \"- fixture: <absolute path to tools/evals/fixtures/outlook-mail/basic>\" to the outlook-mail block.",
-    "Delete the \"## outlook-calendar\" block, so mail handles invitations itself (E8)."
+    "Make a scratch data folder as README.md in this folder describes (a copy of the Example, discerny-example, as of its last commit), and connect the helper to it.",
+    "In its SOURCES.md, add \"- fixture: <absolute path to tools/evals/fixtures/outlook-mail/basic>\" to the outlook-mail block."
   ],
   "expect": [
     {
@@ -20,7 +19,7 @@
     {
       "eval": "E3",
       "message": "m-103",
-      "result": "No new item; an update proposal on T-0031 (cancelled this week)."
+      "result": "Dropped: a cancellation is the calendar skill's to handle. No new item, no proposal and no line in IGNORED.md."
     },
     {
       "eval": "E4",
@@ -40,7 +39,7 @@
     {
       "eval": "E8",
       "message": "m-106",
-      "result": "New ty:Meeting item with due:2026-11-03 14:00 and a ref cal|2026-11-03|supplier review – feltcraft beside the mail ref."
+      "result": "Dropped: an invitation is the calendar skill's to handle, even though it asks the user to bring something. No new item and no line in IGNORED.md."
     },
     {
       "eval": "E11",
@@ -65,7 +64,7 @@
     {
       "eval": "-",
       "message": "m-112",
-      "result": "Dropped (Accepted reply)."
+      "result": "Dropped by match: an Accepted reply that asks nothing. No exclude rule catches it, and no line in IGNORED.md."
     },
     {
       "eval": "-",
@@ -101,6 +100,11 @@
       "eval": "-",
       "message": "s-206",
       "result": "Dropped: an invitation the user sent."
+    },
+    {
+      "eval": "E25",
+      "message": "report",
+      "result": "The report ends \"outlook-mail: caught up\", from the commit's behind report."
     },
     {
       "eval": "-",
