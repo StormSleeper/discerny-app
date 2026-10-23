@@ -59,6 +59,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `config.toml` | The app folder's settings. `data_folder` is the path of the connected data folder, written by `discern connect` and `discern new` | when Node is missing |
 | `new_discerny_repo/` | The blank starter files for a new data folder | never, unless asked |
 | `discerny.html` | The UI | never |
+| `icons/` | The UI's icons | never |
 | `AGENTS.md`, `CLAUDE.md`, `README.md`, `LICENSE` | Instructions and documentation | this file only |
 
 ## Rules for every edit

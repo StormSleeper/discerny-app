@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/discerny-logo.png" width="256" alt="Discerny logo: a pair of binoculars with eyes, holding a checklist and a folder of notes">
+</p>
+
 # Discerny
 
 Discerny is a task tracker and knowledge base for the work you're juggling and the people, projects and systems around it. It borrows from David Allen's *Getting Things Done*, and you run it together with an AI agent.

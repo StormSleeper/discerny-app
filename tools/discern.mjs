@@ -1045,6 +1045,14 @@ CMD.serve = function () {
     // A same-origin fetch always names the page's origin, so a PUT without it came from somewhere else.
     if (req.method === 'PUT' && ![`http://127.0.0.1:${port}`, `http://localhost:${port}`].includes(req.headers.origin)) return send(res, 403, 'forbidden');
     if (req.method === 'GET' && req.url === '/') return send(res, 200, fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'), { 'Content-Type': 'text/html; charset=utf-8' });
+    // The app's icons, whatever the folder's state: a strict name, so nothing outside icons/ can be reached.
+    const icon = /^\/icons\/([a-z0-9-]+\.(png|ico))$/.exec(req.url);
+    if (req.method === 'GET' && icon) {
+      const f = path.join(REPO, 'icons', icon[1]);
+      if (!fs.existsSync(f)) return send(res, 404, 'not found');
+      res.writeHead(200, { 'Content-Type': icon[2] === 'png' ? 'image/png' : 'image/x-icon', 'Cache-Control': 'max-age=3600' });
+      return res.end(fs.readFileSync(f));
+    }
     if (req.method === 'GET' && req.url === '/api/info') {
       return send(res, 200, { folder: open.dir, name: open.dir && path.basename(open.dir), version: C.VERSION, session: open.session, problem: problem(), canSwitch: CAN_SWITCH });
     }

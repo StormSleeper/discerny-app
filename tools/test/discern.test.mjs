@@ -1227,6 +1227,28 @@ test('serve refuses unknown names, paths out of the folder and a Host that is no
   assert.equal(Object.keys(ok.headers).some(h => h.startsWith('access-control-')), false);
 });
 
+test('serve gives the app\'s icons as they are on disk, and nothing else under /icons/', async (t) => {
+  const { url } = await serve(t, folder());
+  for (const [name, type] of [['favicon.ico', 'image/x-icon'], ['discerny-32.png', 'image/png'], ['apple-touch-icon.png', 'image/png']]) {
+    const r = await fetch(new URL(`icons/${name}`, url));
+    assert.equal(r.status, 200, name);
+    assert.equal(r.headers.get('content-type'), type, name);
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), fs.readFileSync(path.join(REPO, 'icons', name)), name);
+  }
+  assert.equal((await raw(url, '/icons/missing.png')).status, 404);
+  for (const p of ['/icons/../discerny.html', '/icons/..%2fdiscerny.html', '/icons/%2e%2e%2fconfig.toml', '/icons/..%5cdiscerny.html', '/icons/Favicon.ico', '/icons/favicon.ico/', '/icons/x.svg', '/icons/']) {
+    const r = await raw(url, p);
+    assert.ok(r.status >= 400, `${p} ${r.status}`);
+    assert.equal(r.headers['content-type'].startsWith('text/plain'), true, p);
+  }
+});
+
+test('serve gives the icons with no folder usable', async (t) => {
+  const said = await serve(t, folderInFormat('0.2.0.1'));
+  assert.match(said.problem, /Format/);
+  assert.equal((await fetch(new URL('icons/favicon.ico', said.url))).status, 200);
+});
+
 test('serve refuses a PUT that is empty over a file with content, not text/plain, or over 10 MB, and writes nothing', async (t) => {
   const d = folder();
   const { url, api, session } = await serve(t, d);

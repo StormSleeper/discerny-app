@@ -5,9 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Discerny</title>
+<link rel="icon" href="icons/favicon.ico" sizes="any">
+<link rel="icon" href="icons/discerny-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#F6F5F2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#15171C" media="(prefers-color-scheme: dark)">
 <script>
+/* Colours the browser's own bars with --bg: the theme the User picked, or the system's when they haven't picked one. */
+function setThemeColor(t) {
+  var m = document.querySelectorAll('meta[name="theme-color"]');
+  for (var i = 0; i < m.length; i++) m[i].content = (t === 'light' || t === 'dark' ? t === 'dark' : /dark/.test(m[i].media)) ? '#15171C' : '#F6F5F2';
+}
 /* Apply the saved theme before first paint so dark mode doesn't flash. */
-try { var t = localStorage.getItem('discerny-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
+try { var t = localStorage.getItem('discerny-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); setThemeColor(t); } catch (e) {}
 </script>
 <style>
 :root{
@@ -400,7 +410,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.1.1.19'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.1.2.1'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','week','soon','later','fyi'];
@@ -3185,6 +3195,7 @@ function addEntityLink(id) {
 function setTheme(t) {
   S.theme = t;
   if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme');
+  setThemeColor(t);
   lsSet('discerny-theme', t);
   render();
 }
