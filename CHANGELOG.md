@@ -2,11 +2,25 @@
 
 What's changed in Discerny, newest first. Each line is one build. A dated section is a release, which you get by pulling `main`. The Unreleased section holds builds on `dev` that haven't been released yet. See the Version section of the README for what the numbers mean.
 
-## Unreleased
+## 0.2.0.1 (2026-10-23)
 
-- Discerny now has its own icon in the browser tab and on bookmarks, and the browser's bars match the app's light or dark theme.
-- In Chrome or Edge, a page served by `discern serve` can be installed as an app with its own window, and the sidebar shows the Discerny icon.
-- Data folders now record their Format, and older ones are upgraded with `discern upgrade` (or by asking your agent to "upgrade my Discerny folder"), which replaces `discern migrate`.
+### What's new
+
+- **Discerny has its own icon** in the browser tab and on bookmarks. The browser's bars now match the app's light or dark theme.
+- **Install it as an app.** In Chrome or Edge, a page served by `discern serve` can be installed as an app with its own window. The sidebar shows the Discerny icon.
+
+### Upgrading
+
+This Release changes how Data folders are written, so **each Data folder needs the Upgrade** before this version will open it.
+
+- `node tools/discern.mjs upgrade` lists what will change, without touching anything.
+- `node tools/discern.mjs upgrade --write` backs the folder up first and then applies the changes.
+- The **discern-upgrade** Skill runs any steps that need an Agent. Ask your agent to "upgrade my Discerny folder".
+- `discern upgrade` replaces `discern migrate`, which has been removed.
+
+What this Upgrade changes:
+
+- **0.2.0.1:** The folder now records its Format. Older Source keys are brought up to date: a whole-chat Teams key gains `|*`, and an open Meeting with a date and an email key, but no calendar key, gains one.
 
 ## 0.1.1.19 (2026-10-21)
 
