@@ -95,7 +95,7 @@ You can have more than one data folder, for example one to try things out in. Sw
 | `RELATIONSHIPS.md` | Relationships between items and records, such as which task concerns which system |
 | `REFERENCE.md` | Web addresses, people's details and other things you look up often |
 | `ASK-AGENT.md`, `ASK-AGENT-LOG.md` | The agent queue: requests waiting for your agent, and a record of what it did with them |
-| `SOURCES.md`, `IGNORED.md` | Bookkeeping for source skills: shared settings such as your time zone, how far each source has been read, and what was ignored or dismissed, so it's never proposed again |
+| `SOURCES.md`, `IGNORED.md`, `DISMISSED.md` | Bookkeeping for source skills: shared settings such as your time zone, how far each source has been read, what was ignored, so it's never proposed again, and what you dismissed, so the same message isn't proposed twice |
 | `REFRESH-LOG.md` | A record of each source-skill run, created on the first run |
 | `drafts/` | Messages your agent drafted for you. They are never sent |
 

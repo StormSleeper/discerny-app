@@ -187,7 +187,7 @@ test('every source skill command refuses a folder in another Format with exit 2,
     [['match'], [{ scheme: 'mail', subject: 'Review' }]],
     [['who', 'ihartley']],
     [['local', '2026-10-24T09:00:00Z']],
-    [['add'], [draft()]],
+    [['add', 'outlook-mail'], [draft()]],
     [['meetings'], [event()]],
     [['ignore'], [{ ref: 'mail|Bake-off Friday sign-up', reason: 'social' }]],
     [['note', 'T-0028', 'Print order moved']],
@@ -516,7 +516,7 @@ test('meetings never takes an older prep item carrying the Meeting\'s plain cal 
   const d = folder();
   const prep = { title: 'Prepare for Calibration review (14 Oct 10:00)', ty: 'Meeting', urg: 'week', p: 2, due: '2026-10-14 10:00', derived: true,
     src: 'Calendar "Calibration review" organised by Declan Moss', refs: ['cal|2026-10-14|calibration review'] };
-  assert.equal(run(d, ['add'], [prep]).code, 0);
+  assert.equal(run(d, ['add', 'outlook-mail'], [prep]).code, 0);
   const r = run(d, ['meetings'], [event({ event_id: undefined })]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.added.map(a => a.title), ['Calibration review']);
@@ -530,13 +530,13 @@ const draft = (o = {}) => ({ title: 'Review the supplier sampling plan', ty: 'Ta
 
 test('add raises the counter first, writes the inbox and refuses duplicates (E10)', () => {
   const d = folder();
-  const r = run(d, ['add'], [draft(), draft({ title: 'Prepare for supplier review', ty: 'Meeting', due: '2026-11-03 14:00', refs: ['mail|Supplier review – Feltcraft'] })]);
+  const r = run(d, ['add', 'outlook-mail'], [draft(), draft({ title: 'Prepare for supplier review', ty: 'Meeting', due: '2026-11-03 14:00', refs: ['mail|Supplier review – Feltcraft'] })]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.added.map(a => a.id), ['T-0032', 'T-0033']);
   assert.ok(r.json.added[1].refs.includes('cal|2026-11-03|supplier review – feltcraft'));
   assert.match(read(d, 'TASKS.md'), /<!-- next-id: 34 -->/);
-  assert.match(read(d, 'INBOX.md'), /T-0032 Review the supplier sampling plan \{ty:Task; who:Meera Ilangovan; urg:week; p:2; asg:2026-10-24 10:00\}/);
-  const again = run(d, ['add'], [draft()]);
+  assert.match(read(d, 'INBOX.md'), /T-0032 Review the supplier sampling plan \{ty:Task; who:Meera Ilangovan; urg:week; p:2; asg:2026-10-24 10:00; source:outlook-mail\}/);
+  const again = run(d, ['add', 'outlook-mail'], [draft()]);
   assert.equal(again.code, 1);
   assert.match(again.json.error, /duplicate/);
   assert.equal(run(d, ['check']).code, 0);
@@ -544,10 +544,10 @@ test('add raises the counter first, writes the inbox and refuses duplicates (E10
 
 test('add enforces the who rule and derives asg for derived items', () => {
   const d = folder();
-  const bad = run(d, ['add'], [draft({ who: 'Ilangovan, Meera' })]);
+  const bad = run(d, ['add', 'outlook-mail'], [draft({ who: 'Ilangovan, Meera' })]);
   assert.equal(bad.code, 1);
   assert.match(bad.json.error, /not a name in PEOPLE.md/);
-  const ok = run(d, ['add'], [draft({ received: undefined, derived: true, refs: ['cal|2026-10-20|mk4 fai – tue 20 oct|invite'] })]);
+  const ok = run(d, ['add', 'outlook-mail'], [draft({ received: undefined, derived: true, refs: ['cal|2026-10-20|mk4 fai – tue 20 oct|invite'] })]);
   assert.equal(ok.code, 0, ok.out);
   assert.match(read(d, 'INBOX.md'), /asg:2026-10-12 16:00/);
 });
@@ -555,7 +555,7 @@ test('add enforces the who rule and derives asg for derived items', () => {
 test('an interrupted run leaves a gap, never a duplicate ID (E14)', () => {
   const d = folder();
   fs.writeFileSync(path.join(d, 'TASKS.md'), read(d, 'TASKS.md').replace('<!-- next-id: 32 -->', '<!-- next-id: 34 -->'));
-  const r = run(d, ['add'], [draft()]);
+  const r = run(d, ['add', 'outlook-mail'], [draft()]);
   assert.deepEqual(r.json.added.map(a => a.id), ['T-0034']);
   assert.equal(run(d, ['check']).code, 0);
 });
@@ -574,7 +574,7 @@ test('add and ignore create a missing INBOX.md or IGNORED.md with the starter fi
   const d = folder();
   fs.rmSync(path.join(d, 'INBOX.md'));
   fs.rmSync(path.join(d, 'IGNORED.md'));
-  assert.equal(run(d, ['add'], [draft()]).code, 0);
+  assert.equal(run(d, ['add', 'outlook-mail'], [draft()]).code, 0);
   assert.equal(run(d, ['ignore'], [{ ref: 'mail|Bake-off Friday sign-up', reason: 'social' }]).code, 0);
   assert.equal(header(read(d, 'INBOX.md')), starter('INBOX.md'));
   assert.equal(header(read(d, 'IGNORED.md')), starter('IGNORED.md'));
@@ -751,10 +751,10 @@ test('migrate is no longer a command', () => {
 
 test('add takes lists as arrays or comma-separated strings, and has a dry run', () => {
   const d = folder();
-  const dry = run(d, ['add', '--dry-run'], [draft({ tg: 'Supplier Quality, Document Control', notes: 'One note.' })]);
+  const dry = run(d, ['add', 'outlook-mail', '--dry-run'], [draft({ tg: 'Supplier Quality, Document Control', notes: 'One note.' })]);
   assert.match(dry.json.would_add[0], /tg:Supplier Quality,Document Control/);
   assert.doesNotMatch(read(d, 'INBOX.md'), /Review the supplier sampling plan/);
-  const r = run(d, ['add'], [draft({ tg: ['Supplier Quality', 'Document Control'], prj: 'PRJ-0001' })]);
+  const r = run(d, ['add', 'outlook-mail'], [draft({ tg: ['Supplier Quality', 'Document Control'], prj: 'PRJ-0001' })]);
   assert.equal(r.code, 0, r.out);
   assert.match(read(d, 'INBOX.md'), /prj:PRJ-0001; tg:Supplier Quality,Document Control/);
 });
@@ -1168,7 +1168,7 @@ test('transcript items share an event but not a calid ref', () => {
   const m = run(d, ['match'], [{ scheme: 'cal', subject: 'QA weekly', date: '2026-10-12', event_id: 'ev1', suffix: 'transcript-1' }]).json[0];
   assert.deepEqual(m.refs, ['cal|2026-10-12|qa weekly|transcript-1']);
   const t = (n) => draft({ title: `Action ${n}`, received: undefined, derived: true, refs: [`cal|2026-10-12|qa weekly|transcript-${n}`, 'calid|ev1'] });
-  assert.equal(run(d, ['add'], [t(1), t(2)]).code, 0);
+  assert.equal(run(d, ['add', 'outlook-mail'], [t(1), t(2)]).code, 0);
 });
 
 
@@ -1434,10 +1434,10 @@ test('serve gives the mtime of every file the page reads in one answer, 0 for a 
   const m = await (await api('api/mtimes')).json();
   assert.equal(m['PEOPLE.md'], Date.parse('2026-10-01T09:00:00Z'));
   assert.equal(m['IGNORED.md'], 0);
-  for (const f of ['TASKS.md', 'INBOX.md', 'DONE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md']) {
+  for (const f of ['TASKS.md', 'INBOX.md', 'DONE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md', 'DISMISSED.md']) {
     assert.equal(m[f], fs.existsSync(path.join(d, f)) ? Math.floor(fs.statSync(path.join(d, f)).mtimeMs) : 0, f);
   }
-  assert.equal(Object.keys(m).length, 12);
+  assert.equal(Object.keys(m).length, 13);
 });
 
 test('serve lists the Drafts, .md and .txt only, by name, and none when there is no drafts folder', async (t) => {
@@ -1656,4 +1656,122 @@ test('serve gives the UI at /', async (t) => {
   assert.equal(r.status, 200);
   assert.match(r.headers.get('Content-Type'), /^text\/html/);
   assert.equal(await r.text(), fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'));
+});
+
+// ---------------------------------------------------------------- Dismisses in DISMISSED.md
+const dismissed = (d, ...lines) => fs.writeFileSync(path.join(d, 'DISMISSED.md'), ['# Dismissed', '<!-- header -->', '', ...lines, ''].join('\n'));
+const dismissedKeys = (text) => text.split('\n').filter(l => l.startsWith('- ')).map(l => l.slice(2, l.lastIndexOf(' {')));
+
+test('match drops a candidate whose source key is in DISMISSED.md, mail by its subject and teams by its message', () => {
+  const d = folder();
+  const mail = { key: 'm', scheme: 'mail', pass: 'inbound', subject: 'Toy fair preview – stand plan', sender: 'someone@example.com', when: '2026-10-12T09:00:00Z' };
+  const chat = { key: 't', scheme: 'teams', pass: 'inbound', chat: '19:abcdef0123456789abcdef@thread.v2', message: '1760259600000', sender: 'someone@example.com', when: '2026-10-12T09:00:00Z' };
+  const first = run(d, ['match'], [mail, chat]).json;
+  assert.deepEqual(first.map(r => r.outcome), ['new', 'new']);
+  dismissed(d, ...first.map(r => `- ${r.ref} {source: outlook-mail; received-datetime: 2026-10-12 10:00; dismissed-date: 2026-10-12; reason: not actionable}`));
+  const again = run(d, ['match'], [{ ...mail, subject: 'RE: Toy fair preview – stand plan' }, chat, { ...chat, key: 'other', message: '1760259700000' }]).json;
+  assert.deepEqual(again.map(r => [r.outcome, r.action]), [['dismissed', 'drop'], ['dismissed', 'drop'], ['new', 'assess: capture it if actionable or FYI, otherwise ignore it']]);
+  const dup = run(d, ['add', 'outlook-mail'], [draft({ refs: [first[0].ref] })]);
+  assert.equal(dup.code, 1);
+  assert.match(dup.json.error, /already in the folder/);
+});
+
+test('add names the source each Proposal came from, and refuses without one or with one SOURCES.md lacks', () => {
+  const d = folder();
+  const none = run(d, ['add'], [draft()]);
+  assert.equal(none.code, 1);
+  assert.match(none.json.error, /discern add <source>/);
+  const bad = run(d, ['add', 'outlook-mial'], [draft()]);
+  assert.equal(bad.code, 1);
+  assert.match(bad.json.error, /no "## outlook-mial" block/);
+  assert.equal(run(d, ['add', 'defaults'], [draft()]).code, 1);
+  const ok = run(d, ['add', 'teams-chat'], [draft()]);
+  assert.equal(ok.code, 0, ok.out);
+  assert.match(read(d, 'INBOX.md'), /T-0032 Review the supplier sampling plan \{[^}]*; source:teams-chat\}/);
+});
+
+test('commit forgets a Dismiss once its source can no longer read the message again, and only then', () => {
+  const d = folder();
+  dismissed(d,
+    '- mail|Old thing {source: outlook-mail; received-datetime: 2026-10-10 09:00; dismissed-date: 2026-10-10; reason: not actionable}',
+    '- mail|Recent thing {source: outlook-mail; received-datetime: 2026-10-12 14:30; dismissed-date: 2026-10-12; reason: not mine}',
+    '- mail|Undated {source: outlook-mail; dismissed-date: 2026-10-12; reason: duplicate}',
+    '- cal|2026-10-11|qa weekly|prep {source: outlook-calendar; event-date: 2026-10-11; dismissed-date: 2026-10-10; reason: not actionable}',
+    '- cal|2026-10-14|qa weekly|prep {source: outlook-calendar; event-date: 2026-10-14; dismissed-date: 2026-10-10; reason: not actionable}',
+    '- mail|No source {received-datetime: 2026-10-10 09:00; dismissed-date: 2026-10-10; reason: not actionable}');
+  const left = () => dismissedKeys(read(d, 'DISMISSED.md'));
+  // 2026-10-12 14:30 in London is 13:30Z; the cursor is the watermark less PT2H.
+  let c = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-12T15:00:00Z']);
+  assert.equal(c.code, 0, c.out);
+  assert.equal(c.json.forgotten, 2);
+  assert.deepEqual(left(), ['mail|Recent thing', 'mail|Undated', 'cal|2026-10-14|qa weekly|prep', 'mail|No source']);
+  // A line naming no source waits for every stream source, teams-chat too.
+  c = run(d, ['commit', 'teams-chat', 'watermark=2026-10-12T15:00:00Z']);
+  assert.equal(c.json.forgotten, 1);
+  assert.deepEqual(left(), ['mail|Recent thing', 'mail|Undated', 'cal|2026-10-14|qa weekly|prep']);
+  c = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-12T16:00:00Z']);
+  assert.equal(c.json.forgotten, 1);
+  // With no time, the end of the day it was dismissed bounds the message.
+  assert.deepEqual(left(), ['mail|Undated', 'cal|2026-10-14|qa weekly|prep']);
+  c = run(d, ['commit', 'outlook-calendar', 'last_run=2026-10-15T09:00:00Z'], undefined, '2026-10-15T09:00:00Z');
+  assert.equal(c.json.forgotten, 1);
+  assert.deepEqual(left(), ['mail|Undated']);
+  c = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-14T00:00:00Z']);
+  assert.equal(c.json.forgotten, 1);
+  assert.deepEqual(left(), []);
+  assert.match(read(d, 'DISMISSED.md'), /^# Dismissed\n<!-- header -->\n/);
+  assert.equal(run(d, ['commit', 'outlook-mail', 'last_result=x']).json.forgotten, 0);
+});
+
+// The Migration that moved Dismisses out of IGNORED.md: the one whose script creates DISMISSED.md.
+const DISMISS_SCRIPT = fs.readdirSync(path.join(REPO, 'migrations')).map(n => path.join(REPO, 'migrations', n, 'migrate.mjs'))
+  .find(f => fs.existsSync(f) && fs.readFileSync(f, 'utf8').includes("'DISMISSED.md'"));
+const OLD_HEADS = {
+  'IGNORED.md': '<!-- One line per source key never to be proposed again, ignored by a source skill or dismissed by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). -->',
+  'INBOX.md': '<!-- Proposals for new items from the discern-* source skills, waiting for the user to clarify them. Accept moves an item to TASKS.md; Dismiss logs it in IGNORED.md. -->',
+  'SOURCES.md': '<!-- Settings and state for source skills. "## defaults" holds settings every source skill shares; each skill then keeps its own "## <source-name>" block. Times are UTC (ISO 8601); durations are ISO 8601 (PT2H, P1D). Skills change single lines through tools/discern.mjs. See SOURCE-SKILLS.md. -->',
+};
+// A copy of the Example as the Format had it before: Dismisses in IGNORED.md, the old header comments and no
+// DISMISSED.md. INBOX.md has Windows line endings, which the Migration should keep.
+function dismissesIgnored(d) {
+  fs.rmSync(path.join(d, 'DISMISSED.md'), { force: true });
+  const head = (f, t) => t.replace(/\r\n/g, '\n').replace(/^<!--.*-->$/m, OLD_HEADS[f]);
+  const keep = ['mail|Bake-off Friday sign-up | 2026-09-17 | social', 'mail|Weekly digest | 2026-09-18 | not actionable', 'mail|Mk3 brochure photography – proofs | 2026-10-08 | deleted by user (T-0016)'];
+  fs.writeFileSync(path.join(d, 'IGNORED.md'), ['# Ignored', OLD_HEADS['IGNORED.md'], '', keep[0],
+    'mail|Toy Industry Weekly: autumn trade fair preview | 2026-09-23 | not actionable (T-0010)', keep[1],
+    '- teams|19:c40e9a|1758962400999 | 2026-09-24 | not mine (T-0011)', 'mail|A | b | 2026-09-25 | duplicate (T-0012)',
+    'inbox|Call the printer | 2026-09-26 | already handled (T-0013)', 'mail|Old | 2026-09-27 | dismissed (T-0014)', keep[2], ''].join('\n'));
+  fs.writeFileSync(path.join(d, 'INBOX.md'), head('INBOX.md', read(d, 'INBOX.md')).replace(/\n/g, '\r\n'));
+  fs.writeFileSync(path.join(d, 'SOURCES.md'), head('SOURCES.md', read(d, 'SOURCES.md')));
+  return keep;
+}
+const migrateDismiss = (d, ...args) => spawnSync(process.execPath, [DISMISS_SCRIPT, d, ...args], { encoding: 'utf8' });
+
+test('the Dismiss Migration\'s script imports only Node\'s built-in modules', () => {
+  const src = fs.readFileSync(DISMISS_SCRIPT, 'utf8');
+  const from = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g)].map(m => m[1] || m[2] || m[3]);
+  assert.ok(from.length);
+  assert.deepEqual(from.filter(s => !s.startsWith('node:')), []);
+});
+
+test('the Dismiss Migration previews and changes nothing; --write removes past Dismisses, creates DISMISSED.md and rewords the headers; again, it changes nothing', () => {
+  const d = folder(), keep = dismissesIgnored(d), before = snapshot(d);
+  const p = migrateDismiss(d);
+  assert.equal(p.status, 0, p.stderr);
+  assert.deepEqual(snapshot(d), before);
+  for (const said of ['IGNORED.md', 'removes the Dismiss mail|Toy Industry Weekly', 'not mine (T-0011)', 'duplicate (T-0012)', 'already handled (T-0013)', 'dismissed (T-0014)', 'INBOX.md', 'SOURCES.md', 'DISMISSED.md'])
+    assert.ok(p.stdout.includes(said), `preview lacks "${said}":\n${p.stdout}`);
+  assert.doesNotMatch(p.stdout, /Weekly digest|Bake-off|deleted by user/);
+  const w = migrateDismiss(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  const starter = f => fs.readFileSync(path.join(REPO, 'new_discerny_repo', f), 'utf8').replace(/\r\n/g, '\n').split('\n')[1];
+  assert.deepEqual(read(d, 'IGNORED.md').split('\n'), ['# Ignored', starter('IGNORED.md'), '', ...keep, '']);
+  assert.equal(read(d, 'DISMISSED.md'), fs.readFileSync(path.join(REPO, 'new_discerny_repo', 'DISMISSED.md'), 'utf8').replace(/\r\n/g, '\n'));
+  assert.equal(read(d, 'SOURCES.md').split('\n')[1], starter('SOURCES.md'));
+  assert.match(read(d, 'INBOX.md'), /Dismiss remembers its message in DISMISSED\.md\. -->\r\n/);
+  assert.doesNotMatch(read(d, 'INBOX.md'), /[^\r]\n/);
+  const after = snapshot(d), again = migrateDismiss(d, '--write');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Nothing to change/);
+  assert.deepEqual(snapshot(d), after);
 });

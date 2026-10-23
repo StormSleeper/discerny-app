@@ -302,9 +302,24 @@ function loadIndex() {
     const ref = segs.length >= 3 ? segs.slice(0, -2).join(' | ') : segs[0];
     recs.push({ store: 'ignored', id: null, st: '', ref: ref.trim(), reason: segs.length >= 3 ? segs[segs.length - 1] : '' });
   });
+  dismissals().forEach(d => recs.push({ store: 'dismissed', id: null, st: '', ref: d.ref, reason: d.fields.reason || '' }));
   return recs;
 }
-const RANK = { tasks: 0, inbox: 1, done: 2, ignored: 3 };
+// DISMISSED.md: one line per source key of a Proposal the user dismissed, `- <ref> {key: value; ...}`, the braces
+// parsed from the final " {". Readers accept the old `key:value` spacing.
+function dismissals(text = read('DISMISSED.md')) {
+  const found = [];
+  text.replace(/\r/g, '').split('\n').forEach((ln, line) => {
+    const t = ln.replace(/^- /, '').trim(), b = t.lastIndexOf(' {'), braced = b > 0 && t.endsWith('}');
+    const ref = (braced ? t.slice(0, b) : t).trim();
+    if (!/^[a-z][a-z0-9-]*\|/i.test(ref)) return;
+    const fields = {};
+    if (braced) t.slice(b + 2, -1).split(';').forEach(p => { const i = p.indexOf(':'); if (i > 0) fields[p.slice(0, i).trim()] = p.slice(i + 1).trim(); });
+    found.push({ line, ref, fields });
+  });
+  return found;
+}
+const RANK = { tasks: 0, inbox: 1, done: 2, ignored: 3, dismissed: 3 };
 function storeOutcome(r) { return r.store === 'tasks' ? (/^waiting$/i.test(r.st) ? 'waiting' : 'open') : r.store; }
 function pick(hits) {
   const best = hits.slice().sort((a, b) => RANK[a.store] - RANK[b.store])[0];
@@ -322,7 +337,7 @@ function matchMail(c, recs) {
     else { const [a, b] = t.length <= s.length ? [t, s] : [s, t]; if (a.length >= 15 && b.includes(a)) contain.push(r); }
   });
   if (exact.length) return pick(exact);
-  const items = new Set(contain.map(r => r.id || 'ignored:' + r.ref));
+  const items = new Set(contain.map(r => r.id || r.store + ':' + r.ref));
   if (items.size === 1) return pick(contain);
   if (items.size > 1) return { outcome: 'ambiguous', ids: [...new Set(contain.filter(h => h.id).map(h => h.id))] };
   return null;
@@ -387,6 +402,7 @@ function actionFor(res, pass, c, meetings) {
     case 'drop': return 'drop';
     case 'new': return ask ? 'classify: ask, commitment or neither' : 'assess: capture it if actionable or FYI, otherwise ignore it';
     case 'ignored': return 'drop';
+    case 'dismissed': return 'drop';
     case 'done': return ask ? 'drop' : `drop, unless it reopens the work: then capture it with reopen:true and name ${id} in a note`;
     case 'inbox': return ask ? 'drop' : onMeeting ? meetingAction(onIds, meetings) : `drop, unless it adds an ask or a date: then propose an update to ${id}`;
     case 'open': return ask ? `report: you replied ${c.when || '<date>'}, consider closing ${id}` : onMeeting ? meetingAction(onIds, meetings) : `drop, unless it adds an ask, a date or an answer: then propose an update to ${id}`;
@@ -607,7 +623,7 @@ CMD.match = function () {
           res = moved ? { outcome: 'moved', ids: [id], from: old[0], to: date, newRef: r.ref } : pick(same);
         }
       }
-      if (it.cancelled) res = res && res.ids && res.ids.length && res.outcome !== 'ignored' && res.outcome !== 'done' ? { outcome: 'cancelled', ids: res.ids } : { outcome: 'drop', ids: [] };
+      if (it.cancelled) res = res && res.ids && res.ids.length && !['ignored', 'dismissed', 'done'].includes(res.outcome) ? { outcome: 'cancelled', ids: res.ids } : { outcome: 'drop', ids: [] };
       // A free event is a Meeting only when it is tracked and the user declined it, and it never gets prep or an invite.
       // Nothing is written for it here: discern meetings adds the calid source key to a declined one.
       else if (it.free) {
@@ -678,7 +694,10 @@ CMD.ref = function () {
 function listOf(v) { return [].concat(v === undefined || v === null ? [] : v).flatMap(x => String(x).split(',')).map(x => x.trim()).filter(Boolean); }
 function cleanMeta(v) { return String(v).replace(/[\r\n]+/g, ' ').replace(/;/g, ',').replace(/[{}]/g, '').trim(); }
 CMD.add = function () {
-  const drafts = stdinJson(), tz = timezone(), now = nowDate();
+  const source = ARGS[1], S = sources();
+  if (!source) fail('name the source the drafts come from: discern add <source>, as its "## <source>" block in SOURCES.md does');
+  if (!S.blocks[source] || source === 'defaults') fail(`SOURCES.md has no "## ${source}" block: name the source as its block does`);
+  const drafts = stdinJson(), tz = timezone(S), now = nowDate();
   const P = people(), names = new Set(P.map(p => p.name));
   const prjText = read('PROJECTS.md');
   const recs = loadIndex(), known = new Set(recs.map(r => r.ref.toLowerCase()));
@@ -721,7 +740,7 @@ CMD.add = function () {
     const meta = { ty: d.ty, who: d.who ? cleanMeta(d.who) : undefined, prj: prj.length ? prj.join(',') : undefined,
       tg: listOf(d.tg).map(t => cleanMeta(t)).filter(Boolean).join(',') || undefined,
       urg: d.urg, p: String(d.p), due: d.due || undefined, st: d.st || undefined,
-      dep: listOf(d.dep).join(',') || undefined, asg };
+      dep: listOf(d.dep).join(',') || undefined, asg, source };
     Object.keys(meta).forEach(k => { if (meta[k] === undefined || meta[k] === '') delete meta[k]; else meta[k] = cleanMeta(meta[k]); });
     const subs = [{ k: 'src', v: String(d.src || '').replace(/[\r\n]+/g, ' ') }];
     notes.forEach(n => subs.push({ k: 'note', v: n.replace(/[\r\n]+/g, ' ') }));
@@ -735,7 +754,7 @@ CMD.add = function () {
   const { start, next } = raiseCounter(built.length);
   const added = built.map((b, k) => ({ id: 'T-' + String(start + k).padStart(4, '0'), ...b }));
   appendLines('INBOX.md', added.map(a => C.serItem({ id: a.id, done: false, title: a.title, meta: a.meta, subs: a.subs })),
-    '# Inbox\n<!-- Proposals for new items from the discern-* source skills, waiting for the user to clarify them. Accept moves an item to TASKS.md; Dismiss logs it in IGNORED.md. IDs come from the next-id counter in TASKS.md. -->\n');
+    '# Inbox\n<!-- Proposals for new items from the discern-* source skills, waiting for the user to clarify them. Accept moves an item to TASKS.md; Dismiss remembers its message in DISMISSED.md. IDs come from the next-id counter in TASKS.md. -->\n');
   out({ added: added.map(a => ({ id: a.id, title: a.title, refs: a.subs.filter(s => s.k === 'ref').map(s => s.v) })), counter: next });
 };
 
@@ -820,7 +839,7 @@ CMD.ignore = function () {
     have.add(ref.toLowerCase());
     lines.push(`${ref} | ${date} | ${String(r.reason || 'not actionable').replace(/\|/g, '/').replace(/[\r\n]+/g, ' ').trim()}`);
   });
-  if (lines.length) appendLines('IGNORED.md', lines, '# Ignored\n<!-- One line per source key never to be proposed again, ignored by a source skill or dismissed by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). -->\n');
+  if (lines.length) appendLines('IGNORED.md', lines, '# Ignored\n<!-- One line per source key never to be proposed again, ignored by a source skill or deleted by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). A Proposal the user dismisses goes in DISMISSED.md instead. -->\n');
   out({ ignored: lines.length, skipped });
 };
 
@@ -859,10 +878,39 @@ CMD.commit = function () {
   const nb = parseSources(lines.join('\n')).blocks[name], split = nb.keys.split;
   if (split && Date.parse(val(nb, 'watermark')) >= Date.parse(split.value) + DAY) { lines.splice(split.line, 1); changed.push('split'); }
   write('SOURCES.md', lines.join(eol).replace(/(\r?\n)?$/, eol));
-  const b = parseSources(lines.join('\n')).blocks[name], res = { source: name, changed };
+  const S2 = parseSources(lines.join('\n')), b = S2.blocks[name], res = { source: name, changed, forgotten: forget(S2) };
   if (changed.includes('last_run') && val(b, 'watermark')) res.behind = behind(name, b);
   out(res);
 };
+
+// Drops each DISMISSED.md line whose source can no longer read its message again: a stream source once its
+// watermark less overlap is past the message, a horizon source once the event's date is before today, where its
+// window starts. A line that names no source waits for every stream source. Returns how many lines went.
+function forget(S) {
+  const text = read('DISMISSED.md'), all = dismissals(text);
+  if (!all.length) return 0;
+  const tz = timezone(S), today = local(nowDate(), tz).slice(0, 10);
+  const DUR = /^P(?=\d|T\d)(?:\d+W)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+S)?)?$/;
+  const cursor = b => {
+    const wm = Date.parse(val(b, 'watermark')), ov = val(b, 'overlap');
+    return isNaN(wm) || (ov && !DUR.test(ov)) ? NaN : wm - (ov ? parseDuration(ov) : 0);
+  };
+  const streams = Object.values(S.blocks).filter(b => b.name !== 'defaults' && val(b, 'watermark'));
+  const DATE = /^\d{4}-\d{2}-\d{2}$/;
+  const gone = new Set(all.filter(({ fields: f }) => {
+    // A message came in before it was dismissed, so the end of the day it was dismissed bounds a line with no time.
+    const at = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(f['received-datetime'] || '') ? wallToInstant(f['received-datetime'], tz).getTime()
+      : DATE.test(f['dismissed-date'] || '') ? wallToInstant(f['dismissed-date'] + ' 23:59', tz).getTime() : NaN;
+    const ev = DATE.test(f['event-date'] || '') ? f['event-date'] : '';
+    const b = f.source ? S.blocks[f.source] : null;
+    if (b && val(b, 'watermark')) return cursor(b) > at;
+    if (b) return !!ev && ev < today;
+    return streams.length > 0 && streams.every(s => cursor(s) > at) && (!ev || ev < today);
+  }).map(d => d.line));
+  if (!gone.size) return 0;
+  write('DISMISSED.md', text.split(/\r?\n/).filter((l, i) => !gone.has(i)).join(eolOf(text)));
+  return gone.size;
+}
 
 // How far a stream source is behind after a Run: the day-long windows of that Run still unread past its watermark,
 // or past its ask cursor in the ask window, whichever is more.

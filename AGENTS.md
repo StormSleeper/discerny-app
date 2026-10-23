@@ -42,7 +42,8 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `ASK-AGENT.md` | The agent queue: requests the user left for you from the UI ("Ask agent") | when running `discern-ask-agent` |
 | `ASK-AGENT-LOG.md` | Append-only record of agent requests you have actioned | append only; read when asked |
 | `SOURCES.md` | Settings shared by source skills (`## defaults`: time zone, priority people) and each source's state: watermark, filters, last run | by source skills; `timezone` whenever a time is written |
-| `IGNORED.md` | Source keys never to be proposed again: ignored by a source skill or dismissed by the user | by source skills |
+| `IGNORED.md` | Source keys never to be proposed again: ignored by a source skill or deleted by the user | by source skills |
+| `DISMISSED.md` | Source keys of proposals the user dismissed, kept only until their source can no longer read the message again | by source skills, through `discern match` |
 | `REFRESH-LOG.md` | Reports of source-skill runs, newest last (created on the first run) | append only; read when asked |
 | `drafts/` | Messages you drafted for the user (`<ID>-<slug>.md`). Never sent | when asked |
 | `DISCERNY.md` | What the folder is, and its Format version as `<!-- format: <version> -->`. No file, or no comment, means 0.1.0.0. `discern check` reports it. Only an Upgrade changes it; never edit it | never; run `discern check` |
@@ -180,9 +181,9 @@ Line breaks inside a request are written as ` ⏎ `. The ID is the item or recor
 A source is anything outside Discerny that a source skill reads: a mailbox, Teams chat, a calendar, an export. A run is one source skill reading its source once; a refresh is running every source skill in turn (`discern-refresh`). Discerny itself never talks to an outside system, so any connector the agent has can be used. Before running or writing a source skill, read `SOURCE-SKILLS.md`: it holds the loop every source skill follows, and how to use the helper, `tools/discern.mjs`, which does the deterministic parts. In short:
 
 1. A `discern-<source>` skill reads the shared `## defaults` block and its own `## <source-name>` block in `SOURCES.md`. For a stream source, such as a mailbox or Teams chat, it asks its connector only for messages after its cursor (`watermark` less `overlap`), in day-long windows. A horizon source, such as a calendar, re-reads a window ahead of now on every run instead.
-2. Each thing it finds is a candidate, which the skill assesses. A candidate whose source key already appears in `TASKS.md`, `INBOX.md`, `DONE.md` or `IGNORED.md` is already tracked: it is skipped, or becomes a proposed change to the existing item, which appears only in the run report.
-3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `src:`, `ref:` and `asg:`. Then the cursor moves past the last window fully processed. A run reads at most `page_cap` pages a pass, so after a gap a stream source takes several runs to catch up: its report ends by saying whether it is caught up, and a refresh runs it again while it isn't. Meetings come from the calendar: a horizon source writes each Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item and keeps it in step with the calendar, but never marks one done; the mail skill leaves invitations to it.
-4. The user clarifies each proposal in the UI's inbox: Accept moves the item to `TASKS.md`; Dismiss logs its source key in `IGNORED.md`.
+2. Each thing it finds is a candidate, which the skill assesses. A candidate whose source key already appears in `TASKS.md`, `INBOX.md`, `DONE.md`, `IGNORED.md` or `DISMISSED.md` is already tracked: it is skipped, or becomes a proposed change to the existing item, which appears only in the run report.
+3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `src:`, `ref:`, `asg:` and `source:`, the name of the source's block in `SOURCES.md`. Then the cursor moves past the last window fully processed. A run reads at most `page_cap` pages a pass, so after a gap a stream source takes several runs to catch up: its report ends by saying whether it is caught up, and a refresh runs it again while it isn't. Meetings come from the calendar: a horizon source writes each Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item and keeps it in step with the calendar, but never marks one done; the mail skill leaves invitations to it.
+4. The user clarifies each proposal in the UI's inbox. Accept moves the item to `TASKS.md`. Already handled accepts it and marks it done at once, so it goes to `DONE.md`. Dismiss, as Not actionable, Not mine or Duplicate, remembers only that message, in `DISMISSED.md`: later messages on the same thread can be proposed again. `discern commit` removes the line once the source can no longer read the message again.
 
 `SOURCES.md` starts with `## defaults`, then one block per source; each skill adds keys of its own:
 
@@ -207,6 +208,14 @@ A source is anything outside Discerny that a source skill reads: a mailbox, Team
 ```
 
 `IGNORED.md` lines are `ref | YYYY-MM-DD | reason`. Parse them from the right, because a source key may contain ` | `.
+
+`DISMISSED.md` lines follow the field names in `SOURCE-SKILLS.md`, with the source key as the line's text and the braces parsed from the final ` {`:
+
+```
+- mail|Toy fair preview {source: outlook-mail; received-datetime: 2026-10-22 09:14; dismissed-date: 2026-10-23; reason: not actionable}
+```
+
+`source` is the name of the source's block in `SOURCES.md`, and times are local, in `timezone`. A dated `cal` source key has `event-date: YYYY-MM-DD` in place of `received-datetime`. The UI writes these lines and the helper removes them: a stream source's once its `watermark` less `overlap` is past the message, a horizon source's once the event's date is before today. A line with no `source` waits for every stream source. Never edit them by hand.
 
 ## Changing the Format
 

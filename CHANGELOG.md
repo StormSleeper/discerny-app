@@ -2,6 +2,10 @@
 
 What's changed in Discerny, newest first. Each line is one build. A dated section is a release, which you get by pulling `main`. The Unreleased section holds builds on `dev` that haven't been released yet. See the Version section of the README for what the numbers mean.
 
+## Unreleased
+
+- Dismissing a Proposal now forgets only that message, so a later email on the same thread that needs action is proposed again, and "Already handled" marks the Proposal done instead of dismissing it.
+
 ## 0.2.0.1 (2026-10-23)
 
 ### What's new

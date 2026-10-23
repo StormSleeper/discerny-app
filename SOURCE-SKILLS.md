@@ -23,8 +23,8 @@ A source skill reads one source (a mailbox, Teams chat, a calendar, an export) a
 3. **Filter.** Drop what the block's exclude rules and the skill's filters catch, and the user's own messages outside ask and commitment passes. These aren't logged. Done when only unfiltered candidates remain. Everything left is a candidate: something the skill has found and is still assessing.
 4. **Match.** Pipe the candidates to `discern match`, which compares their source keys with what is already tracked. Each result has an `outcome` and an `action`; follow the action as worded. `drop` means no item, no proposal and no report line. `report: …` is a line under Replies, word for word, `consider closing` included, and nothing else is proposed for that candidate. Done when every candidate has one.
 5. **Assess.** Decide what the action leaves open, by the policy below: already tracked, noise to ignore, or worth a proposal, and how to word it. Body and event reads count against the skill's read budget: every full text you look at is a read, whether it comes from the connector or a fixture file that holds them all. Once it is spent, capture the remaining inbound candidates from their summaries (unsure means capture) and count them under "Not yet checked"; in an ask pass, leave them uncaptured behind the ask cursor and count them the same way. Done when every candidate has a decision.
-6. **Write.** `discern meetings` for a horizon source's Meetings, `discern add --dry-run` first, then `discern add` for new items, `discern ignore` for noise, `discern ref` where an action asks for a source key, then `discern check`. Done when the check passes.
-7. **Commit.** Every Run commits, even one that found nothing new or ran at the same time as the last. `discern commit <source>` with `last_run=` the `run_start` and `last_result=` the report's first line. A stream source also sends `watermark=` the end of the last window every pass finished (the watermark it has, when none was), `waiting_checked_through=` the ask cursor (the end of the last ask window the pass finished, as `discern state` gave it; only when an ask was left unclassified does it go back, to one second before the oldest such ask), and `split=` when step 2 found a day too big; a horizon source sends nothing else. The helper refuses a watermark that isn't the end of one of the Run's windows, since it could skip days not yet read: exit 1, so send the one the message points to. A failed pass commits nothing; a finished backfill sends `gap=`. For a stream source the output's `behind.report` says whether the source is caught up or has days still to read. Done when `SOURCES.md` shows this run.
+6. **Write.** `discern meetings` for a horizon source's Meetings, `discern add <source> --dry-run` first, then `discern add <source>` for new items, `discern ignore` for noise, `discern ref` where an action asks for a source key, then `discern check`. Done when the check passes.
+7. **Commit.** Every Run commits, even one that found nothing new or ran at the same time as the last. `discern commit <source>` with `last_run=` the `run_start` and `last_result=` the report's first line. A stream source also sends `watermark=` the end of the last window every pass finished (the watermark it has, when none was), `waiting_checked_through=` the ask cursor (the end of the last ask window the pass finished, as `discern state` gave it; only when an ask was left unclassified does it go back, to one second before the oldest such ask), and `split=` when step 2 found a day too big; a horizon source sends nothing else. The helper refuses a watermark that isn't the end of one of the Run's windows, since it could skip days not yet read: exit 1, so send the one the message points to. A failed pass commits nothing; a finished backfill sends `gap=`. Each commit also removes the `DISMISSED.md` lines whose source can no longer read the message again, and counts them as `forgotten`. For a stream source the output's `behind.report` says whether the source is caught up or has days still to read. Done when `SOURCES.md` shows this run.
 8. **Report.** The template below, ending, for a stream source, with `behind.report` from the commit; when `log_runs` is true, also pipe it to `discern log`. Done when every proposal names its item ID.
 
 ## Matching
@@ -37,7 +37,7 @@ A source skill reads one source (a mailbox, Teams chat, a calendar, an export) a
 | `teams` | `chat`, `message`, `when` | Exact on chat and message. A whole-chat source key (`teams\|<chat>\|*`) makes it `related` on an item, `ignored` in `IGNORED.md` |
 | `cal` | `subject`, `date` or `start` (`{dateTime, timeZone}`), optional `event_id`, `suffix`, `cancelled` | Exact on local date and subject; the same `event_id` on a new date is `moved` |
 
-Each result has `key`, `outcome`, `ids` (the items it matched), `action`, and `refs` (source keys) to write. `who` is the sender on an inbound candidate and the recipient on an ask, when they are in `PEOPLE.md` (`null` when not). An inbound `mail` or `teams` candidate from one of the user's own addresses comes back `from_user: true` with the action `drop`; a `cal` candidate never does, since the user organising an event doesn't make it theirs to ignore. `notice`, `to` and `newRef` appear where they apply, and a `reply` result has the `title`, `who` and `due` of its Task: due a day after the mail was received, a Saturday or Sunday moved to the Monday at the same time, and never after the Meeting starts. Every `ty:Meeting` item with a date carries a `cal` source key, whichever source wrote it, so all sources recognise the same meeting.
+A source key in `IGNORED.md` makes a candidate `ignored`, and one in `DISMISSED.md` makes it `dismissed`: the user dismissed that message, so its action is `drop`. Each result has `key`, `outcome`, `ids` (the items it matched), `action`, and `refs` (source keys) to write. `who` is the sender on an inbound candidate and the recipient on an ask, when they are in `PEOPLE.md` (`null` when not). An inbound `mail` or `teams` candidate from one of the user's own addresses comes back `from_user: true` with the action `drop`; a `cal` candidate never does, since the user organising an event doesn't make it theirs to ignore. `notice`, `to` and `newRef` appear where they apply, and a `reply` result has the `title`, `who` and `due` of its Task: due a day after the mail was received, a Saturday or Sunday moved to the Monday at the same time, and never after the Meeting starts. Every `ty:Meeting` item with a date carries a `cal` source key, whichever source wrote it, so all sources recognise the same meeting.
 
 ## Meetings from a horizon source
 
@@ -68,7 +68,7 @@ A Meeting item records when and where a Meeting happens and who attends; the wor
 
 ## Writing
 
-`discern add` takes drafts: `title`, `ty`, `who`, `prj`, `tg`, `urg`, `p`, `due`, `st`, `src`, `refs` (from `match`), `notes`, `links` (`{label, url}`), and `received` (ISO with Z) or `derived: true`. List fields take an array or a comma-separated string. Optional: `meeting_subject` when the event's subject differs from the message's, `reopen: true` to capture again something in `DONE.md`. It checks every draft before writing any.
+`discern add <source>` takes drafts, and writes `source:<source>` on each proposal, so a Dismiss knows whose watermark to wait for. `<source>` is the name of its block in `SOURCES.md`. Each draft has `title`, `ty`, `who`, `prj`, `tg`, `urg`, `p`, `due`, `st`, `src`, `refs` (from `match`), `notes`, `links` (`{label, url}`), and `received` (ISO with Z) or `derived: true`. List fields take an array or a comma-separated string. Optional: `meeting_subject` when the event's subject differs from the message's, `reopen: true` to capture again something in `DONE.md`. It checks every draft before writing any.
 
 | File | A source skill writes | Command |
 |---|---|---|
@@ -76,9 +76,20 @@ A Meeting item records when and where a Meeting happens and who attends; the wor
 | `IGNORED.md` | Noise; a whole out-of-scope chat with `"container": true` | `discern ignore` |
 | `TASKS.md` | The counter; hidden `ref:` lines (source keys); a `note:` only if `apply_task_updates` is true; a horizon source's Meetings | `discern add`, `ref`, `note`, `meetings` |
 | `SOURCES.md` | Its own block's state | `discern commit` |
+| `DISMISSED.md` | Nothing; the UI writes it and a commit removes lines its sources have moved past | `discern commit` |
 | `REFRESH-LOG.md` | The report | `discern log` |
 
 Everything else (people, relationships, changes to items other than a horizon source's Meetings) is a proposal in the run report, and appears only there: the UI does not show these proposals. A proposal costs the user one read where an unwanted edit costs a search.
+
+## Field names
+
+Every new field is named this way. Older fields keep their short codes (`ty`, `prj`, `asg`) until they are renamed.
+
+- **Keys** are whole lowercase English words, joined by hyphens; `id` is the only short form. A field for a glossary concept takes the glossary's name (`source`, `source-key`). A key that holds a list is plural; others are singular.
+- **Values** are lowercase whole words, spaces allowed (`reason: not actionable`).
+- **Layout**: `{key: value; key: value}`, with lists written `a, b`. The braces hold only short structured values and come last on the line, parsed from the final ` {`. Free text goes on an indented sub-line (`- why: …`), and a source key goes in the line's text. Readers accept the old `key:value` spacing too.
+- **Times** are named after the event plus a suffix that fixes the value's shape: `-date` is `YYYY-MM-DD`, `-time` is `HH:MM`, `-datetime` is `YYYY-MM-DD HH:MM`. A field that can hold either a date or a time is split (`due-date`, `due-time`).
+- **Time zone**: local time in `timezone`, except in `SOURCES.md`, whose state is UTC.
 
 ## Report
 

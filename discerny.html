@@ -412,8 +412,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.2.0.1'; // the app's version; tools/discern.mjs reads it from here
-var FORMAT='0.2.0.1'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
+var VERSION='0.3.0.1'; // the app's version; tools/discern.mjs reads it from here
+var FORMAT='0.3.0.1'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','week','soon','later','fyi'];
 var TYPES=['Task','Meeting','Process','Document','FYI'];
@@ -636,10 +636,11 @@ function quickItem(q,o){
   var notes=String(o.description||'').split(/[\r\n\u2028\u2029\u0085]/).map(function(s){return s.trim();}).filter(Boolean);
   return {title:q.title,meta:meta,notes:notes};}
 // The data folder files the page reads and writes; `discern serve` serves these and no others.
-var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', ignored: 'IGNORED.md' };
+var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md' };
 var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
 // The header the page writes when it creates a missing RELATIONSHIPS.md or ASK-AGENT.md: the starter file's, word for word.
 var REL_HEAD = ['# Relationships', '<!-- One line per relationship, stored once (shown on both): `- A ~ B | related` (symmetric) or `- A -> B | type` (involves, concerns, owns, uses). Validate: both IDs exist, no duplicates, nothing related to itself. `dep:` on items is separate. -->', ''];
+var DIS_HEAD = ['# Dismissed', '<!-- One line per source key of a Proposal the user dismissed, kept until its source can no longer read the message again: `- <source key> {source: <source name>; received-datetime: YYYY-MM-DD HH:MM; dismissed-date: YYYY-MM-DD; reason: not actionable}`, local time in `timezone`. A line from a horizon source has `event-date: YYYY-MM-DD` in place of `received-datetime`. Parse the braces from the final " {". tools/discern.mjs removes a line on commit once its source has moved past it. -->', ''];
 var ASK_HEAD = ['# Ask agent queue', '<!-- The agent queue. One line per agent request: - ID | YYYY-MM-DD HH:MM | text. Written by discerny.html. The agent removes a line once it is actioned (skill: discern-ask-agent) and records it in ASK-AGENT-LOG.md. -->', ''];
 //</core>
 
@@ -648,7 +649,7 @@ var EDEF = {
   PRJ: { file: 'PROJECTS.md', key: 'projects', word: 'project', Word: 'Project', types: ['Project', 'Workstream', 'Pod'], sts: ['Active', 'On hold', 'Done'], pk: 'parent' },
   SYS: { file: 'SYSTEMS.md', key: 'systems', word: 'system', Word: 'System', types: ['Platform', 'Pipeline', 'Registry', 'Application', 'Instrument', 'Other'], sts: ['Live', 'In build', 'Delayed', 'Retired'], pk: 'part-of' }
 };
-var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, ignored: function (t) { return { text: String(t || '') }; } };
+var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, ignored: function (t) { return { text: String(t || '') }; }, dismissed: function (t) { return { text: String(t || '') }; } };
 function serKey(k, m) {
   if (k === 'tasks' || k === 'inbox' || k === 'done') return serialize(m);
   if (k === 'people') { ensurePIds(m); return pSerialize(m); }
@@ -836,7 +837,7 @@ async function loadAll() {
     people: pParse(t['PEOPLE.md']), projects: eParse(t['PROJECTS.md']), systems: eParse(t['SYSTEMS.md']),
     rels: rParse(t['RELATIONSHIPS.md']), asks: aParse(t['ASK-AGENT.md']),
     log: parseLog(t['ASK-AGENT-LOG.md']), sources: parseSources(t['SOURCES.md']),
-    drafts: await readDrafts(), ignored: { text: '' }
+    drafts: await readDrafts(), ignored: { text: '' }, dismissed: { text: '' }
   };
   keys.forEach(function (k) { BASE[k] = countOf(k, out[k]); });
   return out;
@@ -876,6 +877,15 @@ function dropLines(text, lines) {
 // Container refs stand for a whole chat or thread ("related" on a task), so they are never logged as a blanket ignore.
 // New form: any scheme ending in |*; legacy form: a bare two-part teams|chat-prefix.
 function ignorable(refs) { return refs.filter(function (r) { return !/\|\*$/.test(r) && !/^teams\|[^|]+$/.test(r); }); }
+// A DISMISSED.md line: a dated cal source key is cleared by its event's date, any other by when the message came in.
+function dismissLine(it, ref, why) {
+  var ev = /^cal\|(\d{4}-\d{2}-\d{2})\|/i.exec(ref), f = [];
+  if (it.meta.source) f.push('source: ' + it.meta.source);
+  if (ev) f.push('event-date: ' + ev[1]);
+  else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(it.meta.asg || '')) f.push('received-datetime: ' + it.meta.asg);
+  f.push('dismissed-date: ' + todayStr(), 'reason: ' + why);
+  return '- ' + ref + ' {' + f.join('; ') + '}';
+}
 function findSub(it, idx, text) {
   var subs = getSub(it, 'sub');
   if (subs[idx] && subs[idx].v === text) return subs[idx];
@@ -1049,20 +1059,21 @@ var OPS = {
       if (R.lines.length !== n) relRefresh(R);
     });
   },
-  dismiss: function (id, igLines) {
-    return op('Dismiss ' + id, ['ignored', 'inbox'], function (M) {
+  dismiss: function (id, disLines) {
+    return op('Dismiss ' + id, ['dismissed', 'inbox'], function (M) {
       var k = M.inbox.items.findIndex(function (i) { return i.id === id; });
       if (k < 0) return;
       M.inbox.items.splice(k, 1);
-      M.ignored.text = addLines(M.ignored.text, igLines);
+      if (disLines.length && !M.dismissed.text.trim()) M.dismissed.text = DIS_HEAD.join('\n');
+      M.dismissed.text = addLines(M.dismissed.text, disLines);
     });
   },
-  undismiss: function (text, igLines) {
-    return op('Undo dismiss', ['inbox', 'ignored'], function (M) {
+  undismiss: function (text, disLines) {
+    return op('Undo dismiss', ['inbox', 'dismissed'], function (M) {
       var it = parse(text).items[0];
       if (!it) return;
       if (!M.inbox.items.some(function (i) { return i.id === it.id; })) insertById(M.inbox.items, it);
-      M.ignored.text = dropLines(M.ignored.text, igLines);
+      M.dismissed.text = dropLines(M.dismissed.text, disLines);
     });
   },
   del: function (id, igLines) {
@@ -3093,17 +3104,17 @@ function snoozeItem(id, days) {
   S.snoozeFor = null;
   patch(id, { due: due }, 'Snoozed ' + id + ' to ' + fmtDT(due) + '.', OPS.meta(id, { due: was }));
 }
+// A Dismiss remembers only the message, in DISMISSED.md, until its source has moved past it; Already handled is not a Dismiss.
 function dismiss(id, reason) {
   var i = item(id);
   if (!i || whereOf(id) !== 'inbox') return;
-  var refs = ignorable(getSub(i, 'ref').map(function (b) { return b.v; }));
-  if (!refs.length) refs = ['inbox|' + i.title];
-  var why = String(reason || 'dismissed').toLowerCase().replace(/\|/g, '/');
-  var lines = refs.map(function (r) { return r + ' | ' + todayStr() + ' | ' + why + ' (' + id + ')'; });
+  if (reason === 'Already handled') { acceptDone(id); return; }
+  var why = String(reason || 'not actionable').toLowerCase();
+  var lines = ignorable(getSub(i, 'ref').map(function (b) { return b.v.trim(); })).map(function (r) { return dismissLine(i, r, why); });
   var text = serItem(i), nx = nextInbox(id);
   S.dismissFor = null;
   commit(OPS.dismiss(id, lines));
-  toastShow('Dismissed ' + id + ' (' + why + '). It won’t be proposed again.', OPS.undismiss(text, lines));
+  toastShow('Dismissed ' + id + ' (' + why + '). This message won’t be proposed again; later news on the thread may be.', OPS.undismiss(text, lines));
   afterTriage(id, nx);
 }
 function deleteTask(id) {
