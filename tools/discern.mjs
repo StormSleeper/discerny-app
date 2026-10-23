@@ -6,7 +6,7 @@
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
 //   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
-// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, migrate, upgrade, serve.
+// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, upgrade, serve.
 // Input for match, add, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
@@ -927,38 +927,6 @@ CMD.check = function () {
   if (errors.length) process.exit(1);
 };
 
-CMD.migrate = function () {
-  const changes = [];
-  for (const f of ['TASKS.md', 'INBOX.md', 'DONE.md']) {
-    const t = read(f); if (!t) continue;
-    const eol = eolOf(t), lines = t.split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-      const m = /^(\s+- ref: )(teams\|[^|]+)\s*$/.exec(lines[i]);
-      if (m) { changes.push(`${f}: ${m[2]} -> ${m[2]}|*`); lines[i] = m[1] + m[2] + '|*'; }
-    }
-    if (f !== 'DONE.md') {
-      C.parse(lines.join('\n')).items.forEach(it => {
-        if (it.done || it.meta.ty !== 'Meeting' || !/^\d{4}-\d{2}-\d{2}/.test(it.meta.due || '')) return;
-        const refs = C.getSub(it, 'ref').map(b => b.v.trim());
-        if (refs.some(r => /^cal\|/i.test(r))) return;
-        const mail = refs.find(r => /^mail\|/i.test(r)); if (!mail) return;
-        const ref = calRef(it.meta.due.slice(0, 10), mail.slice(5));
-        const i = itemLine(lines, it.id), j = blockEnd(lines, i), at = lastOf(lines, i, j, ['ref']);
-        lines.splice((at >= 0 ? at : i) + 1, 0, `  - ref: ${ref}`);
-        changes.push(`${f}: ${it.id} + ${ref}`);
-      });
-    }
-    if (OPT.write) write(f, lines.join(eol));
-  }
-  const ig = read('IGNORED.md');
-  if (ig) {
-    const eol = eolOf(ig), lines = ig.split(/\r?\n/);
-    lines.forEach((l, i) => { const m = /^(- )?(teams\|[^| ]+)( \| .*)$/.exec(l); if (m) { changes.push(`IGNORED.md: ${m[2]} -> ${m[2]}|*`); lines[i] = (m[1] || '') + m[2] + '|*' + m[3]; } });
-    if (OPT.write) write('IGNORED.md', lines.join(eol));
-  }
-  out({ written: OPT.write, changes, next: OPT.write || !changes.length ? undefined : 'run again with --write to apply' });
-};
-
 // ---------------------------------------------------------------- the Upgrade (see migrations/README.md)
 // The Migrations newer than a Format version, oldest first, with next last, and what each one holds.
 function pendingMigrations(format) {
@@ -1127,7 +1095,7 @@ if (cmd === '--version' || cmd === 'version') {
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|meetings|ignore|note|ref|commit|log|check|migrate|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|meetings|ignore|note|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
 // serve starts with no usable folder when it can switch to one, so the page can offer Change folder.

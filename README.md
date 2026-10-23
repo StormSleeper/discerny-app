@@ -123,9 +123,18 @@ The UI shows the app's version on the folder page, and `node tools/discern.mjs -
 - **PATCH** goes up with the first change after each release.
 - **BUILD** goes up with every change, and never goes back down.
 
-If the first two numbers differ from the last release you had, your data folders need an Upgrade before the new app will work on them. Ask your agent to "upgrade my Discerny folder", or run `node tools/discern.mjs upgrade` to see what it would change and `node tools/discern.mjs upgrade --write` to make the changes. Either way, a copy of the folder is first made beside it, named `<folder>.backup-<format>`. If only the last two differ, just pull.
-
 The `main` branch holds only releases, and each one is tagged `v<version>`, such as `v0.1.1.1`. The `dev` branch holds every change as it's made, each with its own build number. Stay on `main` unless you want to try changes before they're released. Each version number is set when a change is made, never by hand. `CHANGELOG.md` says what each release changed.
+
+### Upgrading
+
+Each data folder records the Format it is written in, in its `DISCERNY.md`. When you update the app, if the first two numbers of its version differ from the last release you had, your data folders need an Upgrade before the new app will work on them. The UI and the helper say so when they open a folder that needs one, and won't work on it until it's upgraded. If only the last two numbers differ, just pull.
+
+To upgrade a folder, do either of these:
+
+- Ask your agent to "upgrade my Discerny folder". It shows you each change before making it, and does any steps that need judgement with you.
+- In the app folder, run `node tools/discern.mjs upgrade` to see what would change, then `node tools/discern.mjs upgrade --write` to make the changes. Add `--dir <folder>` for a folder other than the connected one.
+
+Before its first change, an Upgrade copies the folder beside it, named `<folder>.backup-<format>` after the Format it was in. To undo the Upgrade, delete the folder and rename the backup to the folder's name. Once you're happy with the upgraded folder, you can delete the backup.
 
 ## Writing your own skills
 

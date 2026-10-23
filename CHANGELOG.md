@@ -6,6 +6,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 
 - Discerny now has its own icon in the browser tab and on bookmarks, and the browser's bars match the app's light or dark theme.
 - In Chrome or Edge, a page served by `discern serve` can be installed as an app with its own window, and the sidebar shows the Discerny icon.
+- Data folders now record their Format, and older ones are upgraded with `discern upgrade` (or by asking your agent to "upgrade my Discerny folder"), which replaces `discern migrate`.
 
 ## 0.1.1.19 (2026-10-21)
 
