@@ -18,6 +18,8 @@ function setThemeColor(t) {
 }
 /* Apply the saved theme before first paint so dark mode doesn't flash. */
 try { var t = localStorage.getItem('discerny-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); setThemeColor(t); } catch (e) {}
+/* The web manifest lets a served page be installed as an app. Opened as a file, the browser blocks it and logs an error, so it's left out. */
+if (location.protocol === 'http:' || location.protocol === 'https:') { var mf = document.createElement('link'); mf.rel = 'manifest'; mf.href = 'manifest.webmanifest'; document.head.appendChild(mf); }
 </script>
 <style>
 :root{
@@ -102,8 +104,8 @@ svg.i.s{width:13px;height:13px;stroke-width:2.1}
 
 /* ---------- sidebar ---------- */
 .brand{display:flex;align-items:center;gap:10px;padding:2px 6px 12px;min-width:0}
-.logo{width:30px;height:30px;border-radius:8px;background:var(--btn);color:var(--btn-ink);display:grid;place-items:center;flex:none}
-.logo svg.i{width:18px;height:18px;stroke-width:2.4}
+.logo{width:30px;height:30px;border-radius:8px;overflow:hidden;flex:none}
+.logo img{display:block;width:100%;height:100%}
 .brand-t{display:flex;flex-direction:column;line-height:1.25;min-width:0}
 .brand-t b{font-weight:600;font-size:15px}
 .brand-t span{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -410,7 +412,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.1.2.1'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.1.2.2'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.1.0.0'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','week','soon','later','fyi'];
@@ -1935,6 +1937,8 @@ var ICONS = {
   refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
   open: '<path d="M7 17 17 7M8 7h9v9"/>'
 };
+// The Discerny icon in the header's tile, by a path relative to the page so it loads served and opened as a file.
+var LOGO = '<img src="icons/discerny-96.png" alt="" width="30" height="30">';
 function ic(n, cls) { return '<svg class="i' + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + (ICONS[n] || '') + '</svg>'; }
 function linkA(l) {
   var u = safeUrl(l.url);
@@ -2696,7 +2700,7 @@ function saveState() {
 var THEME_WORD = { system: 'System', light: 'Light', dark: 'Dark' };
 function vSide(c) {
   var rail = isRail();
-  var h = '<nav class="side" data-k="side" aria-label="Lists and pages"><div class="brand"><span class="logo" aria-hidden="true"' + (rail ? ' title="Discerny, version ' + VERSION + '"' : '') + '>' + ic('check') + '</span><span class="brand-t hide-rail"><b>Discerny</b><span title="' + esc(S.folder) + '">' + esc(S.folder) + '</span></span></div>' +
+  var h = '<nav class="side" data-k="side" aria-label="Lists and pages"><div class="brand"><span class="logo" aria-hidden="true"' + (rail ? ' title="Discerny, version ' + VERSION + '"' : '') + '>' + LOGO + '</span><span class="brand-t hide-rail"><b>Discerny</b><span title="' + esc(S.folder) + '">' + esc(S.folder) + '</span></span></div>' +
     '<button type="button" class="searchbtn" data-act="palette" aria-label="Search or jump to (Ctrl K)"' + (rail ? ' title="Search or jump to (Ctrl K)"' : '') + '>' + ic('search') + '<span class="hide-rail st" aria-hidden="true">Search…</span><span class="kbd hide-rail" aria-hidden="true">Ctrl K</span></button>';
   NAV.forEach(function (g) {
     h += '<div class="navh">' + g[0] + '</div>';
@@ -2823,7 +2827,7 @@ var GATE = {
 };
 function vGate() {
   var g = GATE[S.gate.mode] || GATE.pick, msg = g[1].replace('%s', S.gate.mode === 'error' ? (S.gate.msg || 'Unknown error') : S.folder).replace('%f', S.gate.format).replace('%a', FORMAT);
-  var h = '<div class="gate" data-k="gate"><main class="gate-c" aria-labelledby="gate-h"><div class="brand" style="padding:0"><span class="logo" aria-hidden="true">' + ic('check') + '</span><span class="brand-t"><b>Discerny</b><span>Version ' + VERSION + '</span></span></div>' +
+  var h = '<div class="gate" data-k="gate"><main class="gate-c" aria-labelledby="gate-h"><div class="brand" style="padding:0"><span class="logo" aria-hidden="true">' + LOGO + '</span><span class="brand-t"><b>Discerny</b><span>Version ' + VERSION + '</span></span></div>' +
     '<h1 id="gate-h">' + esc(g[0]) + '</h1><p>' + esc(msg) + '</p>' + (S.gate.msg && S.gate.mode !== 'error' ? '<p class="err-t">' + esc(S.gate.msg) + '</p>' : '');
   if (srv && (g[3] === 'refolder' || S.gate.mode === 'nofolder')) h += srv.canSwitch ? vFolderForm() : '<p class="hint">' + esc(srvSwitch()) + '</p>';
   else if (g[2]) h += '<div class="acts">' + bt(g[2], g[3], { cls: 'primary lg' }) + (S.gate.mode === 'reconnect' || S.gate.mode === 'denied' ? bt('Choose a different folder', 'pick', { cls: 'lg' }) : '') + '</div>';

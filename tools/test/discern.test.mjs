@@ -1249,6 +1249,38 @@ test('serve gives the icons with no folder usable', async (t) => {
   assert.equal((await fetch(new URL('icons/favicon.ico', said.url))).status, 200);
 });
 
+test('serve gives the web manifest as it is on disk, with no folder usable', async (t) => {
+  const said = await serve(t, folderInFormat('0.2.0.1'));
+  assert.match(said.problem, /Format/);
+  const r = await fetch(new URL('manifest.webmanifest', said.url));
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('content-type'), 'application/manifest+json');
+  assert.equal(await r.text(), fs.readFileSync(path.join(REPO, 'manifest.webmanifest'), 'utf8'));
+});
+
+test('the web manifest installs Discerny standalone, with icons that serve gives at the sizes it says', async (t) => {
+  const { url } = await serve(t, folder());
+  const at = new URL('manifest.webmanifest', url);
+  const m = await (await fetch(at)).json();
+  assert.equal(m.name, 'Discerny');
+  assert.equal(m.short_name, 'Discerny');
+  assert.equal(m.description, 'A task tracker and knowledge base you run together with an AI agent.');
+  for (const k of ['id', 'start_url', 'scope']) assert.equal(new URL(m[k], at).href, new URL('/', url).href, k);
+  assert.equal(m.display, 'standalone');
+  assert.equal(m.background_color, '#F6F5F2');
+  assert.equal(m.theme_color, '#F6F5F2');
+  const got = [];
+  for (const icon of m.icons) {
+    const r = await fetch(new URL(icon.src, at));
+    assert.equal(r.status, 200, icon.src);
+    assert.equal(r.headers.get('content-type'), 'image/png', icon.src);
+    const png = Buffer.from(await r.arrayBuffer());
+    assert.equal(icon.sizes, `${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`, icon.src);
+    got.push(`${icon.sizes} ${icon.purpose ?? 'any'}`);
+  }
+  assert.deepEqual(got.sort(), ['192x192 any', '192x192 maskable', '256x256 any', '512x512 any', '512x512 maskable']);
+});
+
 test('serve refuses a PUT that is empty over a file with content, not text/plain, or over 10 MB, and writes nothing', async (t) => {
   const d = folder();
   const { url, api, session } = await serve(t, d);

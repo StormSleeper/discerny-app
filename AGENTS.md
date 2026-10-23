@@ -60,6 +60,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `new_discerny_repo/` | The blank starter files for a new data folder | never, unless asked |
 | `discerny.html` | The UI | never |
 | `icons/` | The UI's icons | never |
+| `manifest.webmanifest` | What a browser needs to install the served UI as an app | never |
 | `AGENTS.md`, `CLAUDE.md`, `README.md`, `LICENSE` | Instructions and documentation | this file only |
 
 ## Rules for every edit

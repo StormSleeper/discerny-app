@@ -1053,6 +1053,8 @@ CMD.serve = function () {
       res.writeHead(200, { 'Content-Type': icon[2] === 'png' ? 'image/png' : 'image/x-icon', 'Cache-Control': 'max-age=3600' });
       return res.end(fs.readFileSync(f));
     }
+    // The web manifest, for installing the UI as an app; like the icons, it doesn't need a folder.
+    if (req.method === 'GET' && req.url === '/manifest.webmanifest') return send(res, 200, fs.readFileSync(path.join(REPO, 'manifest.webmanifest'), 'utf8'), { 'Content-Type': 'application/manifest+json' });
     if (req.method === 'GET' && req.url === '/api/info') {
       return send(res, 200, { folder: open.dir, name: open.dir && path.basename(open.dir), version: C.VERSION, session: open.session, problem: problem(), canSwitch: CAN_SWITCH });
     }

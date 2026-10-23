@@ -68,6 +68,8 @@ The server answers only this computer (127.0.0.1), and only for the files the pa
 
 To switch folders, use *Change folder* in the page: type the folder's path, or pick a suggestion, and the page reopens on it. The server connects to the new folder as `connect` does, so your agent works on it too. You can start `serve` before any folder is connected, or on a folder that needs an upgrade: the page says what's wrong and offers *Change folder*. A server started with `--dir` keeps to that folder; to switch, stop it, run `node tools/discern.mjs connect <folder>`, and start it again.
 
+In Chrome or Edge, the served page can be installed as an app, with its own window and a Discerny icon on the taskbar and in the Start menu: use *Install Discerny* in the browser's menu or address bar. The installed app is the same page, so it works only while `serve` is running, on the default port.
+
 Serve the page when you want a browser other than Chrome or Edge, or when your agent should open the UI itself. Opening the file needs no Node and works the same in Chrome and Edge.
 4. **Work through the starter project.** Your data folder starts with one project, *Discerny Setup*, and three items:
    - T-0001: connect your agent to your data folder. For Claude Code, that means starting it in the app folder with `claude --add-dir ~/discerny-data`.
