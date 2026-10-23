@@ -1,3 +1,7 @@
+<p align="center">
+  <img src=".github/discerny-logo.png" width="256" alt="Discerny logo: a pair of binoculars with eyes, holding a checklist and a folder of notes">
+</p>
+
 # Discerny
 
 Discerny is a task tracker and knowledge base for the work you're juggling and the people, projects and systems around it. It borrows from David Allen's *Getting Things Done*, and you run it together with an AI agent.
@@ -64,6 +68,8 @@ The server answers only this computer (127.0.0.1), and only for the files the pa
 
 To switch folders, use *Change folder* in the page: type the folder's path, or pick a suggestion, and the page reopens on it. The server connects to the new folder as `connect` does, so your agent works on it too. You can start `serve` before any folder is connected, or on a folder that needs an upgrade: the page says what's wrong and offers *Change folder*. A server started with `--dir` keeps to that folder; to switch, stop it, run `node tools/discern.mjs connect <folder>`, and start it again.
 
+In Chrome or Edge, the served page can be installed as an app, with its own window and a Discerny icon on the taskbar and in the Start menu: use *Install Discerny* in the browser's menu or address bar. The installed app is the same page, so it works only while `serve` is running, on the default port.
+
 Serve the page when you want a browser other than Chrome or Edge, or when your agent should open the UI itself. Opening the file needs no Node and works the same in Chrome and Edge.
 4. **Work through the starter project.** Your data folder starts with one project, *Discerny Setup*, and three items:
    - T-0001: connect your agent to your data folder. For Claude Code, that means starting it in the app folder with `claude --add-dir ~/discerny-data`.
@@ -117,9 +123,18 @@ The UI shows the app's version on the folder page, and `node tools/discern.mjs -
 - **PATCH** goes up with the first change after each release.
 - **BUILD** goes up with every change, and never goes back down.
 
-If the first two numbers differ from the last release you had, your data folders need an Upgrade before the new app will work on them. Ask your agent to "upgrade my Discerny folder", or run `node tools/discern.mjs upgrade` to see what it would change and `node tools/discern.mjs upgrade --write` to make the changes. Either way, a copy of the folder is first made beside it, named `<folder>.backup-<format>`. If only the last two differ, just pull.
-
 The `main` branch holds only releases, and each one is tagged `v<version>`, such as `v0.1.1.1`. The `dev` branch holds every change as it's made, each with its own build number. Stay on `main` unless you want to try changes before they're released. Each version number is set when a change is made, never by hand. `CHANGELOG.md` says what each release changed.
+
+### Upgrading
+
+Each data folder records the Format it is written in, in its `DISCERNY.md`. When you update the app, if the first two numbers of its version differ from the last release you had, your data folders need an Upgrade before the new app will work on them. The UI and the helper say so when they open a folder that needs one, and won't work on it until it's upgraded. If only the last two numbers differ, just pull.
+
+To upgrade a folder, do either of these:
+
+- Ask your agent to "upgrade my Discerny folder". It shows you each change before making it, and does any steps that need judgement with you.
+- In the app folder, run `node tools/discern.mjs upgrade` to see what would change, then `node tools/discern.mjs upgrade --write` to make the changes. Add `--dir <folder>` for a folder other than the connected one.
+
+Before its first change, an Upgrade copies the folder beside it, named `<folder>.backup-<format>` after the Format it was in. To undo the Upgrade, delete the folder and rename the backup to the folder's name. Once you're happy with the upgraded folder, you can delete the backup.
 
 ## Writing your own skills
 

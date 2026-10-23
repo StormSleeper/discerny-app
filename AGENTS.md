@@ -59,6 +59,8 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `config.toml` | The app folder's settings. `data_folder` is the path of the connected data folder, written by `discern connect` and `discern new` | when Node is missing |
 | `new_discerny_repo/` | The blank starter files for a new data folder | never, unless asked |
 | `discerny.html` | The UI | never |
+| `icons/` | The UI's icons | never |
+| `manifest.webmanifest` | What a browser needs to install the served UI as an app | never |
 | `AGENTS.md`, `CLAUDE.md`, `README.md`, `LICENSE` | Instructions and documentation | this file only |
 
 ## Rules for every edit
@@ -205,6 +207,23 @@ A source is anything outside Discerny that a source skill reads: a mailbox, Team
 ```
 
 `IGNORED.md` lines are `ref | YYYY-MM-DD | reason`. Parse them from the right, because a source key may contain ` | `.
+
+## Changing the Format
+
+The Format is the way a data folder is written. Each folder records its Format version in `DISCERNY.md`, and the app refuses a folder in any other Format. So a change to the Format may need a Migration, which `discern upgrade` runs to bring older folders up to date.
+
+- **A change needs a Migration** if it rewrites data already in folders, if an older app would misread what it writes, or if it adds a file or setting that must be there.
+- **A change needs none** if it adds an optional field or file that the app treats as absent when it's missing, and that an older app keeps intact. The parser keeps meta keys and sub-lines it doesn't know when it writes an Item back. New `SOURCES.md` keys that a skill adds follow the same rule.
+
+The Format is defined in these places, and a change to any of them is a change to the Format:
+
+- the format sections of this file, from "Item format" to "Sources, runs and refresh";
+- the `//<core>` block in `discerny.html`, which holds the parser;
+- the starter folder, `new_discerny_repo/`;
+- `SOURCE-SKILLS.md`, and the `SOURCES.md` keys a skill adds;
+- the helper's writers in `tools/discern.mjs`.
+
+`migrations/README.md` says how to write a Migration.
 
 ## Testing a change to the UI
 

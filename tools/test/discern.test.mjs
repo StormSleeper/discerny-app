@@ -14,7 +14,8 @@ const CLI = path.join(REPO, 'tools', 'discern.mjs');
 const DATA = path.resolve(process.env.DISCERNY_TEST_DATA || path.join(REPO, '..', 'discerny-example'));
 const NOW = '2026-10-12T15:00:00Z';
 const DATES = path.join('tools', 'refresh-dates.mjs');
-const BASE = pinned(committed());
+const BASE = upgraded(pinned(committed()));
+const FORMAT = /var FORMAT='([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'))[1];
 
 // The example folder doubles as a data folder the app can be connected to, so using the app
 // changes it. The tests expect exact results (next IDs, inbox contents), so they read it as of
@@ -48,13 +49,33 @@ function pinned(d) {
   return d;
 }
 
+// The tests expect the Example in the app's Format, so their copy is upgraded first when it is older.
+// The Upgrade's backup beside it is deleted.
+function upgraded(d) {
+  const up = (...args) => {
+    const r = spawnSync(process.execPath, [CLI, 'upgrade', ...args, '--dir', d], { encoding: 'utf8' });
+    if (r.status !== 0) throw new Error(`upgrade ${args.join(' ')} failed on ${d}: ${r.stdout}${r.stderr}`);
+    return JSON.parse(r.stdout);
+  };
+  if (!up().pending.length) return d;
+  if (d === DATA) {
+    const c = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-base-'));
+    fs.cpSync(d, c, { recursive: true, filter: (f) => path.basename(f) !== '.git' });
+    d = c;
+  }
+  up('--write');
+  fs.readdirSync(path.dirname(d)).filter(n => n.startsWith(path.basename(d) + '.backup-'))
+    .forEach(n => fs.rmSync(path.join(path.dirname(d), n), { recursive: true, force: true }));
+  return d;
+}
+
 function folder() {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-'));
   fs.cpSync(BASE, d, { recursive: true });
   return d;
 }
-function run(dir, args, input, now = NOW) {
-  const r = spawnSync(process.execPath, [CLI, ...args, '--dir', dir, '--now', now], { input: input === undefined ? '' : typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' });
+function run(dir, args, input, now = NOW, cli = CLI) {
+  const r = spawnSync(process.execPath, [cli, ...args, '--dir', dir, '--now', now],{ input: input === undefined ? '' : typeof input === 'string' ? input : JSON.stringify(input), encoding: 'utf8' });
   let json = null;
   try { json = JSON.parse(r.stdout); } catch (e) { /* plain usage text */ }
   return { code: r.status, json, out: r.stdout };
@@ -75,8 +96,19 @@ test('check passes on the Example', () => {
   assert.equal(r.json.ok, true);
 });
 
-test('check reports a folder with no DISCERNY.md as Format 0.1.0.0, the same as the app', () => {
-  const r = run(folder(), ['check']);
+test('check finds the tests\' copy of the Example in the app\'s Format', () => {
+  assert.deepEqual(run(folder(), ['check']).json.format, { folder: FORMAT, app: FORMAT, is: 'same' });
+});
+
+// The Format gate is tested on a copy of the app pinned to Format 0.1.0.0, so that older, newer and
+// next folders mean the same whatever Format the app itself has reached.
+const GATE_APP = app('0.1.0.0'), GATE = path.join(GATE_APP, 'tools', 'discern.mjs');
+const gate = (dir, args, input) => run(dir, args, input, NOW, GATE);
+
+test('check reports a folder with no DISCERNY.md as Format 0.1.0.0', () => {
+  const d = folder();
+  fs.rmSync(path.join(d, 'DISCERNY.md'), { force: true });
+  const r = gate(d, ['check']);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.format, { folder: '0.1.0.0', app: '0.1.0.0', is: 'same' });
 });
@@ -90,7 +122,7 @@ const folderInFormat = (format) => {
 test('check reports a DISCERNY.md with no format comment as Format 0.1.0.0', () => {
   const d = folder();
   fs.writeFileSync(path.join(d, 'DISCERNY.md'), '# Discerny data folder\n\nThis folder holds Discerny data.\n');
-  const r = run(d, ['check']);
+  const r = gate(d, ['check']);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.format, { folder: '0.1.0.0', app: '0.1.0.0', is: 'same' });
 });
@@ -106,7 +138,7 @@ test('the app\'s Format version is its newest Migration: next if there is one un
 
 test('check fails on a folder in an older or newer Format, or next', () => {
   for (const [format, is] of [['0.0.1.5', 'older'], ['0.2.0.1', 'newer'], ['next', 'newer']]) {
-    const r = run(folderInFormat(format), ['check']);
+    const r = gate(folderInFormat(format), ['check']);
     assert.equal(r.code, 1, `${format}: ${r.out}`);
     assert.equal(r.json.ok, false);
     assert.deepEqual(r.json.format, { folder: format, app: '0.1.0.0', is });
@@ -119,7 +151,7 @@ const snapshot = (d) => Object.fromEntries(fs.readdirSync(d, { recursive: true }
 
 test('state refuses a folder in an older Format with exit 2, says how to Upgrade, and writes nothing', () => {
   const d = folderInFormat('0.0.1.5'), before = snapshot(d);
-  const r = run(d, ['state', 'outlook-mail']);
+  const r = gate(d, ['state', 'outlook-mail']);
   assert.equal(r.code, 2, r.out);
   assert.match(r.json.error, /0\.0\.1\.5/);
   assert.match(r.json.error, /0\.1\.0\.0/);
@@ -130,7 +162,7 @@ test('state refuses a folder in an older Format with exit 2, says how to Upgrade
 
 test('state refuses a folder in a newer Format with exit 2, says to get the newer app, and writes nothing', () => {
   const d = folderInFormat('0.2.0.1'), before = snapshot(d);
-  const r = run(d, ['state', 'outlook-mail']);
+  const r = gate(d, ['state', 'outlook-mail']);
   assert.equal(r.code, 2, r.out);
   assert.match(r.json.error, /0\.2\.0\.1/);
   assert.match(r.json.error, /0\.1\.0\.0/);
@@ -141,7 +173,7 @@ test('state refuses a folder in a newer Format with exit 2, says to get the newe
 
 test('state refuses a folder upgraded by an unreleased build (next) with exit 2, says to restore its backup, and writes nothing', () => {
   const d = folderInFormat('next'), before = snapshot(d);
-  const r = run(d, ['state', 'outlook-mail']);
+  const r = gate(d, ['state', 'outlook-mail']);
   assert.equal(r.code, 2, r.out);
   assert.match(r.json.error, /Format next/);
   assert.match(r.json.error, /0\.1\.0\.0/);
@@ -162,12 +194,11 @@ test('every source skill command refuses a folder in another Format with exit 2,
     [['ref', 'T-0020', 'cal|2026-10-23|fable range 2027 – go/no-go']],
     [['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z']],
     [['log'], 'outlook-mail · fetched 3'],
-    [['migrate', '--write']],
   ];
   for (const format of ['0.0.1.5', '0.2.0.1', 'next']) {
     const d = folderInFormat(format), before = snapshot(d);
     for (const [args, input] of calls) {
-      const r = run(d, args, input);
+      const r = gate(d, args, input);
       assert.equal(r.code, 2, `${args[0]} on ${format}: ${r.out}`);
       assert.match(r.json.error, new RegExp(`Format ${format}`), `${args[0]} on ${format}`);
     }
@@ -178,12 +209,12 @@ test('every source skill command refuses a folder in another Format with exit 2,
 test('check, connect and --version still work on a folder in another Format', () => {
   for (const format of ['0.0.1.5', '0.2.0.1', 'next']) {
     const d = folderInFormat(format);
-    const v = run(d, ['--version']);
+    const v = gate(d, ['--version']);
     assert.equal(v.code, 0, `--version on ${format}: ${v.out}`);
-    const c = run(d, ['connect']);
+    const c = gate(d, ['connect']);
     assert.equal(c.code, 0, `connect on ${format}: ${c.out}`);
     assert.equal(c.json.ok, true);
-    const k = run(d, ['check']);
+    const k = gate(d, ['check']);
     assert.equal(k.code, 1, `check on ${format}: ${k.out}`);
     assert.equal(k.json.format.folder, format);
   }
@@ -704,13 +735,18 @@ test('a first name finds the one person who has it, and no one when two do, on i
   assert.equal(run(d, ['match'], ask).json[0].who, null);
 });
 
-test('who, log and migrate', () => {
+test('who and log', () => {
   const d = folder();
   assert.equal(run(d, ['who', 'ihartley']).json.name, 'Imogen Hartley');
   assert.equal(run(d, ['who', 'MEERA.ILANGOVAN@pennywhistle.example']).json.name, 'Meera Ilangovan');
   run(d, ['log'], 'outlook-mail · fetched 3 · inbox +1');
   assert.match(read(d, 'REFRESH-LOG.md'), /## 2026-10-12 16:00\n\noutlook-mail · fetched 3/);
-  assert.deepEqual(run(d, ['migrate']).json.changes, []);
+});
+
+test('migrate is no longer a command', () => {
+  const r = run(folder(), ['migrate']);
+  assert.notEqual(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /migrate/);
 });
 
 test('add takes lists as arrays or comma-separated strings, and has a dry run', () => {
@@ -723,14 +759,20 @@ test('add takes lists as arrays or comma-separated strings, and has a dry run', 
   assert.match(read(d, 'INBOX.md'), /prj:PRJ-0001; tg:Supplier Quality,Document Control/);
 });
 
-// connect and new write config.toml in the app folder, so they run in a throwaway copy of the app.
-function app() {
+// connect and new write config.toml in the app folder, so they run in a throwaway copy of the app,
+// with its Format version set to the one given.
+function app(format) {
   const a = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-app-'));
   fs.mkdirSync(path.join(a, 'tools'));
   fs.copyFileSync(CLI, path.join(a, 'tools', 'discern.mjs'));
   fs.copyFileSync(path.join(REPO, 'discerny.html'), path.join(a, 'discerny.html'));
   fs.cpSync(path.join(REPO, 'new_discerny_repo'), path.join(a, 'new_discerny_repo'), { recursive: true });
+  if (format) setFormat(a, format);
   return a;
+}
+function setFormat(a, format) {
+  const html = path.join(a, 'discerny.html');
+  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(/var FORMAT='[^']*'/, `var FORMAT='${format}'`));
 }
 function runApp(a, args, env = {}) {
   const r = spawnSync(process.execPath, [path.join(a, 'tools', 'discern.mjs'), ...args, '--now', NOW], { encoding: 'utf8', env: { ...process.env, DISCERNY_DIR: '', ...env } });
@@ -771,10 +813,10 @@ test('new writes DISCERNY.md with the app\'s Format version, and check finds it 
   assert.equal(runApp(a, ['new', mine]).code, 0);
   const text = read(mine, 'DISCERNY.md');
   assert.match(text, /^# /);
-  assert.match(text, /<!-- format: 0\.1\.0\.0 -->/);
+  assert.ok(text.includes(`<!-- format: ${FORMAT} -->`), text);
   const c = runApp(a, ['check']);
   assert.equal(c.code, 0, c.out);
-  assert.deepEqual(c.json.format, { folder: '0.1.0.0', app: '0.1.0.0', is: 'same' });
+  assert.deepEqual(c.json.format, { folder: FORMAT, app: FORMAT, is: 'same' });
 });
 
 const appFile = (a, f) => path.join(a, f);
@@ -853,13 +895,16 @@ test('--dir and $DISCERNY_DIR still win over config.toml, and connect warns that
 });
 
 test('connect connects to a folder in another Format, and warns', () => {
-  const a = app(), d = folderInFormat('0.2.0.1');
+  const a = app(), d = folderInFormat('0.0.1.5');
   const r = runApp(a, ['connect', d]);
   assert.equal(r.code, 0, r.out);
   assert.equal(r.json.connected, d);
-  assert.ok(r.json.warnings.some(w => w.includes('0.2.0.1')), r.out);
+  assert.ok(r.json.warnings.some(w => w.includes('0.0.1.5')), r.out);
   assert.deepEqual(runApp(a, ['connect', folder()]).json.warnings, []);
 });
+
+// The same folder as it was before any Migration: with no DISCERNY.md, it is in Format 0.1.0.0.
+const plain = (d) => { fs.rmSync(path.join(d, 'DISCERNY.md'), { force: true }); return d; };
 
 // A made-up Migration script: it adds its version as a line of MIGRATED.txt, so the order they ran in shows.
 const script = (v, extra = '') => `import fs from 'node:fs';
@@ -883,9 +928,7 @@ function appWith(migrations) {
     if (m.script !== undefined) fs.writeFileSync(path.join(d, 'migrate.mjs'), m.script);
     if (m.instructions !== undefined) fs.writeFileSync(path.join(d, 'INSTRUCTIONS.md'), m.instructions);
   }
-  const newest = names.includes('next') ? 'next' : names.sort((x, y) => x.localeCompare(y, 'en', { numeric: true })).at(-1);
-  const html = path.join(a, 'discerny.html');
-  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(/var FORMAT='[^']*'/, `var FORMAT='${newest}'`));
+  setFormat(a, names.includes('next') ? 'next' : names.sort((x, y) => x.localeCompare(y, 'en', { numeric: true })).at(-1));
   return a;
 }
 
@@ -896,7 +939,7 @@ test('upgrade lists the pending Migrations and previews the next, and changes no
     '0.2.0.1': { script: script('0.2.0.1'), instructions: '# Fill in urgency\n\nOptional: yes\n\nSet urg on open Items.\n' },
     '0.2.0.4': { instructions: '# Split owners\n\nOptional: no\n\nSplit each owner.\n' },
   });
-  const d = folder(), before = snapshot(d);
+  const d = plain(folder()), before = snapshot(d);
   const r = runApp(a, ['upgrade', '--dir', d]);
   assert.equal(r.code, 0, r.out);
   assert.equal(r.json.folder, '0.1.0.0');
@@ -920,7 +963,7 @@ const beside = (d) => fs.readdirSync(path.dirname(d)).sort();
 
 test('upgrade --write backs the folder up, runs the Migrations oldest first and records the newest; again, it does nothing', () => {
   const a = appWith({ '0.1.0.7': { script: script('0.1.0.7') }, '0.2.0.1': { script: script('0.2.0.1') }, '0.10.0.1': { script: script('0.10.0.1') } });
-  const d = lone(), before = snapshot(d);
+  const d = plain(lone()), before = snapshot(d);
   const r = runApp(a, ['upgrade', '--write', '--dir', d]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(beside(d), ['mine', 'mine.backup-0.1.0.0']);
@@ -937,7 +980,7 @@ test('upgrade --write backs the folder up, runs the Migrations oldest first and 
 
 test('upgrade --write never overwrites an existing backup', () => {
   const a = appWith({ '0.1.0.7': { script: script('0.1.0.7') } });
-  const d = lone(), old = path.join(path.dirname(d), 'mine.backup-0.1.0.0');
+  const d = plain(lone()), old = path.join(path.dirname(d), 'mine.backup-0.1.0.0');
   fs.mkdirSync(old);
   fs.writeFileSync(path.join(old, 'TASKS.md'), 'an older backup\n');
   assert.equal(runApp(a, ['upgrade', '--write', '--dir', d]).code, 0);
@@ -955,7 +998,7 @@ test('upgrade --write declines optional instructions and records them, and stops
     '0.2.0.4': { script: script('0.2.0.4'), instructions: REQUIRED },
     '0.3.0.1': { script: script('0.3.0.1') },
   });
-  const d = lone();
+  const d = plain(lone());
   const r = runApp(a, ['upgrade', '--write', '--dir', d]);
   assert.equal(r.code, 2, r.out);
   assert.deepEqual(r.json.declined, ['0.2.0.1']);
@@ -968,7 +1011,7 @@ test('upgrade --write declines optional instructions and records them, and stops
 
 test('upgrade --write stops with exit 1 at a failing script, names it, and keeps what is already recorded', () => {
   const a = appWith({ '0.1.0.7': { script: script('0.1.0.7') }, '0.2.0.1': { script: script('0.2.0.1', failing) }, '0.3.0.1': { script: script('0.3.0.1') } });
-  const d = lone();
+  const d = plain(lone());
   const r = runApp(a, ['upgrade', '--write', '--dir', d]);
   assert.equal(r.code, 1, r.out);
   assert.match(r.json.error, /migrations\/0\.2\.0\.1\/migrate\.mjs/);
@@ -979,9 +1022,9 @@ test('upgrade --write stops with exit 1 at a failing script, names it, and keeps
 
 test('an Upgrade taken one Migration at a time with --one and --done ends as --write does, with a backup per step', () => {
   const a = appWith({ '0.1.0.7': { script: script('0.1.0.7') }, '0.2.0.1': { script: script('0.2.0.1'), instructions: OPTIONAL }, '0.3.0.1': { script: script('0.3.0.1') } });
-  const whole = lone();
+  const whole = plain(lone());
   assert.equal(runApp(a, ['upgrade', '--write', '--dir', whole]).code, 0);
-  const d = lone();
+  const d = plain(lone());
   assert.equal(runApp(a, ['upgrade', '--write', '--one', '--dir', d]).code, 0);
   assert.match(read(d, 'DISCERNY.md'), /<!-- format: 0\.1\.0\.7 -->/);
   const step = runApp(a, ['upgrade', '--write', '--one', '--dir', d]);
@@ -999,7 +1042,7 @@ test('an Upgrade taken one Migration at a time with --one and --done ends as --w
 
 test('upgrade --write runs next after every numbered Migration, and the folder then records next', () => {
   const a = appWith({ next: { script: script('next') }, '0.1.0.7': { script: script('0.1.0.7') }, '0.2.0.1': { script: script('0.2.0.1') } });
-  const d = lone();
+  const d = plain(lone());
   assert.deepEqual(runApp(a, ['upgrade', '--dir', d]).json.pending.map(m => m.version), ['0.1.0.7', '0.2.0.1', 'next']);
   assert.equal(runApp(a, ['upgrade', '--write', '--dir', d]).code, 0);
   assert.equal(read(d, 'MIGRATED.txt'), '0.1.0.7\n0.2.0.1\nnext\n');
@@ -1022,12 +1065,102 @@ test('upgrade on a folder in a newer Format, or next, refuses with exit 2 and sa
   for (const [format, says] of [['0.2.0.1', /newer app/], ['next', /backup/]]) {
     const d = folderInFormat(format), before = snapshot(d);
     for (const args of [['upgrade'], ['upgrade', '--write']]) {
-      const r = run(d, args);
+      const r = gate(d, args);
       assert.equal(r.code, 2, `${args} on ${format}: ${r.out}`);
       assert.match(r.json.error, says);
     }
     assert.deepEqual(snapshot(d), before);
   }
+});
+
+// The first Migration, which brought the older Source key forms up to date. It's the oldest folder in migrations/.
+const FIRST = fs.readdirSync(path.join(REPO, 'migrations')).filter(n => n === 'next' || /^\d+(\.\d+)*$/.test(n))
+  .sort((x, y) => x === 'next' ? 1 : y === 'next' ? -1 : x.localeCompare(y, 'en', { numeric: true }))[0];
+const FIRST_SCRIPT = path.join(REPO, 'migrations', FIRST, 'migrate.mjs');
+
+// A copy of the Example in Format 0.1.0.0 with a Source key of every older form, and the files the
+// first Migration should leave. Meeting T-0029 in INBOX.md loses its cal| key, so the Migration
+// should give it back exactly; INBOX.md has Windows line endings, which it should keep.
+function oldForms(d) {
+  plain(d);
+  const inbox = read(d, 'INBOX.md').replace(/\r\n/g, '\n'), cal = /\n {2}- ref: cal\|2026-\d\d-\d\d\|mk4 fai[^\n]*/.exec(inbox)[0];
+  const tasks = (form) => read(d, 'TASKS.md').replace('<!-- next-id: 32 -->', '<!-- next-id: 35 -->') + [
+    '- [ ] T-0032 Print shop chat {ty:Task; urg:later; p:3; asg:2026-10-10 09:00}',
+    `  - ref: teams|c40e9a12${form ? '' : '|*'}`,
+    '- [ ] T-0033 Supplier day {ty:Meeting; urg:week; p:2; due:2026-10-23 11:00; asg:2026-10-10 09:00}',
+    `  - ref: teams|ab12cd34${form ? '' : '|*'}`,
+    '  - ref: mail|RE: Accepted:  Supplier day  agenda',
+    ...(form ? [] : ['  - ref: cal|2026-10-23|supplier day agenda']),
+    '  - note: Bring the samples.',
+    '',
+  ].join('\n');
+  const done = (form) => read(d, 'DONE.md') + [
+    '- [x] T-0034 Old sync {ty:Meeting; due:2026-09-01 09:00; done:2026-09-01}',
+    `  - ref: teams|ef56ab78${form ? '' : '|*'}`,
+    '  - ref: mail|Old sync',
+    '',
+  ].join('\n');
+  const ignored = (form) => read(d, 'IGNORED.md') + `teams|99aa88bb${form ? '' : '|*'} | 2026-10-01 | chatter\n- teams|77cc66dd${form ? '' : '|*'} | 2026-10-02 | more chatter\n`;
+  const want = { 'TASKS.md': tasks(false), 'INBOX.md': inbox.replace(/\n/g, '\r\n'), 'DONE.md': done(false), 'IGNORED.md': ignored(false) };
+  const had = { 'TASKS.md': tasks(true), 'INBOX.md': inbox.replace(cal, '').replace(/\n/g, '\r\n'), 'DONE.md': done(true), 'IGNORED.md': ignored(true) };
+  Object.entries(had).forEach(([f, t]) => fs.writeFileSync(path.join(d, f), t));
+  return want;
+}
+const migrate = (d, ...args) => spawnSync(process.execPath, [FIRST_SCRIPT, d, ...args], { encoding: 'utf8' });
+
+test('the first Migration\'s script imports only Node\'s built-in modules', () => {
+  const src = fs.readFileSync(FIRST_SCRIPT, 'utf8');
+  const from = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g)].map(m => m[1] || m[2] || m[3]);
+  assert.ok(from.length);
+  assert.deepEqual(from.filter(s => !s.startsWith('node:')), []);
+});
+
+test('the first Migration previews each fix and changes nothing; --write makes them, keeping line endings; again, it changes nothing', () => {
+  const d = folder(), want = oldForms(d), before = snapshot(d);
+  const p = migrate(d);
+  assert.equal(p.status, 0, p.stderr);
+  assert.deepEqual(snapshot(d), before);
+  for (const said of ['TASKS.md', 'T-0032: teams|c40e9a12 becomes teams|c40e9a12|*', 'T-0033: gains cal|2026-10-23|supplier day agenda',
+    'INBOX.md', 'T-0029: gains cal|', 'DONE.md', 'T-0034: teams|ef56ab78 becomes', 'IGNORED.md', 'teams|99aa88bb becomes teams|99aa88bb|*', 'teams|77cc66dd becomes']) {
+    assert.ok(p.stdout.includes(said), `preview lacks "${said}":\n${p.stdout}`);
+  }
+  assert.doesNotMatch(p.stdout, /T-0034: gains/);
+  const w = migrate(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  for (const [f, t] of Object.entries(want)) assert.equal(read(d, f), t, f);
+  const after = snapshot(d), again = migrate(d, '--write');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Nothing to change/);
+  assert.deepEqual(snapshot(d), after);
+});
+
+test('the first Migration finds nothing to change in the Example, and fails on a folder with no TASKS.md', () => {
+  const d = folder(), before = snapshot(d), r = migrate(d, '--write');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /Nothing to change/);
+  assert.deepEqual(snapshot(d), before);
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-empty-'));
+  const e = migrate(empty);
+  assert.equal(e.status, 1);
+  assert.match(e.stderr, /TASKS\.md/);
+});
+
+test('upgrade previews the first Migration on a folder with the older Source key forms; --write applies it and records the Format; again, nothing is pending', () => {
+  const d = lone(), want = oldForms(d), before = snapshot(d);
+  const r = run(d, ['upgrade']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.json.folder, '0.1.0.0');
+  assert.equal(r.json.pending[0].version, FIRST);
+  assert.match(r.json.preview, /T-0033: gains cal\|2026-10-23\|supplier day agenda/);
+  assert.match(r.json.preview, /teams\|c40e9a12 becomes teams\|c40e9a12\|\*/);
+  assert.deepEqual(snapshot(d), before);
+  const w = run(d, ['upgrade', '--write']);
+  assert.equal(w.code, 0, w.out);
+  assert.ok(read(d, 'DISCERNY.md').includes(`<!-- format: ${FORMAT} -->`));
+  assert.deepEqual(beside(d), ['mine', 'mine.backup-0.1.0.0']);
+  for (const [f, t] of Object.entries(want)) assert.equal(read(d, f), t, f);
+  assert.equal(run(d, ['check']).code, 0);
+  assert.deepEqual(run(d, ['upgrade']).json.pending, []);
 });
 
 test('transcript items share an event but not a calid ref', () => {
@@ -1122,7 +1255,7 @@ test('the tests\' copy of the Example is as of Monday 12 October 2026, however f
 // With an app copy `a`, it runs that copy's helper on its connected folder; otherwise it serves `dir` with --dir.
 async function serve(t, dir, { a, env = {} } = {}) {
   const { spawn } = await import('node:child_process');
-  const args = a ? [path.join(a, 'tools', 'discern.mjs'), 'serve', '--port', '0'] : [CLI, 'serve', '--dir', dir, '--port', '0'];
+  const args = [a ? path.join(a, 'tools', 'discern.mjs') : CLI, 'serve', ...(dir ? ['--dir', dir] : []), '--port', '0'];
   const p = spawn(process.execPath, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, DISCERNY_DIR: '', ...env } });
   t.after(() => p.kill());
   let outText = '';
@@ -1227,6 +1360,60 @@ test('serve refuses unknown names, paths out of the folder and a Host that is no
   assert.equal(Object.keys(ok.headers).some(h => h.startsWith('access-control-')), false);
 });
 
+test('serve gives the app\'s icons as they are on disk, and nothing else under /icons/', async (t) => {
+  const { url } = await serve(t, folder());
+  for (const [name, type] of [['favicon.ico', 'image/x-icon'], ['discerny-32.png', 'image/png'], ['apple-touch-icon.png', 'image/png']]) {
+    const r = await fetch(new URL(`icons/${name}`, url));
+    assert.equal(r.status, 200, name);
+    assert.equal(r.headers.get('content-type'), type, name);
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), fs.readFileSync(path.join(REPO, 'icons', name)), name);
+  }
+  assert.equal((await raw(url, '/icons/missing.png')).status, 404);
+  for (const p of ['/icons/../discerny.html', '/icons/..%2fdiscerny.html', '/icons/%2e%2e%2fconfig.toml', '/icons/..%5cdiscerny.html', '/icons/Favicon.ico', '/icons/favicon.ico/', '/icons/x.svg', '/icons/']) {
+    const r = await raw(url, p);
+    assert.ok(r.status >= 400, `${p} ${r.status}`);
+    assert.equal(r.headers['content-type'].startsWith('text/plain'), true, p);
+  }
+});
+
+test('serve gives the icons with no folder usable', async (t) => {
+  const said = await serve(t, folderInFormat('0.0.1.5'));
+  assert.match(said.problem, /Format/);
+  assert.equal((await fetch(new URL('icons/favicon.ico', said.url))).status, 200);
+});
+
+test('serve gives the web manifest as it is on disk, with no folder usable', async (t) => {
+  const said = await serve(t, folderInFormat('0.0.1.5'));
+  assert.match(said.problem, /Format/);
+  const r = await fetch(new URL('manifest.webmanifest', said.url));
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get('content-type'), 'application/manifest+json');
+  assert.equal(await r.text(), fs.readFileSync(path.join(REPO, 'manifest.webmanifest'), 'utf8'));
+});
+
+test('the web manifest installs Discerny standalone, with icons that serve gives at the sizes it says', async (t) => {
+  const { url } = await serve(t, folder());
+  const at = new URL('manifest.webmanifest', url);
+  const m = await (await fetch(at)).json();
+  assert.equal(m.name, 'Discerny');
+  assert.equal(m.short_name, 'Discerny');
+  assert.equal(m.description, 'A task tracker and knowledge base you run together with an AI agent.');
+  for (const k of ['id', 'start_url', 'scope']) assert.equal(new URL(m[k], at).href, new URL('/', url).href, k);
+  assert.equal(m.display, 'standalone');
+  assert.equal(m.background_color, '#F6F5F2');
+  assert.equal(m.theme_color, '#F6F5F2');
+  const got = [];
+  for (const icon of m.icons) {
+    const r = await fetch(new URL(icon.src, at));
+    assert.equal(r.status, 200, icon.src);
+    assert.equal(r.headers.get('content-type'), 'image/png', icon.src);
+    const png = Buffer.from(await r.arrayBuffer());
+    assert.equal(icon.sizes, `${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`, icon.src);
+    got.push(`${icon.sizes} ${icon.purpose ?? 'any'}`);
+  }
+  assert.deepEqual(got.sort(), ['192x192 any', '192x192 maskable', '256x256 any', '512x512 any', '512x512 maskable']);
+});
+
 test('serve refuses a PUT that is empty over a file with content, not text/plain, or over 10 MB, and writes nothing', async (t) => {
   const d = folder();
   const { url, api, session } = await serve(t, d);
@@ -1271,7 +1458,7 @@ test('serve lists the Drafts, .md and .txt only, by name, and none when there is
 test('serve on a folder in another Format listens, says so, gives only DISCERNY.md and refuses every other read and write with 409', async (t) => {
   for (const format of ['0.0.1.5', '0.2.0.1', 'next']) {
     const d = folderInFormat(format), before = snapshot(d);
-    const said = await serve(t, d);
+    const said = await serve(t, d, { a: GATE_APP });
     assert.equal(said.folder, d);
     assert.match(said.problem, new RegExp(`Format ${format}`));
     const info = await (await fetch(new URL('api/info', said.url))).json();
@@ -1342,7 +1529,7 @@ test('serve switches to another data folder, serves it, and records it in config
 });
 
 test('serve refuses to switch to a folder with no TASKS.md or in another Format, or without its own Origin, and stays where it was', async (t) => {
-  const a = app(), d = folder();
+  const a = app('0.1.0.0'), d = folderInFormat('0.1.0.0');
   assert.equal(runApp(a, ['connect', d]).code, 0);
   const { url, session } = await serve(t, null, { a });
   const toml = read(a, 'config.toml');
@@ -1424,7 +1611,7 @@ test('serve opens a folder normally once it is upgraded on disk, with no restart
   const d = folderInFormat('0.0.1.5');
   const { url } = await serve(t, d);
   assert.equal((await (await fetch(new URL('api/info', url))).json()).problem, 'format');
-  fs.writeFileSync(path.join(d, 'DISCERNY.md'), '# Discerny data folder\n\n<!-- format: 0.1.0.0 -->\n');
+  fs.writeFileSync(path.join(d, 'DISCERNY.md'), `# Discerny data folder\n\n<!-- format: ${FORMAT} -->\n`);
   const info = await (await fetch(new URL('api/info', url))).json();
   assert.equal(info.problem, undefined);
   const got = await fetch(new URL('api/file/TASKS.md', url), { headers: { 'X-Discerny-Session': info.session } });

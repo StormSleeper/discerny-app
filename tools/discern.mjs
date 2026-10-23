@@ -6,7 +6,7 @@
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
 //   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
-// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, migrate, upgrade, serve.
+// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, upgrade, serve.
 // Input for match, add, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
@@ -927,38 +927,6 @@ CMD.check = function () {
   if (errors.length) process.exit(1);
 };
 
-CMD.migrate = function () {
-  const changes = [];
-  for (const f of ['TASKS.md', 'INBOX.md', 'DONE.md']) {
-    const t = read(f); if (!t) continue;
-    const eol = eolOf(t), lines = t.split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-      const m = /^(\s+- ref: )(teams\|[^|]+)\s*$/.exec(lines[i]);
-      if (m) { changes.push(`${f}: ${m[2]} -> ${m[2]}|*`); lines[i] = m[1] + m[2] + '|*'; }
-    }
-    if (f !== 'DONE.md') {
-      C.parse(lines.join('\n')).items.forEach(it => {
-        if (it.done || it.meta.ty !== 'Meeting' || !/^\d{4}-\d{2}-\d{2}/.test(it.meta.due || '')) return;
-        const refs = C.getSub(it, 'ref').map(b => b.v.trim());
-        if (refs.some(r => /^cal\|/i.test(r))) return;
-        const mail = refs.find(r => /^mail\|/i.test(r)); if (!mail) return;
-        const ref = calRef(it.meta.due.slice(0, 10), mail.slice(5));
-        const i = itemLine(lines, it.id), j = blockEnd(lines, i), at = lastOf(lines, i, j, ['ref']);
-        lines.splice((at >= 0 ? at : i) + 1, 0, `  - ref: ${ref}`);
-        changes.push(`${f}: ${it.id} + ${ref}`);
-      });
-    }
-    if (OPT.write) write(f, lines.join(eol));
-  }
-  const ig = read('IGNORED.md');
-  if (ig) {
-    const eol = eolOf(ig), lines = ig.split(/\r?\n/);
-    lines.forEach((l, i) => { const m = /^(- )?(teams\|[^| ]+)( \| .*)$/.exec(l); if (m) { changes.push(`IGNORED.md: ${m[2]} -> ${m[2]}|*`); lines[i] = (m[1] || '') + m[2] + '|*' + m[3]; } });
-    if (OPT.write) write('IGNORED.md', lines.join(eol));
-  }
-  out({ written: OPT.write, changes, next: OPT.write || !changes.length ? undefined : 'run again with --write to apply' });
-};
-
 // ---------------------------------------------------------------- the Upgrade (see migrations/README.md)
 // The Migrations newer than a Format version, oldest first, with next last, and what each one holds.
 function pendingMigrations(format) {
@@ -1045,6 +1013,16 @@ CMD.serve = function () {
     // A same-origin fetch always names the page's origin, so a PUT without it came from somewhere else.
     if (req.method === 'PUT' && ![`http://127.0.0.1:${port}`, `http://localhost:${port}`].includes(req.headers.origin)) return send(res, 403, 'forbidden');
     if (req.method === 'GET' && req.url === '/') return send(res, 200, fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'), { 'Content-Type': 'text/html; charset=utf-8' });
+    // The app's icons, whatever the folder's state: a strict name, so nothing outside icons/ can be reached.
+    const icon = /^\/icons\/([a-z0-9-]+\.(png|ico))$/.exec(req.url);
+    if (req.method === 'GET' && icon) {
+      const f = path.join(REPO, 'icons', icon[1]);
+      if (!fs.existsSync(f)) return send(res, 404, 'not found');
+      res.writeHead(200, { 'Content-Type': icon[2] === 'png' ? 'image/png' : 'image/x-icon', 'Cache-Control': 'max-age=3600' });
+      return res.end(fs.readFileSync(f));
+    }
+    // The web manifest, for installing the UI as an app; like the icons, it doesn't need a folder.
+    if (req.method === 'GET' && req.url === '/manifest.webmanifest') return send(res, 200, fs.readFileSync(path.join(REPO, 'manifest.webmanifest'), 'utf8'), { 'Content-Type': 'application/manifest+json' });
     if (req.method === 'GET' && req.url === '/api/info') {
       return send(res, 200, { folder: open.dir, name: open.dir && path.basename(open.dir), version: C.VERSION, session: open.session, problem: problem(), canSwitch: CAN_SWITCH });
     }
@@ -1117,7 +1095,7 @@ if (cmd === '--version' || cmd === 'version') {
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|meetings|ignore|note|ref|commit|log|check|migrate|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|meetings|ignore|note|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
 // serve starts with no usable folder when it can switch to one, so the page can offer Change folder.
