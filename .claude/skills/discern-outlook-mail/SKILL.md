@@ -59,7 +59,8 @@ An `exclude_subject` rule that drops Accepted or Tentative replies, such as `^(A
 - `received`: `receivedDateTime`, or `sentDateTime` for sent mail.
 - `who` on sent-mail items: the main recipient, which `match` returns from `recipient`.
 - `links`: only a URL in the mail the user needs, such as a document or form.
-- **Reply to an invite:** `ty:Task`, `p:2`, urgency by the shared policy from its `due`; the note says what the reply asks or proposes.
+- **Reply to an invite:** `ty:Task`, `p:2`, urgency by the shared policy from its `due`; the description says what the reply asks or proposes.
+- **Comments** are by `email`: `discern comment <id> --author email`, as `match`'s actions give them.
 
 ## Known limits
 

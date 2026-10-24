@@ -5,6 +5,5 @@
 - timezone: UTC
 - priority_people:
 - personal_domains: gmail.com, outlook.com, hotmail.com, icloud.com, yahoo.com
-- apply_task_updates: false
 - page_cap: 10
 - log_runs: true

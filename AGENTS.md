@@ -10,11 +10,12 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 - **The app**: Discerny's own program: the UI, the helper, these instructions and the skills. It lives in the app folder, this folder, and holds no one's data.
 - **The data folder**: a folder of Discerny files (`TASKS.md` and the rest) holding one user's items, records and the bookkeeping that goes with them. It is kept apart from the app, so the app can work with whichever data folder is connected to it: the user's own, or one for testing. In this file a bare file name such as `TASKS.md` means the file in the data folder.
 - **The UI**: the web page, `discerny.html`. When this file says "the UI does X", it means the page, not you.
-- **The user**: the one person the data folder belongs to. Their record in `PEOPLE.md` is the one whose note says "The user of Discerny" (normally `P-0001`).
+- **The user**: the one person the data folder belongs to. Their record in `PEOPLE.md` is always `P-0001`, and that ID is never given to anyone else.
 - **The agent**: you, an AI working on the data folder from outside Discerny by following these instructions.
 - **Skill**: a named set of instructions (`discern-<name>`) that ships with the app and that an agent runs on request.
 - **Source skill**: a skill that reads one source (a mailbox, Teams chat, a calendar, an export) and puts proposals to the user, new items in `INBOX.md` among them. The calendar's Meetings are the exception: they go straight into `TASKS.md`.
 - **Item**: one tracked thing (a task, meeting, process, document or FYI), proposed, open or done. **Record**: a person, project or system that items are about.
+- **Description**: what an item or record is, written once by whoever creates it. **Comment**: a timestamped addition to an item or record, with its author. See "Descriptions and Comments".
 
 ## Start here
 
@@ -34,7 +35,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `TASKS.md` | Open items, flat list in ID order | by default |
 | `DONE.md` | Completed items | `ref:` lines (source keys), by source skills; otherwise only when asked |
 | `INBOX.md` | Proposals from source skills, waiting for the user to clarify them: new items, then changes under `## Changes` | during a run, and when the user asks about the inbox |
-| `PEOPLE.md` | One record per person: company, department, title, manager, notes, change history | when a person is involved |
+| `PEOPLE.md` | One record per person: company, department, title, manager, Description, Comments, change history | when a person is involved |
 | `PROJECTS.md` | One record per project, workstream or pod (`PRJ-####`) | when an item has `prj:` or a project is named |
 | `SYSTEMS.md` | One record per system or platform (`SYS-####`) | when a system is involved |
 | `RELATIONSHIPS.md` | One line per relationship between items and records | search by ID |
@@ -78,15 +79,18 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 ```
 - [ ] T-0012 Title text {ty:Task; who:Person Name; prj:PRJ-0001; tg:Tag1,Tag2; urg:today|week|soon|later|fyi; p:1-3; due:YYYY-MM-DD[ HH:MM]; st:Waiting|In progress; dep:T-0003; asg:YYYY-MM-DD HH:MM}
   - src: where it came from
-  - note: context from the agent or the source
+  - description: what the item is
+    further lines of it, indented 4 spaces
   - link: [label](https://…)
   - ref: scheme|key   for example mail|normalised subject, teams|chat|messageId, cal|date|subject
-  - my: the user's own notes (one line each)
+  - comment: {added-datetime: YYYY-MM-DD HH:MM; author: email; acknowledged: no}
+    the Comment's text, indented 4 spaces
   - [ ] sub-task
 ```
 
+- The sub-lines come in that order: `src`, the description, `link`, `ref`, the Comments oldest first, then sub-tasks.
 - `ty`: Task, Meeting, Process, Document or FYI.
-- `who`: the person the item is with or waiting on. Must match a name in `PEOPLE.md` exactly; if no record matches, leave `who` out and name the person in a `note:`.
+- `who`: the person the item is with or waiting on. Must match a name in `PEOPLE.md` exactly; if no record matches, leave `who` out and name the person in the description.
 - `urg`: today, week, soon, later or fyi. `p`: 1 high, 2 medium, 3 low.
 - `due`: `YYYY-MM-DD`, or `YYYY-MM-DD HH:MM` when a time is known. Every `ty:Meeting` with a known date and time must carry the time.
 - `st`: optional. `Waiting` means the user is waiting on someone else; `In progress` means started.
@@ -94,40 +98,58 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 - `prj`: optional, comma-separated `PRJ-####` IDs. `tg`: optional, comma-separated free-text tags; the tag list is whatever the data uses.
 - `asg`: when the item reached the user (message timestamp; `12:00` if only the date is known). For an item a skill derives rather than receives, such as a prep item for a meeting, the time it was derived. Set it on every item a source skill creates.
 - `ref`: the item's **source key**, a hidden key that ties it to the source thread, message or event it came from, so the same thing is never proposed twice: a scheme, then keys joined by `|`. The UI never shows or edits it, and renaming the item does not affect it. An item may carry several; a meeting with a date also carries a `cal|date|subject` source key so every source recognises it. A source key ending in `|*` stands for a whole chat or thread: on an item it means "related", never "already seen" (the older bare form `teams|chat-prefix` means the same). `SOURCE-SKILLS.md` lists the schemes and how they match.
-- `note:` is for your context and the source's; the UI's "Details" box also writes `note:`. `my:` is the user's own notes; never edit or remove them unless asked.
+- `note:` and `my:` lines are retired: the Description and Comments replaced them. Never write one; `discern check` warns about any left.
 - `top:` is retired. The UI still reads it on old items; never write it.
 - Completing an item means moving it to `DONE.md` as `[x]` with `done:YYYY-MM-DD`. The UI does this itself; do it only when asked.
+
+## Descriptions and Comments
+
+Every item and record has at most one Description and any number of Comments.
+
+- **The Description** says what the item or record is. Whoever creates it writes it: you, a source skill or the user. After that only the user changes it, or you when the user asks you to. It is one `  - description:` sub-line, its further lines indented 4 spaces; a blank line in it is a line of just those 4 spaces.
+- **A Comment** is something added later: news, an answer, a decision. Its line holds only its fields, in braces, and its text follows on lines indented 4 spaces, as in the Description:
+  - `added-datetime`: when it was added, local time in `timezone`. Comments the Migration made from old notes have none: they come first, as older than any dated one.
+  - `author`: `user` for the user; the skill's word for a source skill (`email`, `calendar`, `teams`); `agent` for you, working an agent request or something the user asked you in a conversation.
+  - `acknowledged: no`, only on a **Comment to acknowledge** (below).
+
+  New Comments go after the others, so they stay oldest first. Add one without asking whenever new information turns up, with `discern comment <id> --author <word> "<text>"` (`node tools/discern.mjs` from the app folder), which stamps the time and puts it in place. Never change or delete a Comment, the user's or anyone else's: the user can edit their own and delete any, in the UI.
+- **A Comment to acknowledge** brings news from someone else that the user should see: a reply received, a Meeting moved or cancelled, new information about an item. `discern comment` with `--to-acknowledge` writes `acknowledged: no`, and the UI's Inbox shows the Comment until the user acknowledges it, which deletes the field. A Comment recording something the user did, such as a reply they sent, needs no acknowledging.
 
 ## Projects and systems (PROJECTS.md, SYSTEMS.md)
 
 ```
 - Title {id:PRJ-0001; type:Project|Workstream|Pod; parent:PRJ-0000; st:Active|On hold|Done}
-  - note: description
+  - description: what the project is
   - link: [label](https://…)
+  - comment: {added-datetime: YYYY-MM-DD HH:MM; author: agent}
+    the Comment's text
 - Name {id:SYS-0001; type:Platform|Application|Instrument|…; owner:Person Name; st:Live; part-of:SYS-0000}
-  - note: free text
+  - description: what the system is
   - link: [label](https://…)
 ```
 
 - Optional `## Group` headings.
-- A note about a system goes on the system in `SYSTEMS.md`, not as an item's `note:`.
-- When a project's notes pass about ten lines, move them to `projects/<name>.md` and leave a `link:` to it on the project.
+- News about a system goes on the system in `SYSTEMS.md`, as a Comment, not on an item.
+- When a project's Description passes about ten lines, move it to `projects/<name>.md` and leave a `link:` to it on the project.
 
 ## People (PEOPLE.md)
 
 ```
 ## Group heading
 - Full Name {id:P-0001; co:Company or business unit; dept:Department; title:Job title; mgr:Manager Name; ext:Y; st:Left; chk:YYYY-MM-DD; em:name@example.com; handle:staff-id}
-  - note: free text
+  - description: who they are
   - hist: 2026-10-06 | Job title: old → new
+  - comment: {added-datetime: YYYY-MM-DD HH:MM; author: agent}
+    the Comment's text
 ```
 
+- `P-0001` is the user. Never give it to anyone else, and never add a record for the user under another ID.
 - The name must match `who:` on items, `owner:` on systems and `mgr:` on people. The UI never renames people; if you rename someone, update every one of those references in the same piece of work.
 - `id` (`P-####`) never changes, even when the name is corrected. Use it when referring to a person in chat.
 - Blank `co`, `dept`, `title` or `mgr` counts as missing and shows on the UI's People page. `chk` is the date the record was last checked; set it when you change a field.
 - `ext:Y` marks a person outside the user's organisation. `st:Left` hides someone who has left.
 - `em:` lists the person's email addresses, comma-separated; `handle:` lists other names or IDs they are addressed or mentioned by. Source skills use them to recognise senders, and the user's own record to recognise the user.
-- When a field changes, add a `hist:` line: `- hist: YYYY-MM-DD | Field: old → new`.
+- When a field changes, add a `hist:` line: `- hist: YYYY-MM-DD | Field: old → new`. `hist:` lines are the record's change history, kept apart from its Comments.
 
 ## Relationships (RELATIONSHIPS.md)
 
@@ -177,7 +199,7 @@ The user leaves agent requests for you from the UI ("Ask agent"). They wait in t
 Line breaks inside a request are written as ` ⏎ `. The ID is the item or record the request is about. To work through the queue (this is what `discern-ask-agent` does):
 
 1. Read `ASK-AGENT.md`. Take the requests oldest first.
-2. For each request, find the item or record by its ID and do what it asks, within the data folder: update a record, add sub-tasks, add a URL or a relationship, answer a question as a `note:`, or write a draft.
+2. For each request, find the item or record by its ID and do what it asks, within the data folder: update a record, add sub-tasks, add a URL or a relationship, answer a question as a Comment (`discern comment <id> --author agent "<answer>"`), or write a draft. Change a Description only when the request asks for that.
 3. If the request needs something only the user can give (their name, a decision), ask them in the conversation. If they are not there, leave the request in the queue and say so.
 4. Drafts go in `drafts/<ID>-<slug>.md`, in this form, and are never sent:
 
@@ -204,7 +226,7 @@ Line breaks inside a request are written as ` ⏎ `. The ID is the item or recor
 A source is anything outside Discerny that a source skill reads: a mailbox, Teams chat, a calendar, an export. A run is one source skill reading its source once; a refresh is running every source skill in turn (`discern-refresh`). Discerny itself never talks to an outside system, so any connector the agent has can be used. Before running or writing a source skill, read `SOURCE-SKILLS.md`: it holds the loop every source skill follows, and how to use the helper, `tools/discern.mjs`, which does the deterministic parts. In short:
 
 1. A `discern-<source>` skill reads the shared `## defaults` block and its own `## <source-name>` block in `SOURCES.md`. For a stream source, such as a mailbox or Teams chat, it asks its connector only for messages after its cursor (`watermark` less `overlap`), in day-long windows. A horizon source, such as a calendar, re-reads a window ahead of now on every run instead.
-2. Each thing it finds is a candidate, which the skill assesses. A candidate whose source key already appears in `TASKS.md`, `INBOX.md`, `DONE.md`, `IGNORED.md` or `DISMISSED.md` is already tracked: it is skipped, or becomes a proposed change to the existing item, which appears only in the run report.
+2. Each thing it finds is a candidate, which the skill assesses. A candidate whose source key already appears in `TASKS.md`, `INBOX.md`, `DONE.md`, `IGNORED.md` or `DISMISSED.md` is already tracked: it is skipped, becomes a Comment on the existing item when it brings news that changes no field, or becomes a proposed change to the item, which appears only in the run report.
 3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `src:`, `ref:`, `asg:` and `source:`, the name of the source's block in `SOURCES.md`. Relationships, new people and new email addresses the run found go under `## Changes` in `INBOX.md` too (see "Changes in the inbox"). Then the cursor moves past the last window fully processed. A run reads at most `page_cap` pages a pass, so after a gap a stream source takes several runs to catch up: its report ends by saying whether it is caught up, and a refresh runs it again while it isn't. Meetings come from the calendar: a horizon source writes each Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item and keeps it in step with the calendar, but never marks one done; the mail skill leaves invitations to it.
 4. The user clarifies each proposal in the UI's inbox. Accept moves the item to `TASKS.md`. Already handled accepts it and marks it done at once, so it goes to `DONE.md`. Dismiss, as Not actionable, Not mine or Duplicate, remembers only that message, in `DISMISSED.md`: later messages on the same thread can be proposed again. `discern commit` removes the line once the source can no longer read the message again. A change is answered Yes, which makes it, or No, which is for good.
 
@@ -215,7 +237,6 @@ A source is anything outside Discerny that a source skill reads: a mailbox, Team
 - timezone: Europe/London
 - priority_people: P-0002, P-0007
 - personal_domains: gmail.com, outlook.com
-- apply_task_updates: false
 - page_cap: 10
 - log_runs: true
 

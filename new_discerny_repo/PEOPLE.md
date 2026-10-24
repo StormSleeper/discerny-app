@@ -4,4 +4,4 @@
 
 ## Me
 - User {id:P-0001}
-  - note: The user of Discerny. "User" is a placeholder until discern-ask-agent asks for your name (see ASK-AGENT.md).
+  - description: You: P-0001 is always the user of this folder. "User" is a placeholder until discern-ask-agent asks for your name (see ASK-AGENT.md).

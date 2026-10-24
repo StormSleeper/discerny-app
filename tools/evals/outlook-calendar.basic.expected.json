@@ -14,7 +14,7 @@
     {
       "eval": "E21",
       "event": "AAMkAGI-fable-gonogo-1021",
-      "result": "T-0020 in TASKS.md now has due:2026-10-23 14:00, the title \"Fable Range 2027 – go/no-go\" and the source key cal|2026-10-23|fable range 2027 – go/no-go; the report's Meetings line says it moved; no proposal and no new item."
+      "result": "T-0020 in TASKS.md now has due:2026-10-23 14:00, the title \"Fable Range 2027 – go/no-go\" and the source key cal|2026-10-23|fable range 2027 – go/no-go, and a Comment by calendar to acknowledge, \"Moved from 21 Oct 14:00 to 23 Oct 14:00.\"; the report's Meetings line says it moved; no proposal and no new item."
     },
     {
       "eval": "E22",
@@ -39,12 +39,12 @@
     {
       "eval": "-",
       "event": "AAMkAGI-owl-redesign-1014",
-      "result": "Meeting item T-0033 in TASKS.md; one prep Task proposal (priority organiser, pre-read), due:2026-10-14 11:00, whose note also says no response recorded; no separate invite item."
+      "result": "Meeting item T-0033 in TASKS.md; one prep Task proposal (priority organiser, pre-read), due:2026-10-14 11:00, whose description also says no response recorded; no separate invite item."
     },
     {
       "eval": "-",
       "event": "AAMkAGI-weekly-qa-sync-1015",
-      "result": "T-0031 stays open in TASKS.md, retitled \"Cancelled: Weekly QA sync\", with a note \"Found cancelled by the calendar Run on 2026-10-12 17:00\"; the report's Meetings line says it was cancelled; no new item."
+      "result": "T-0031 stays open in TASKS.md, retitled \"Cancelled: Weekly QA sync\", with a Comment by calendar to acknowledge, \"Found cancelled.\", added 2026-10-12 17:00; the report's Meetings line says it was cancelled; no new item."
     },
     {
       "eval": "-",

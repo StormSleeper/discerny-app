@@ -9,12 +9,12 @@
     {
       "eval": "E1",
       "message": "m-101",
-      "result": "New inbox item to review the Academy QA checklist; no who (Rosa Kim is not in PEOPLE.md), her name in a note, and Rosa Kim proposed as a new person under \"## Changes\" in INBOX.md, through discern propose, with the item in her items and a why line."
+      "result": "New inbox item to review the Academy QA checklist; no who (Rosa Kim is not in PEOPLE.md), her name in its description, and Rosa Kim proposed as a new person under \"## Changes\" in INBOX.md, through discern propose, with the item in her items and a why line."
     },
     {
       "eval": "E2",
       "message": "m-102",
-      "result": "New inbox item (add the complaints trend chart) whose note names T-0013 and T-0030; p:1, from the manager."
+      "result": "New inbox item (add the complaints trend chart) whose description names T-0013 and T-0030; p:1, from the manager."
     },
     {
       "eval": "E3",
@@ -24,17 +24,17 @@
     {
       "eval": "E4",
       "message": "m-104",
-      "result": "No new item; report \"reply received, consider closing T-0022\"."
+      "result": "No new item; T-0022 gains a Comment by email to acknowledge, \"Helena replied on 9 Oct: …\" saying what she sent, and the report's Comments line lists T-0022."
     },
     {
       "eval": "E5",
       "message": "s-201",
-      "result": "No new item; report \"T-0007 chased 9 Oct\", not \"consider closing\"."
+      "result": "No new item; T-0007 gains the Comment \"Chased Desmond on 9 Oct.\" by email, not to acknowledge, and the report's Comments line lists T-0007."
     },
     {
       "eval": "E6",
       "message": "s-202",
-      "result": "No new item; report \"you replied 8 Oct, consider closing T-0009\"."
+      "result": "No new item; T-0009 gains the Comment \"You replied on 8 Oct.\" by email, not to acknowledge, and the report's Comments line lists T-0009."
     },
     {
       "eval": "E8",

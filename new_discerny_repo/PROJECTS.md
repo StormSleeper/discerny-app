@@ -3,4 +3,4 @@
 <!-- next-id: 2 -->
 
 - Discerny Setup {id:PRJ-0001; type:Project; st:Active}
-  - note: Get Discerny running: connect an agent to this data folder, create the discern-ask-agent skill, and run it once. Then add your own projects, people and systems, or set up the source skills (in the app folder's .claude/skills) to fill the inbox.
+  - description: Get Discerny running: connect an agent to this data folder, create the discern-ask-agent skill, and run it once. Then add your own projects, people and systems, or set up the source skills (in the app folder's .claude/skills) to fill the inbox.

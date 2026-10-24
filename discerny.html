@@ -221,6 +221,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .t .tm{font-family:var(--mono);font-weight:500;color:var(--accent-ink);margin-right:8px}
 .row.done .t{color:var(--muted);text-decoration:line-through}
 .meta{font-size:13px;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
+.row .sum{font-size:13px;color:var(--ink-3);margin-top:2px;overflow-wrap:anywhere}
 .right{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:6px;max-width:min(52cqi,460px)}
 .reasons{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
 .chg .q{font-weight:600;font-size:15px;line-height:1.35;color:var(--ink);overflow-wrap:anywhere}
@@ -298,6 +299,11 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .tag .xbtn{min-width:24px;min-height:24px}
 .ctx{font-size:14px;color:var(--ink-2);overflow-wrap:anywhere}
 .ctx.src{font-size:13px;color:var(--muted)}
+.cmt{border-left:2px solid var(--line-3);padding:2px 0 2px 10px;margin:8px 0}
+.cmt-h{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px;color:var(--muted)}
+.cmt-a{margin-left:auto;display:flex;gap:10px}
+.cmt-t{font-size:14px;color:var(--ink-2);white-space:pre-line;overflow-wrap:anywhere;margin-top:2px}
+.ent-note.pre{white-space:pre-line}
 .links{display:flex;flex-wrap:wrap;gap:6px 14px}
 .ext{display:inline-flex;align-items:center;gap:4px;font-size:14px;color:var(--accent);overflow-wrap:anywhere}
 .lrow{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;min-width:0}
@@ -422,8 +428,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.0.2'; // the app's version; tools/discern.mjs reads it from here
-var FORMAT='0.3.0.2'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
+var VERSION='0.3.0.3'; // the app's version; tools/discern.mjs reads it from here
+var FORMAT='0.3.0.3'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','week','soon','later','fyi'];
 var TYPES=['Task','Meeting','Process','Document','FYI'];
@@ -433,6 +439,8 @@ var ITEM_RE=/^- \[( |x)\] (T-\d+) (.*)$/;
 function parseMeta(s){var m={};s.split(';').forEach(function(p){var i=p.indexOf(':');if(i>0)m[p.slice(0,i).trim()]=p.slice(i+1).trim();else if(p.trim())(m[' bare']=m[' bare']||[]).push(p.trim());});return m;}
 // one physical line: line separators typed or pasted into a field must never split an item
 function ol(s){return String(s).replace(/[\r\n\u2028\u2029\u0085]+/g,' ');}
+// every kind of line break written as one newline
+function nl(s){return String(s==null?'':s).replace(/\r\n?|[\u2028\u2029\u0085]/g,'\n');}
 function metaParts(meta,order){var parts=[];order.forEach(function(k){if(meta[k]!==undefined&&meta[k]!=='')parts.push(k+':'+ol(meta[k]).replace(/;/g,','));});
   Object.keys(meta).forEach(function(k){if(order.indexOf(k)<0&&k.charAt(0)!==' '&&meta[k]!=='')parts.push(k+':'+ol(meta[k]).replace(/;/g,','));});
   (meta[' bare']||[]).forEach(function(b){parts.push(ol(b).replace(/;/g,','));});return parts;}
@@ -441,7 +449,7 @@ var CHANGES_HEAD='## Changes';
 function parse(text){
   var lines=String(text||'').replace(/\r/g,'').split('\n');var pre=[],items=[],cur=null,post=null;
   if(lines.length&&lines[lines.length-1]==='')lines.pop();
-  lines.forEach(function(ln){
+  lines.forEach(textLines(function(ln){
     if(post){post.push(ln);return;}
     if(ln===CHANGES_HEAD){post=[ln];var t=cur?cur.subs:null;
       if(t)while(t.length&&t[t.length-1].k==='raw'&&!t[t.length-1].v.trim())t.pop();
@@ -452,22 +460,69 @@ function parse(text){
       if(bi>-1&&rest.charAt(rest.length-1)==='}'){meta=parseMeta(rest.slice(bi+2,-1));rest=rest.slice(0,bi);}
       cur={id:m[2],done:m[1]==='x',title:rest,meta:meta,subs:[]};items.push(cur);return;}
     if(!cur){pre.push(ln);return;}
-    var s=/^  - (src|note|link|my|ref): ?(.*)$/.exec(ln);
-    if(s){cur.subs.push({k:s[1],v:s[2]});return;}
+    var s=/^  - (src|description|link|ref|comment): ?(.*)$/.exec(ln);
+    if(s){cur.subs.push(textSub(s[1],s[2]));return;}
     var c=/^  - \[( |x)\] (.*)$/.exec(ln);
     if(c){cur.subs.push({k:'sub',v:c[2],x:c[1]==='x'});return;}
     cur.subs.push({k:'raw',v:ln});
-  });
+  },function(){return post?null:cur;},function(){cur.subs.push({k:'raw',v:''});}));
   return {pre:pre,items:items,post:post||[]};}
+// A Description or a Comment carries on over the lines below it indented 4 spaces, a blank line in it being an indented
+// empty one; a Comment's own line holds only its fields: "  - comment: {added-datetime: YYYY-MM-DD HH:MM; author: user}".
+// -> {k:'description', v} or {k:'comment', f:{fields}, v}, v holding the text with \n between its lines
+function textSub(k,rest){
+  if(k==='comment'){var t=String(rest).trim(),f={};if(t.charAt(0)==='{'&&t.charAt(t.length-1)==='}'){f=fieldsOf(t.slice(1,-1));t='';}return {k:k,f:f,v:t,n:t?1:0};}
+  return {k:k,v:rest,n:rest?1:0};}
+// wraps a parser's line handler so the lines that carry on a Description or Comment join its text. A truly empty line
+// between them counts as a blank one; any other empty line goes back to the parser through blank once the text is over.
+function textLines(each,curOf,blank){var tx=null,gap=0;
+  function end(){if(blank)for(;gap;gap--)blank();gap=0;tx=null;}
+  return function(ln,i,all){
+    if(tx){var c=/^ {4}(.*)$/.exec(ln);
+      if(c){for(;gap;gap--){tx.v+='\n';tx.n++;}tx.v=(tx.n?tx.v+'\n':'')+c[1];tx.n++;return;}
+      if(ln===''&&i<all.length-1){gap++;return;}
+      end();}
+    each(ln);
+    var cur=curOf(),last=cur&&cur.subs[cur.subs.length-1];
+    tx=last&&(last.k==='description'||last.k==='comment')&&last.n!==undefined?last:null;
+    if(i===all.length-1)end();};}
+var COMMENT_ORDER=['added-datetime','author','acknowledged'];
+// one sub-line of an Item or Record as written: several physical lines for a Description or Comment
+function serSub(b){
+  if(b.k==='raw')return b.v;
+  if(b.k==='sub')return '  - ['+(b.x?'x':' ')+'] '+ol(b.v);
+  if(b.k!=='description'&&b.k!=='comment')return '  - '+b.k+': '+ol(b.v);
+  var ls=nl(b.v).split('\n'),f=b.f||{},parts=[];
+  var head='  - '+b.k+':';
+  if(b.k==='comment'){COMMENT_ORDER.concat(Object.keys(f).filter(function(k){return COMMENT_ORDER.indexOf(k)<0;})).forEach(function(k){
+      if(f[k]!==undefined&&f[k]!=='')parts.push(k+': '+ol(f[k]).replace(/[;{}]/g,','));});
+    head+=' {'+parts.join('; ')+'}';}
+  else head+=ls[0]?' '+ls[0]:'';
+  return head+(b.k==='comment'?ls:ls.slice(1)).map(function(l){return '\n    '+l;}).join('');}
 var META_ORDER=['ty','who','prj','tg','top','urg','p','due','st','dep','done','asg'];
 function serItem(it){
   var parts=metaParts(it.meta,META_ORDER);
   var s='- ['+(it.done?'x':' ')+'] '+it.id+' '+ol(it.title)+(parts.length?' {'+parts.join('; ')+'}':'');
-  it.subs.forEach(function(b){
-    if(b.k==='raw')s+='\n'+b.v;
-    else if(b.k==='sub')s+='\n  - ['+(b.x?'x':' ')+'] '+ol(b.v);
-    else s+='\n  - '+b.k+': '+ol(b.v);});
+  it.subs.forEach(function(b){s+='\n'+serSub(b);});
   return s;}
+// where each kind of sub-line goes on an Item, a Person and a Project or System: a new one goes after the last of its rank or lower
+var ITEM_RANK={src:0,description:1,link:2,ref:3,comment:4,sub:5},PERSON_RANK={description:0,hist:1,comment:2},ENT_RANK={description:0,link:1,comment:2};
+function placeSub(x,b,rank){var at=-1,r=rank[b.k];x.subs.forEach(function(s,k){if(rank[s.k]!==undefined&&rank[s.k]<=r)at=k;});x.subs.splice(at+1,0,b);return b;}
+// the Description's text ('' for none), and setting it: an empty one removes the line
+function descOf(x){var d=x.subs.filter(function(b){return b.k==='description';})[0];return d?d.v:'';}
+// text the User or an Agent gives, as it is written: no spaces at the ends of its lines, and no blank lines before or after it
+function cleanText(s){return nl(s).split('\n').map(function(l){return l.replace(/\s+$/,'');}).join('\n').replace(/^\n+|\n+$/g,'');}
+function setDesc(x,text,rank){var t=cleanText(text),at=-1,k=0;
+  // only one Description is kept, where the first was
+  x.subs=x.subs.filter(function(b){if(b.k!=='description'){k++;return true;}if(at<0)at=k;return false;});
+  if(!t)return;
+  if(at>=0)x.subs.splice(at,0,{k:'description',v:t});
+  else placeSub(x,{k:'description',v:t},rank);}
+// Comments oldest first as written. A Comment to acknowledge carries acknowledged: no until the User acknowledges it.
+function commentsOf(x){return x.subs.filter(function(b){return b.k==='comment';});}
+function toAck(c){return /^no$/i.test(String((c.f||{}).acknowledged||''));}
+function addComment(x,c,rank){var f={};f['added-datetime']=c.at;f.author=c.author;if(c.ack)f.acknowledged='no';
+  return placeSub(x,{k:'comment',f:f,v:cleanText(c.text)},rank);}
 function serialize(model){var post=model.post||[];
   return model.pre.join('\n')+'\n'+model.items.map(serItem).join('\n')+(model.items.length?'\n':'')+(post.length?'\n'+post.join('\n')+'\n':'');}
 // change Proposals under "## Changes" in INBOX.md: "- <what> {key: value; …}" then "  - why: …", the braces parsed from the final " {"
@@ -494,13 +549,15 @@ function setNextId(model,n){var f=false;model.pre=model.pre.map(function(l){if(/
   if(!f)model.pre.push('<!-- next-id: '+n+' -->');}
 function fmtId(n){return 'T-'+('0000'+n).slice(-4);}
 function getSub(it,k){return it.subs.filter(function(b){return b.k===k;});}
-// ---- people (PEOPLE.md): "## Group" headings, "- Name {co:; dept:; title:; mgr:; st:Left; chk:date}" + "  - note:/hist:" lines
+// ---- people (PEOPLE.md): "## Group" headings, "- Name {co:; dept:; title:; mgr:; st:Left; chk:date}" + description, hist: and comment lines
 var PFIELDS=['co','dept','title','mgr'];
 var PLABEL={co:'Company',dept:'Department',title:'Job title',mgr:'Reports to',grp:'Group'};
 var PMETA_ORDER=['id','co','dept','title','mgr','ext','st','chk'];
+// P-0001 is always the User, and never anyone else
+var USER_ID='P-0001';
 function pParse(text){
   var lines=String(text||'').replace(/\r/g,'').split('\n');var pre=[],people=[],cur=null,grp='Other',started=false,gtext={},gorder=[];
-  lines.forEach(function(ln){
+  lines.forEach(textLines(function(ln){
     var h=/^## (.*)$/.exec(ln);
     if(h){grp=h[1].trim()||'Other';started=true;cur=null;if(gorder.indexOf(grp)<0)gorder.push(grp);return;}
     var m=/^- (.+)$/.exec(ln);
@@ -510,15 +567,15 @@ function pParse(text){
     if(!started){pre.push(ln);return;}
     if(ln.trim()==='')return;
     if(!cur){(gtext[grp]=gtext[grp]||[]).push(ln);return;}
-    var s=/^  - (note|hist): ?(.*)$/.exec(ln);
-    if(s){cur.subs.push({k:s[1],v:s[2]});return;}
-    cur.subs.push({k:'raw',v:ln});});
+    var s=/^  - (description|hist|comment): ?(.*)$/.exec(ln);
+    if(s){cur.subs.push(s[1]==='hist'?{k:s[1],v:s[2]}:textSub(s[1],s[2]));return;}
+    cur.subs.push({k:'raw',v:ln});},function(){return cur;}));
   while(pre.length&&pre[pre.length-1].trim()==='')pre.pop();
   return {pre:pre,people:people,gtext:gtext,gorder:gorder};}
 function pSerItem(p){
   var parts=metaParts(p.meta,PMETA_ORDER);
   var s='- '+ol(p.name)+(parts.length?' {'+parts.join('; ')+'}':'');
-  p.subs.forEach(function(b){s+=(b.k==='raw')?'\n'+b.v:'\n  - '+b.k+': '+ol(b.v);});
+  p.subs.forEach(function(b){s+='\n'+serSub(b);});
   return s;}
 function pSerialize(model){
   var order=(model.gorder||[]).slice(),gt=model.gtext||{};model.people.forEach(function(p){var g=p.grp||'Other';if(order.indexOf(g)<0)order.push(g);});
@@ -551,7 +608,7 @@ function cleanTag(s){return String(s||'').replace(/[;,{}]/g,' ').replace(/\s+/g,
 var EMETA_ORDER=['id','type','owner','parent','part-of','st'];
 function eParse(text){
   var lines=String(text||'').replace(/\r/g,'').split('\n');var pre=[],ents=[],cur=null,grp='',started=false,gtext={},gorder=[];
-  lines.forEach(function(ln){
+  lines.forEach(textLines(function(ln){
     var h=/^## (.*)$/.exec(ln);
     if(h){grp=h[1].trim();started=true;cur=null;if(gorder.indexOf(grp)<0)gorder.push(grp);return;}
     var m=/^- (.+)$/.exec(ln);
@@ -561,15 +618,15 @@ function eParse(text){
     if(!started){pre.push(ln);return;}
     if(ln.trim()==='')return;
     if(!cur){(gtext[grp]=gtext[grp]||[]).push(ln);return;}
-    var s=/^  - (note|link|my): ?(.*)$/.exec(ln);
-    if(s){cur.subs.push({k:s[1],v:s[2]});return;}
-    cur.subs.push({k:'raw',v:ln});});
+    var s=/^  - (description|link|comment): ?(.*)$/.exec(ln);
+    if(s){cur.subs.push(s[1]==='link'?{k:s[1],v:s[2]}:textSub(s[1],s[2]));return;}
+    cur.subs.push({k:'raw',v:ln});},function(){return cur;}));
   while(pre.length&&pre[pre.length-1].trim()==='')pre.pop();
   return {pre:pre,ents:ents,gtext:gtext,gorder:gorder};}
 function eSerItem(e){
   var parts=metaParts(e.meta,EMETA_ORDER);
   var s='- '+ol(e.name)+(parts.length?' {'+parts.join('; ')+'}':'');
-  e.subs.forEach(function(b){s+=(b.k==='raw')?'\n'+b.v:'\n  - '+b.k+': '+ol(b.v);});
+  e.subs.forEach(function(b){s+='\n'+serSub(b);});
   return s;}
 function eSerialize(model){
   var order=(model.gorder||[]).slice(),gt=model.gtext||{};model.ents.forEach(function(e){var g=e.grp||'';if(order.indexOf(g)<0)order.push(g);});
@@ -662,7 +719,7 @@ function itemMatch(i,q,prjName){
   function sv(k){return getSub(i,k).map(function(b){return b.v;}).join(' ');}
   var places=[['',i.id+' '+i.title+' '+(i.meta.who||'')+' '+tagsOf(i).join(' ')],
     ['project',prjOf(i).map(function(p){return (prjName&&prjName(p))||p;}).join(' ')],
-    ['notes',sv('note')],['your notes',sv('my')],['sub-tasks',sv('sub')],['the source',sv('src')]]
+    ['the description',descOf(i)],['comments',sv('comment')],['sub-tasks',sv('sub')],['the source',sv('src')]]
     .map(function(p){return {where:p[0],toks:tokensOf(p[1])};});
   function has(p,w){return p.toks.some(function(t){return t.indexOf(w)===0;});}
   if(!words.every(function(w){return places.some(function(p){return has(p,w);});}))return null;
@@ -670,7 +727,7 @@ function itemMatch(i,q,prjName){
   if(full)return full.where;
   var rest=words.filter(function(w){return !has(places[0],w);});
   return places.filter(function(p){return rest.some(function(w){return has(p,w);});})[0].where;}
-// quick add: parseQuick's result plus what the User chose -> {title, meta, notes} for the new item
+// quick add: parseQuick's result plus what the User chose -> {title, meta, description} for the new item
 function daysBetween(a,b){function t(s){var p=String(s).slice(0,10).split('-').map(Number);return Date.UTC(p[0],p[1]-1,p[2]);}return Math.round((t(b)-t(a))/86400000);}
 function urgForDue(due,today){var n=daysBetween(today,due);return n<=0?'today':(n<=7?'week':(n<=14?'soon':'later'));}
 // overdue: open and due on a day before today. A Meeting is overdue from the day after it takes place, not from its start time
@@ -690,8 +747,19 @@ function quickItem(q,o){
   meta.p=q.p||'2';
   if(due)meta.due=due;
   meta.asg=o.now;
-  var notes=String(o.description||'').split(/[\r\n\u2028\u2029\u0085]/).map(function(s){return s.trim();}).filter(Boolean);
-  return {title:q.title,meta:meta,notes:notes};}
+  var description=cleanText(o.description);
+  return {title:q.title,meta:meta,description:description};}
+// the timezone setting in SOURCES.md's "## defaults" block ('' when it has none)
+function tzOf(text){var d=false,z='';String(text||'').replace(/\r/g,'').split('\n').some(function(l){
+    if(/^## /.test(l)){if(d)return true;d=/^## defaults\s*$/.test(l);return false;}
+    var m=d&&/^- timezone:\s*(.*?)\s*$/.exec(l);if(m)z=m[1];return false;});return z;}
+// an instant as local "YYYY-MM-DD HH:MM" in a time zone, the way the helper writes times; the browser's own zone for none or an unknown one
+function stampIn(tz,ms){try{var o={};new Intl.DateTimeFormat('en-GB',{timeZone:tz||undefined,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})
+    .formatToParts(new Date(ms)).forEach(function(p){o[p.type]=p.value;});return o.year+'-'+o.month+'-'+o.day+' '+o.hour+':'+o.minute;}
+  catch(e){return tz?stampIn('',ms):'';}}
+// Comments in time order, the undated ones (older than any stamp) first; those with the same time keep their order
+function byTime(list){return list.map(function(c,k){return {c:c,k:k,t:String((c.f||{})['added-datetime']||'')};})
+  .sort(function(a,b){return a.t<b.t?-1:a.t>b.t?1:a.k-b.k;}).map(function(x){return x.c;});}
 // The data folder files the page reads and writes; `discern serve` serves these and no others.
 var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md', settings: 'SOURCES.md' };
 var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
@@ -719,8 +787,10 @@ function serKey(k, m) {
 /* ===================== small utilities ===================== */
 function pad2(n) { return String(n).padStart(2, '0'); }
 function ymd(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
-function todayStr() { return ymd(new Date()); }
-function nowStamp() { var d = new Date(); return ymd(d) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+// today and now in the User's time zone, the timezone setting in SOURCES.md, so the page's stamps match the helper's
+function userZone() { return S.m && S.m.settings ? tzOf(S.m.settings.text) : ''; }
+function todayStr() { return stampIn(userZone(), Date.now()).slice(0, 10) || ymd(new Date()); }
+function nowStamp() { var d = new Date(); return stampIn(userZone(), d.getTime()) || ymd(d) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
 function lsGet(k, d) { try { var v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* storage may be blocked */ } }
 function lsJson(k, d) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } }
@@ -733,7 +803,7 @@ var S = {
   group: lsGet('discerny-group', 'project'), pf: 'all', pq: '', pgroup: lsGet('discerny-pgroup', 'none'),
   wb: Object.assign({ group: 'urg', sort: 'urg', tag: '' }, lsJson('discerny-wb', {})), wq: '',
   qa: '', qaType: null, qaMore: false, qaUrg: '', qaDesc: '', palette: false, palQ: '', palI: 0, dialog: null,
-  composer: {}, introOn: {}, subDraft: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', linkKind: 'All', linkDone: false, sysQ: '', suggestOn: {},
+  composer: {}, introOn: {}, subDraft: '', cmtDraft: '', cmtEdit: null, cmtEditText: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', linkKind: 'All', linkDone: false, sysQ: '', suggestOn: {},
   dismissFor: null, snoozeFor: null, confirm: null, editAsk: null, editAskText: '', adding: null, addName: '', addGrp: '', addType: '',
   linkLabel: '', linkUrl: '', toasts: [], doneLimit: 60, copied: null,
   gate: { mode: 'pick', msg: '' }, side: lsGet('discerny-side', 'auto'), theme: lsGet('discerny-theme', 'system')
@@ -973,6 +1043,21 @@ function findSub(it, idx, text) {
   if (subs[idx] && subs[idx].v === text) return subs[idx];
   return subs.filter(function (s) { return s.v === text; })[0] || null;
 }
+// the Comment at idx among an Item's or Record's Comments, or, when the files have moved it, the one with its text
+function findComment(x, idx, text) {
+  var list = commentsOf(x);
+  if (list[idx] && list[idx].v === text) return list[idx];
+  return list.filter(function (c) { return c.v === text; })[0] || null;
+}
+// which files an Item or Record lives in, and the Item or Record itself, with where its sub-lines go
+function recKeys(id) { var k = kindOf(id); return k === 'T' ? ANY : k === 'P' ? ['people'] : [EDEF[k].key]; }
+function recIn(M, id) {
+  var k = kindOf(id), x = rid(id);
+  if (k === 'T') { var f = fItem(M, id); return f ? { x: f.it, rank: ITEM_RANK } : null; }
+  if (k === 'P') { var p = M.people.people.filter(function (q) { return q.meta.id === x; })[0]; return p ? { x: p, rank: PERSON_RANK } : null; }
+  var e = EDEF[k] ? entIn(M, k, id) : null;
+  return e ? { x: e, rank: ENT_RANK } : null;
+}
 function maxTaskId(M) {
   var n = nextId(M.tasks);
   ['inbox', 'done'].forEach(function (k) { if (M[k]) M[k].items.forEach(function (i) { var v = parseInt(i.id.slice(2), 10); if (v >= n) n = v + 1; }); });
@@ -1010,17 +1095,44 @@ var OPS = {
     });
   },
   title: function (id, t) { return op('Rename ' + id, ANY, function (M) { var f = fItem(M, id); if (f && t) f.it.title = t; }); },
-  my: function (id, lines) {
-    return op('Notes on ' + id, ANY, function (M) {
-      var f = fItem(M, id);
-      if (!f) return;
-      var it = f.it, first = -1;
-      it.subs.forEach(function (s, k) { if (s.k === 'my' && first < 0) first = k; });
-      it.subs = it.subs.filter(function (s) { return s.k !== 'my'; });
-      var add = lines.map(function (v) { return { k: 'my', v: v }; });
-      var at = first;
-      if (at < 0) { at = it.subs.length; for (var k = 0; k < it.subs.length; k++) { if (it.subs[k].k === 'sub' || it.subs[k].k === 'raw') { at = k; break; } } }
-      Array.prototype.splice.apply(it.subs, [at, 0].concat(add));
+  /* the Description and Comments of an Item or Record */
+  desc: function (id, text) {
+    return op('Description of ' + id, recKeys(id), function (M) { var r = recIn(M, id); if (r) setDesc(r.x, text, r.rank); });
+  },
+  // c: {at, author, ack, text}, stamped when the User added it, so applying it again to the files adds it once
+  comment: function (id, c) {
+    return op('Comment on ' + id, recKeys(id), function (M) {
+      var r = recIn(M, id), t = cleanText(c.text);
+      if (r && t && !commentsOf(r.x).some(function (b) { return b.f['added-datetime'] === c.at && b.f.author === c.author && b.v === t; })) addComment(r.x, c, r.rank);
+    });
+  },
+  // idx and text pick the Comment, as findSub does for sub-tasks; the User edits only their own
+  editComment: function (id, idx, text, now) {
+    return op('Edit comment on ' + id, recKeys(id), function (M) {
+      var r = recIn(M, id), c = r && findComment(r.x, idx, text), t = cleanText(now);
+      if (c && c.f.author === 'user' && t) c.v = t;
+    });
+  },
+  delComment: function (id, idx, text) {
+    return op('Delete comment on ' + id, recKeys(id), function (M) {
+      var r = recIn(M, id), c = r && findComment(r.x, idx, text);
+      if (c) r.x.subs.splice(r.x.subs.indexOf(c), 1);
+    });
+  },
+  // undoes delComment: the Comment goes back where it was among the others
+  putComment: function (id, idx, c) {
+    return op('Restore comment on ' + id, recKeys(id), function (M) {
+      var r = recIn(M, id);
+      if (!r || commentsOf(r.x).some(function (b) { return b.v === c.v && b.f['added-datetime'] === c.f['added-datetime'] && b.f.author === c.f.author; })) return;
+      var list = commentsOf(r.x), b = { k: 'comment', f: Object.assign({}, c.f), v: c.v };
+      if (list[idx]) r.x.subs.splice(r.x.subs.indexOf(list[idx]), 0, b); else placeSub(r.x, b, r.rank);
+    });
+  },
+  // Acknowledged clears the Comments to acknowledge it names ([idx, text] each); on, the undo, marks them again
+  ack: function (id, which, on) {
+    return op((on ? 'Undo acknowledge on ' : 'Acknowledge comments on ') + id, recKeys(id), function (M) {
+      var r = recIn(M, id);
+      if (r) which.forEach(function (w) { var c = findComment(r.x, w[0], w[1]); if (!c) return; if (on) c.f.acknowledged = 'no'; else delete c.f.acknowledged; });
     });
   },
   addSub: function (id, text) {
@@ -1203,10 +1315,10 @@ var OPS = {
       if (st.old.chk) p.meta.chk = st.old.chk; else delete p.meta.chk;
     });
   },
-  // Add, or Add as Priority person: a new Person record, who on the Items that named them only in a note, and an introduction Task if asked
+  // Add, or Add as Priority person: a new Person record, who on the Items that named them only in their Description, and an introduction Task if asked
   personAdd: function (c, o, st) {
     var ap = OPS.addPerson(c.name, 'Other'), spec = null, task = {};
-    if (o.intro) spec = { title: 'Set up an introduction meeting with ' + c.name, meta: { ty: 'Task', who: c.name, urg: 'week', p: '2', asg: o.now }, notes: [], newProjects: [], date: o.date };
+    if (o.intro) spec = { title: 'Set up an introduction meeting with ' + c.name, meta: { ty: 'Task', who: c.name, urg: 'week', p: '2', asg: o.now }, description: '', newProjects: [], date: o.date };
     var at = spec ? OPS.addTask(spec, task) : null, items = csv(c.fields.items);
     st.whos = []; st.rels = [];
     var keys = ['inbox', 'people', 'tasks', 'done', 'rels'].concat(o.priority ? ['settings'] : []);
@@ -1282,9 +1394,9 @@ var OPS = {
       else { id = fmtId(n); if (want) noteAlias(want, id); else spec.want = id; }
       var meta = Object.assign({}, spec.meta);
       if (prj.length) meta.prj = prj.join(','); else delete meta.prj;
-      var subs = [{ k: 'src', v: 'Added ' + spec.date }];
-      spec.notes.forEach(function (v) { subs.push({ k: 'note', v: v }); });
-      M.tasks.items.push({ id: id, done: false, title: spec.title, meta: meta, subs: subs });
+      var it = { id: id, done: false, title: spec.title, meta: meta, subs: [{ k: 'src', v: 'Added ' + spec.date }] };
+      if (spec.description) setDesc(it, spec.description, ITEM_RANK);
+      M.tasks.items.push(it);
       setNextId(M.tasks, Math.max(n, idNum(id) + 1));
       if (out) out.id = id;
     });
@@ -1325,13 +1437,6 @@ var OPS = {
         if (PFIELDS.indexOf(k) >= 0) { touched = true; if (old && nv) p.subs.push({ k: 'hist', v: date + ' | ' + PLABEL[k] + ': ' + old + ' → ' + nv }); }
       });
       if (touched && patch.chk === undefined) p.meta.chk = date;
-    });
-  },
-  personNotes: function (name, lines) {
-    return op('Notes on ' + name, ['people'], function (M) {
-      var p = M.people.people.filter(function (x) { return x.name === name; })[0];
-      if (!p) return;
-      p.subs = lines.map(function (v) { return { k: 'note', v: v }; }).concat(p.subs.filter(function (s) { return s.k !== 'note'; }));
     });
   },
   addPerson: function (name, grp) {
@@ -1387,15 +1492,8 @@ var OPS = {
     });
   },
   renameEnt: function (kind, id, name) { return op('Rename ' + id, [EDEF[kind].key], function (M) { var e = entIn(M, kind, id); if (e && name) e.name = name; }); },
-  entNotes: function (kind, id, lines) {
-    return op('Notes on ' + id, [EDEF[kind].key], function (M) {
-      var e = entIn(M, kind, id);
-      if (!e) return;
-      e.subs = lines.map(function (v) { return { k: 'note', v: v }; }).concat(e.subs.filter(function (s) { return s.k !== 'note'; }));
-    });
-  },
   addEntLink: function (kind, id, v) {
-    return op('Add URL to ' + id, kind === 'T' ? ANY : [EDEF[kind].key], function (M) { var e = kind === 'T' ? (fItem(M, id) || {}).it : entIn(M, kind, id); if (e && !e.subs.some(function (s) { return s.k === 'link' && s.v === v; })) e.subs.push({ k: 'link', v: v }); });
+    return op('Add URL to ' + id, recKeys(id), function (M) { var r = recIn(M, id); if (r && !r.x.subs.some(function (s) { return s.k === 'link' && s.v === v; })) placeSub(r.x, { k: 'link', v: v }, r.rank); });
   },
   removeEntLink: function (kind, id, v) {
     return op('Remove URL from ' + id, kind === 'T' ? ANY : [EDEF[kind].key], function (M) {
@@ -1703,8 +1801,9 @@ function exists(id) { return labelOf(id) !== null; }
 
 /* ===================== item helpers ===================== */
 function subVals(x, k) { return getSub(x, k).map(function (b) { return b.v; }); }
-function notesOf(x) { return subVals(x, 'note'); }
-function myOf(x) { return subVals(x, 'my'); }
+// the Description's first line, which list rows show, and the text search reads: the Description and the Comments
+function firstLine(x) { return descOf(x).split('\n').filter(function (l) { return l.trim(); })[0] || ''; }
+function wordsOf(x) { return [descOf(x)].concat(subVals(x, 'comment')).join(' '); }
 function srcOf(x) { return subVals(x, 'src'); }
 function subsOf(x) { return getSub(x, 'sub'); }
 function parseLink(v) { var m = /\[(.*?)\]\((.*?)\)/.exec(String(v || '')); return m ? { label: m[1] || m[2], url: m[2], raw: v } : { label: String(v || ''), url: '', raw: v }; }
@@ -1794,7 +1893,7 @@ function todayItems() {
 
 /* ===================== people, projects and systems ===================== */
 function isExt(p) { return /^(y|yes|true|1)$/i.test(p.meta.ext || ''); }
-function isMe(p) { return notesOf(p).some(function (n) { return /user of (discerny|this tracker)/i.test(n); }); }
+function isMe(p) { return p.meta.id === USER_ID; }
 function gaps(p) {
   if (p.meta.st === 'Left') return [];
   var need = isExt(p) ? ['co', 'title'] : ['co', 'dept', 'title', 'mgr'];
@@ -1894,7 +1993,7 @@ function words(text) {
   var stop = stopWords();
   return String(text).toLowerCase().replace(/[“”"'’(),.:;!?/]/g, ' ').split(/\s+/).filter(function (w) { return w.length >= 3 && !stop[w] && !/^\d+$/.test(w); });
 }
-function textOf(i) { return [i.title].concat(notesOf(i), myOf(i), subsOf(i).map(function (x) { return x.v; })).join(' '); }
+function textOf(i) { return [i.title, wordsOf(i)].concat(subsOf(i).map(function (x) { return x.v; })).join(' '); }
 function suggestions(i) {
   var pool = openList().filter(function (x) { return x.id !== i.id; });
   var df = {};
@@ -2060,11 +2159,11 @@ function search(qs) {
   });
   tasks.sort(function (a, b) { return a.rank - b.rank || (a.id < b.id ? -1 : 1); });
   if (tasks.length) groups.push({ title: 'Tasks', items: tasks.slice(0, 8).concat(tasks.length > 8 ? [{ label: 'Show all ' + tasks.length + ' matching items', sub: 'On All items, with inbox and done', id: '', act: 'all', arg: String(qs).trim() }] : []), more: tasks.length - 8, lab: tasks[0].lab });
-  var people = S.m.people.people.filter(function (p) { return has(p.name + ' ' + Object.keys(p.meta).map(function (k) { return p.meta[k]; }).join(' ') + ' ' + p.grp + ' ' + notesOf(p).join(' ')); })
+  var people = S.m.people.people.filter(function (p) { return has(p.name + ' ' + Object.keys(p.meta).map(function (k) { return p.meta[k]; }).join(' ') + ' ' + p.grp + ' ' + wordsOf(p)); })
     .map(function (p) { return { label: p.name, sub: [p.meta.title, p.meta.co, p.meta.st === 'Left' ? 'left' : ''].filter(Boolean).join(' · ') || 'Person', id: p.meta.id || '', act: 'person', arg: p.meta.id || '', lab: has(p.name) }; })
     .sort(function (a, b) { return (b.lab - a.lab) || a.label.localeCompare(b.label); });
   if (people.length) groups.push({ title: 'People', items: people.slice(0, 5), more: people.length - 5, lab: people[0].lab });
-  var ents = entsOf('PRJ').concat(entsOf('SYS')).filter(function (e) { return e.meta.id && has(e.meta.id + ' ' + e.name + ' ' + notesOf(e).join(' ') + ' ' + linksOf(e).map(function (l) { return l.label; }).join(' ')); })
+  var ents = entsOf('PRJ').concat(entsOf('SYS')).filter(function (e) { return e.meta.id && has(e.meta.id + ' ' + e.name + ' ' + wordsOf(e) + ' ' + linksOf(e).map(function (l) { return l.label; }).join(' ')); })
     .map(function (e) { return { label: e.name, sub: [KIND_WORD[kindOf(e.meta.id)], e.meta.type !== KIND_WORD[kindOf(e.meta.id)] ? e.meta.type : '', e.meta.st].filter(Boolean).join(' · '), id: e.meta.id, act: 'ent', arg: e.meta.id, lab: has(e.meta.id + ' ' + e.name) }; })
     .sort(function (a, b) { return (b.lab - a.lab); });
   if (ents.length) groups.push({ title: 'Projects and systems', items: ents.slice(0, 5), more: ents.length - 5, lab: ents[0].lab });
@@ -2172,6 +2271,7 @@ function vRow(i, o) {
     '<div class="lead">' + lead + '</div>' +
     '<div class="body"><button type="button" class="t" data-act="open" data-id="' + i.id + '"' + (sel ? ' aria-current="true"' : '') + '>' + (time ? '<span class="tm">' + time + '</span>' : '') + esc(title) + '</button>' +
     (meta.length ? '<div class="meta">' + esc(meta.join(' · ')) + '</div>' : '') +
+    (firstLine(i) ? '<div class="sum">' + esc(clip(firstLine(i), 140)) + '</div>' : '') +
     (o.showTags && tagsOf(i).length ? '<div class="pills">' + tagsOf(i).map(function (t) { return '<button type="button" class="chipbtn" data-act="wb-tag" data-v="' + esc(t) + '"' + pressed(S.wb.tag === t) + ' title="Show only #' + esc(t) + '">#' + esc(t) + '</button>'; }).join('') + '</div>' : '') + (inbox ? vItemChanges(i.id) : '') + reasons + '</div>' +
     '<div class="right">' + badges + (showWhen ? '<span class="b when' + (wh.tone ? ' ' + wh.tone : '') + '">' + esc(whenLabel) + '</span>' : '') + acts + '<span class="id">' + i.id + '</span></div></div>';
 }
@@ -2269,7 +2369,16 @@ function vQuick() {
 function inboxChanges() { return changesOf(S.m.inbox.post).filter(function (c) { return c.type; }); }
 function onInboxItem(c) { return c.type === 'relationship' && (whereOf(c.a) === 'inbox' || whereOf(c.b) === 'inbox'); }
 function changeCards() { return inboxChanges().filter(function (c) { return !onInboxItem(c); }); }
-function inboxCount() { return S.m.inbox.items.length + changeCards().length; }
+function inboxCount() { return S.m.inbox.items.length + changeCards().length + ackItems().length; }
+// the Items with Comments to acknowledge: news a Skill added, waiting in the Inbox under New comments until the User acknowledges it
+function ackItems() { return allItems().filter(function (i) { return commentsOf(i).some(toAck); }); }
+function vAckEntry(i) {
+  var cs = byTime(commentsOf(i).filter(toAck));
+  return '<div class="row chg" data-k="ack-' + i.id + '"><div class="lead"><span class="pip" aria-hidden="true"></span></div><div class="body">' +
+    '<button type="button" class="t" data-act="open" data-id="' + i.id + '">' + esc(i.title) + '</button>' +
+    cs.map(function (c) { return '<div class="cmt"><div class="cmt-h"><span>' + esc(whenOf(c)) + ' · ' + esc(authorOf(c)) + '</span></div><div class="cmt-t">' + esc(c.v) + '</div></div>'; }).join('') +
+    '</div><div class="right">' + bt('Acknowledged', 'cmt-ack', { id: i.id, cls: 'primary sm', attrs: ' aria-label="Acknowledged: ' + esc(clip(i.title, 60)) + '"' }) + '<span class="id">' + i.id + '</span></div></div>';
+}
 function changeByLine(line) { return inboxChanges().filter(function (c) { return c.line === line; })[0] || null; }
 // the line Yes writes to RELATIONSHIPS.md, with its ends in the order it stores them
 function relOf(c) { var r = relLine(c.a, c.b), m = r.line ? REL_RE.exec(r.line) : null; return m ? { line: r.line, from: m[1], to: m[3], type: m[4] } : null; }
@@ -2288,9 +2397,9 @@ function vSeen(c) {
 // one end of a Relationship: its type, ID, title or name, and Description; each opens its page
 function vEnd(id) {
   var k = kindOf(id), label = labelOf(id), kind = KIND_WORD[k] || k, desc = '', sub = '';
-  if (k === 'T') { var t = item(id); if (t) { kind = t.meta.ty || 'Task'; desc = notesOf(t)[0] || ''; if (whereOf(id) === 'done') sub = 'done'; else if (whereOf(id) === 'inbox') sub = 'in the inbox'; } }
-  else if (k === 'P') { var p = personById(id); if (p) { sub = [p.meta.title, p.meta.co].filter(Boolean).join(', '); desc = notesOf(p)[0] || ''; } }
-  else { var e = entById(id); if (e) desc = notesOf(e)[0] || ''; }
+  if (k === 'T') { var t = item(id); if (t) { kind = t.meta.ty || 'Task'; desc = firstLine(t); if (whereOf(id) === 'done') sub = 'done'; else if (whereOf(id) === 'inbox') sub = 'in the inbox'; } }
+  else if (k === 'P') { var p = personById(id); if (p) { sub = [p.meta.title, p.meta.co].filter(Boolean).join(', '); desc = firstLine(p); } }
+  else { var e = entById(id); if (e) desc = firstLine(e); }
   return '<div class="end" data-k="end-' + id + '"><div class="k">' + esc(kind) + (sub ? ' · ' + esc(sub) : '') + ' <span class="id">' + id + '</span></div>' +
     (label === null ? '<div class="hint">Not found in your files.</div>' : '<button type="button" class="t" data-act="open" data-id="' + id + '">' + esc(label) + '</button>') +
     (desc ? '<div class="meta">' + esc(clip(desc, 160)) + '</div>' : '') + '</div>';
@@ -2327,11 +2436,12 @@ function vItemChanges(id) {
   }).join('');
 }
 function viewInbox() {
-  var l = inboxList(), cs = changeCards(), r = lastRefresh();
-  var body = vSec('triage', 'To clarify', rowsOf(l), { hint: 'oldest first', empty: cs.length ? 'No new items to clarify.' : 'Inbox zero. Nothing is waiting to be clarified.' });
+  var l = inboxList(), cs = changeCards(), ak = ackItems(), r = lastRefresh();
+  var body = vSec('triage', 'To clarify', rowsOf(l), { hint: 'oldest first', empty: cs.length || ak.length ? 'No new items to clarify.' : 'Inbox zero. Nothing is waiting to be clarified.' });
+  if (ak.length) body += vSec('acks', 'New comments', ak.map(vAckEntry), { hint: 'news on items you track' });
   if (cs.length) body += vSec('changes', 'Changes', cs.map(vChange), { hint: 'relationships and people' });
   return {
-    title: 'Inbox', sub: plural(l.length + cs.length, 'proposal') + (r ? ' · last run ' + r : ''),
+    title: 'Inbox', sub: plural(l.length + cs.length, 'proposal') + (ak.length ? ' · ' + plural(ak.length, 'item') + ' with new comments' : '') + (r ? ' · last run ' + r : ''),
     body: '<div class="list">' + body + '</div>'
   };
 }
@@ -2422,7 +2532,7 @@ function viewAll() {
   var tools = '<div class="seg" role="group" aria-label="Group by">' + WB_GROUPS.map(function (g) {
     return '<button type="button" data-act="wb-group" data-v="' + g[0] + '"' + pressed(o.group === g[0]) + '>' + g[1] + '</button>';
   }).join('') + '</div>';
-  var bar = '<div class="toolbar" data-k="toolbar"><label class="sr" for="wb-q">Search items</label><input id="wb-q" class="in" type="search" autocomplete="off" data-in="wq" value="' + esc(S.wq) + '" placeholder="Search items, notes, people, projects…" style="min-width:min(320px,100%)">' +
+  var bar = '<div class="toolbar" data-k="toolbar"><label class="sr" for="wb-q">Search items</label><input id="wb-q" class="in" type="search" autocomplete="off" data-in="wq" value="' + esc(S.wq) + '" placeholder="Search items, descriptions, comments, people…" style="min-width:min(320px,100%)">' +
     '<label class="sr" for="wb-sort">Sort within each group</label><select id="wb-sort" class="in" data-ch="wb-sort">' + opts(WB_SORTS, o.sort) + '</select>' +
     '<label class="sr" for="wb-tag">Show only one tag</label><select id="wb-tag" class="in" data-ch="wb-tag">' + opts([['', 'All tags']].concat(tags.map(function (t) { return [t, '#' + t]; })), o.tag) + '</select></div>';
   var sub = o.q || o.tag ? [plural(n, 'open item') + ' match' + (n === 1 ? 'es' : '')].concat(extra).join(' · ') : plural(n, 'open item');
@@ -2477,7 +2587,7 @@ function viewProject(id) {
   if (parent) facts += fact('Part of', [fv(parent.name, 'ent', parent.meta.id)]);
   if (kids.length) facts += fact('Sub-projects', kids.map(function (k) { return fv(k.name, 'ent', k.meta.id); }));
   var ls = linksOf(e);
-  var box = '<div class="entity" data-k="entity"><div class="pills">' + pills + '</div>' + notesOf(e).map(function (t) { return '<div class="ent-note">' + esc(t) + '</div>'; }).join('') +
+  var box = '<div class="entity" data-k="entity"><div class="pills">' + pills + '</div>' + vDescText(e) +
     '<div class="facts">' + facts + '</div>' + (ls.length ? '<div class="links">' + ls.map(linkA).join('') + '</div>' : '') + vAsksBox(id) + '</div>';
   var row = function (l, o) { return rowsOf(l, Object.assign({ hideProject: !kids.length }, o || {})); };
   var b = vSec('pn', 'Next actions', row(sortItems(open.filter(isNext))), { empty: 'No next action. This project is stuck until you add one.' });
@@ -2508,7 +2618,7 @@ function viewSystem(id) {
     fact('Used by', projects.length ? projects.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No projects related')]);
   var ls = linksOf(e);
   var box = '<div class="entity" data-k="entity"><div class="pills">' + (st ? badge(st, ST_TONE[st]) : badge('No status', 'soft')) + badge(e.meta.type || 'System') + '<span class="sp">' + copyId(id) + '</span></div>' +
-    notesOf(e).map(function (t) { return '<div class="ent-note">' + esc(t) + '</div>'; }).join('') + '<div class="facts">' + facts + '</div>' +
+    vDescText(e) + '<div class="facts">' + facts + '</div>' +
     (ls.length ? '<div class="links">' + ls.map(linkA).join('') + '</div>' : '') + vAsksBox(id) + '</div>';
   var items = sysItems(id);
   var b = vSec('so', 'Open items about this system', rowsOf(sortItems(items.filter(function (i) { return whereOf(i.id) === 'open'; }))), { empty: 'Nothing open about this system.' });
@@ -2538,7 +2648,7 @@ function viewPerson(id) {
     fact('Owns', owns.length ? owns.map(function (x) { return fv(x.name, 'ent', x.meta.id); }) : [fv('No systems')]) +
     fact('Last checked', [fv(p.meta.chk ? fmtY(p.meta.chk) : 'Never')]);
   var hist = subVals(p, 'hist');
-  var box = '<div class="entity" data-k="entity"><div class="pills">' + pills + '</div>' + notesOf(p).map(function (t) { return '<div class="ent-note">' + esc(t) + '</div>'; }).join('') +
+  var box = '<div class="entity" data-k="entity"><div class="pills">' + pills + '</div>' + vDescText(p) +
     '<div class="facts">' + facts + '</div>' + vAsksBox(id) +
     (hist.length ? '<div><div class="h3">Change history</div>' + hist.map(function (h) { var k = h.indexOf(' | '); return '<div class="hint">' + esc(k > 0 && isDay(h) ? fmtY(h.slice(0, 10)) + ': ' + h.slice(k + 3) : h) + '</div>'; }).join('') + '</div>' : '') + '</div>';
   var name = p.name, first = name.split(' ')[0];
@@ -2605,7 +2715,7 @@ function viewProjects() {
     return '<article class="ecard" data-k="c-' + id + '"' + (o.dep ? ' style="margin-left:' + Math.min(o.dep, 3) * 18 + 'px"' : '') + '><div class="pills">' + badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + '<span class="sp id">' + id + '</span></div>' +
       (e.meta.parent && entById(e.meta.parent) ? '<div class="path">Part of ' + esc(entPath(e.meta.parent)) + '</div>' : '') +
       '<button type="button" class="nm" data-act="ent" data-id="' + id + '">' + esc(e.name) + '</button>' +
-      (notesOf(e)[0] ? '<div class="sum">' + esc(clip(notesOf(e)[0], 150)) + '</div>' : '') + (badges ? '<div class="pills">' + badges + '</div>' : '') +
+      (firstLine(e) ? '<div class="sum">' + esc(clip(firstLine(e), 150)) + '</div>' : '') + (badges ? '<div class="pills">' + badges + '</div>' : '') +
       '<div class="lines"><div><span class="k">Next date</span> ' + esc(dated[0] ? when(dated[0]).label + ', ' + clip(dated[0].title, 70) : 'Nothing dated') + '</div><div><span class="k">Open</span> ' + esc(plural(next.length, 'action') + ', ' + plural(meetings.length, 'meeting') + ', ' + done.length + ' done') + '</div></div></article>';
   });
   var active = entsOf('PRJ').filter(function (p) { return (p.meta.st || 'Active') === 'Active'; }).length;
@@ -2619,7 +2729,7 @@ function viewSystems() {
     var badges = (items.length ? badge(plural(items.length, 'open item')) : '') + (asksFor(id).length ? badge(asksFor(id).length + ' for agent', 'claude') : '');
     return '<article class="ecard" data-k="c-' + id + '"' + (o.dep ? ' style="margin-left:' + Math.min(o.dep, 3) * 18 + 'px"' : '') + '><div class="pills">' + (st ? badge(st, ST_TONE[st]) : badge('No status', 'soft')) + badge(e.meta.type || 'System') + '<span class="sp id">' + id + '</span></div>' +
       '<button type="button" class="nm" data-act="ent" data-id="' + id + '">' + esc(e.name) + '</button>' +
-      (notesOf(e)[0] ? '<div class="sum">' + esc(clip(notesOf(e)[0], 150)) + '</div>' : '') + (badges ? '<div class="pills">' + badges + '</div>' : '') +
+      (firstLine(e) ? '<div class="sum">' + esc(clip(firstLine(e), 150)) + '</div>' : '') + (badges ? '<div class="pills">' + badges + '</div>' : '') +
       '<div class="lines"><div><span class="k">Owner</span> ' + esc(e.meta.owner || 'Not set') + '</div><div><span class="k">Part of</span> ' + esc(parent ? parent.name : 'Stands alone') + '</div></div></article>';
   });
   var notLive = entsOf('SYS').filter(function (x) { return (x.meta.st || '') !== 'Live'; }).length;
@@ -2633,7 +2743,7 @@ function viewPeople() {
   if (S.pf === 'external') list = list.filter(isExt);
   if (S.pf === 'gaps') list = list.filter(function (p) { return gaps(p).length; });
   var q = S.pq.trim().toLowerCase();
-  if (q) list = list.filter(function (p) { return (p.name + ' ' + Object.keys(p.meta).map(function (k) { return p.meta[k]; }).join(' ') + ' ' + p.grp + ' ' + notesOf(p).join(' ')).toLowerCase().indexOf(q) >= 0; });
+  if (q) list = list.filter(function (p) { return (p.name + ' ' + Object.keys(p.meta).map(function (k) { return p.meta[k]; }).join(' ') + ' ' + p.grp + ' ' + wordsOf(p)).toLowerCase().indexOf(q) >= 0; });
   var tb = '<div class="toolbar" data-k="toolbar"><div class="pills" role="group" aria-label="Filter people">' + defs.map(function (f) { return '<button type="button" class="chipbtn" data-act="pf" data-v="' + f[0] + '"' + pressed(S.pf === f[0]) + '>' + f[1] + ' ' + f[2] + '</button>'; }).join('') + '</div>' +
     '<label class="sr" for="people-q">Search people</label><input id="people-q" class="in" type="search" autocomplete="off" data-in="pq" value="' + esc(S.pq) + '" placeholder="Search name, role, organisation…">' +
     '<label class="sr" for="people-g">Group people by</label><select id="people-g" class="in" data-ch="pgroup">' + opts([['none', 'No grouping'], ['co', 'By organisation'], ['dept', 'By department'], ['grp', 'By group']], S.pgroup) + '</select>' +
@@ -2784,6 +2894,29 @@ function vUrls(id, ls) {
   return '<section data-k="sec-weblinks"><h3 class="h3">URLs</h3>' + ls.map(function (l) { return '<div class="lrow" data-k="wl-' + esc(l.raw) + '">' + linkA(l) + '<span style="flex:1"></span><button type="button" class="xbtn" data-act="e-link-del" data-id="' + id + '" data-v="' + esc(l.raw) + '" aria-label="Remove URL ' + esc(l.label) + '">' + ic('x', 's') + '</button></div>'; }).join('') +
     '<div class="pills" style="margin-top:6px"><label class="sr" for="ef-ll">URL label</label><input id="ef-ll" class="in" type="text" data-in="linkLabel" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkLabel) + '" placeholder="Label" style="width:120px"><label class="sr" for="ef-lu">URL</label><input id="ef-lu" class="in" type="url" data-in="linkUrl" data-kd="e-link" data-id="' + id + '" value="' + esc(S.linkUrl) + '" placeholder="https://…" style="flex:1;min-width:140px">' + bt('Add URL', 'e-link-add', { id: id, cls: 'sm' }) + '</div></section>';
 }
+/* Descriptions and Comments */
+var AUTHOR_WORD = { user: 'You', agent: 'Agent' };
+// who wrote a Comment: You, Agent, or the Skill's word with a capital (Email, Calendar)
+function authorOf(c) { var a = c.f.author || ''; return AUTHOR_WORD[a] || (a ? a.charAt(0).toUpperCase() + a.slice(1) : 'Unknown'); }
+function whenOf(c) { var at = c.f['added-datetime']; return at ? fmtDT(at) : 'Earlier'; }
+// the Description on a Project's, System's or Person's page, a paragraph to each block of lines
+function vDescText(x) { return descOf(x).split(/\n\s*\n/).filter(function (p) { return p.trim(); }).map(function (p) { return '<div class="ent-note pre">' + esc(p) + '</div>'; }).join(''); }
+// the Details tab's Description box and Comments, oldest first, the undated ones shown as Earlier. Edit on the User's own, Delete on any.
+function vDescComments(id, x, hint) {
+  var list = commentsOf(x);
+  var d = '<section data-k="sec-desc"><label class="h3" for="f-desc" style="display:block">Description</label><textarea id="f-desc" class="in" rows="4" data-ch="desc" data-id="' + id + '" placeholder="' + esc(hint) + '">' + esc(descOf(x)) + '</textarea></section>';
+  var rows = byTime(list).map(function (c) {
+    var k = list.indexOf(c), editing = S.cmtEdit === id + '|' + k && c.f.author === 'user';
+    var head = '<div class="cmt-h"><span>' + esc(whenOf(c)) + ' · ' + esc(authorOf(c)) + '</span>' + (toAck(c) ? badge('New', 'info') : '') +
+      (editing ? '' : '<span class="cmt-a">' + (c.f.author === 'user' ? lk('Edit', 'cmt-edit', { id: id, v: k }) : '') + lk('Delete', 'cmt-del', { id: id, v: k, attrs: ' aria-label="Delete the comment from ' + esc(whenOf(c)) + '"' }) + '</span>') + '</div>';
+    var body = editing ? '<label class="sr" for="cmt-edit">Edit your comment</label><textarea id="cmt-edit" class="in" rows="3" data-in="cmtEditText" data-kd="cmt-edit" data-id="' + id + '" style="width:100%">' + esc(S.cmtEditText) + '</textarea>' +
+      '<div class="reasons">' + bt('Save', 'cmt-save', { id: id, v: k, cls: 'primary sm' }) + lk('Cancel', 'cmt-cancel') + '</div>' : '<div class="cmt-t">' + esc(c.v) + '</div>';
+    return '<div class="cmt" data-k="cmt-' + k + '-' + esc(c.f['added-datetime'] || '') + '">' + head + body + '</div>';
+  }).join('');
+  var add = '<label class="sr" for="f-cmt">Add a comment</label><textarea id="f-cmt" class="in" rows="2" data-in="cmtDraft" data-kd="cmt" data-id="' + id + '" placeholder="Add a comment" style="width:100%">' + esc(S.cmtDraft) + '</textarea>' +
+    '<div class="pills">' + bt('Add a comment', 'cmt-add', { id: id, cls: 'sm' }) + '<span class="hint">Ctrl Enter also adds it.</span></div>';
+  return d + '<section data-k="sec-cmts"><h3 class="h3">Comments' + (list.length ? ' <span class="n">' + list.length + '</span>' : '') + '</h3>' + rows + add + '</section>';
+}
 function vClaudeTab(id) {
   var asks = asksFor(id), drafts = draftsFor(id), log = logFor(id);
   var h = '<section data-k="sec-queued"><h3 class="h3">Queued for the agent</h3>' + (asks.length ? asks.map(function (n) { return vAskItem(n, false); }).join('') : '<div class="empty">Nothing queued for this ' + (KIND_WORD[kindOf(id)] || 'item').toLowerCase() + '.</div>') + '</section>';
@@ -2850,9 +2983,9 @@ function panelTask(i) {
       return '<div class="subrow' + (s.x ? ' x' : '') + '" data-k="sub-' + k + '-' + esc(s.v) + '"><input type="checkbox" id="' + cid + '" data-ch="sub" data-id="' + id + '" data-i="' + k + '"' + (s.x ? ' checked' : '') + '><label for="' + cid + '">' + esc(s.v) + '</label>' +
         '<button type="button" class="xbtn" data-act="sub-del" data-id="' + id + '" data-i="' + k + '" aria-label="Remove sub-task: ' + esc(s.v) + '">' + ic('x', 's') + '</button></div>';
     }).join('') + '<label class="sr" for="f-sub">New sub-task</label><input id="f-sub" class="in" type="text" autocomplete="off" data-in="subDraft" data-kd="sub" data-id="' + id + '" value="' + esc(S.subDraft) + '" placeholder="Add a sub-task and press Enter" style="width:100%"></section>';
-    var src = srcOf(i), notes = notesOf(i), ls = linksOf(i);
-    var ctx = (src.length + notes.length ? '<section data-k="sec-ctx"><h3 class="h3">Context</h3>' + src.map(function (t) { return '<div class="ctx src">Source: ' + esc(t) + '</div>'; }).join('') + notes.map(function (t) { return '<div class="ctx">' + esc(t) + '</div>'; }).join('') + '</section>' : '') + vUrls(id, ls);
-    var my = '<section data-k="sec-my"><label class="h3" for="f-my" style="display:block">Your notes</label><textarea id="f-my" class="in" rows="4" data-ch="my" data-id="' + id + '" placeholder="Anything you want to remember about this">' + esc(myOf(i).join('\n')) + '</textarea></section>';
+    var src = srcOf(i), ls = linksOf(i);
+    var ctx = (src.length ? '<section data-k="sec-ctx">' + src.map(function (t) { return '<div class="ctx src">Source: ' + esc(t) + '</div>'; }).join('') + '</section>' : '') +
+      vDescComments(id, i, 'What this is and anything worth knowing') + vUrls(id, ls);
     var tail = '';
     if (inbox) {
       var sg = suggestions(i), il = inboxList(), pos = il.map(function (x) { return x.id; }).indexOf(id), rq = vItemChanges(id);
@@ -2866,7 +2999,7 @@ function panelTask(i) {
     } else if (!done) {
       tail += '<div class="foot" data-k="foot-del">' + bt('Delete task', 'del', { id: id, cls: 'danger sm' }) + '<span class="hint">You can undo for a few seconds.</span></div>';
     }
-    h += tabPanel('details', f + sb + ctx + my + tail);
+    h += tabPanel('details', f + sb + ctx + tail);
   }
   return h;
 }
@@ -2885,7 +3018,7 @@ function panelPerson(p) {
       fRow('External', 'pf-ext', '<input type="checkbox" id="pf-ext" data-ch="p-ext" data-id="' + id + '"' + (isExt(p) ? ' checked' : '') + '><span class="hint">Outside the company (needs only organisation and job title)</span>') +
       '<div class="f" data-k="row-pst"><span class="lbl" id="l-pst">Status</span><div class="ctl"><div class="seg" role="group" aria-labelledby="l-pst">' + [['', 'Active'], ['Left', 'Left']].map(function (s) { return '<button type="button" data-act="p-st" data-id="' + id + '" data-v="' + s[0] + '"' + pressed((p.meta.st === 'Left' ? 'Left' : '') === s[0]) + '>' + s[1] + '</button>'; }).join('') + '</div></div></div>' +
       fRow('Last checked', '', '<span>' + esc(p.meta.chk ? fmtY(p.meta.chk) : 'Never') + '</span>' + bt('Mark checked today', 'check-person', { id: id, cls: 'sm' }));
-    f += '<section data-k="sec-pnotes"><label class="h3" for="pf-notes" style="display:block">Notes</label><textarea id="pf-notes" class="in" rows="4" data-ch="p-notes" data-id="' + id + '" placeholder="Notes about this person (saved as note: lines)">' + esc(notesOf(p).join('\n')) + '</textarea></section>';
+    f += vDescComments(id, p, 'Who they are and anything worth knowing');
     var hist = subVals(p, 'hist');
     if (hist.length) f += '<section data-k="sec-hist"><h3 class="h3">Change history</h3>' + hist.map(function (x) { var k = x.indexOf(' | '); return '<div class="ctx src">' + esc(k > 0 && isDay(x) ? fmtY(x.slice(0, 10)) + ': ' + x.slice(k + 3) : x) + '</div>'; }).join('') + '</section>';
     f += '<div class="hint" data-k="hint-names">Names can’t be changed here, because tasks refer to people by name. Edit PEOPLE.md and the tasks together if a name is wrong.</div>';
@@ -2911,9 +3044,8 @@ function panelEnt(e) {
       fRow(kind === 'PRJ' ? 'Parent' : 'Part of', 'ef-parent', '<select id="ef-parent" class="in" data-ch="e-parent" data-id="' + id + '" style="max-width:100%">' + opts(parents, e.meta[D.pk] || '') + '</select>');
     if (kind === 'SYS') f += fRow('Owner', 'ef-owner', '<input id="ef-owner" class="in" type="text" list="dl-people" autocomplete="off" data-ch="e-owner" data-id="' + id + '" value="' + esc(e.meta.owner || '') + '" style="width:100%">');
     f += fRow('Group', 'ef-grp', '<input id="ef-grp" class="in" type="text" list="dl-egrp-' + kind + '" autocomplete="off" data-ch="e-grp" data-id="' + id + '" value="' + esc(e.grp) + '" style="width:100%">');
-    f += '<section data-k="sec-enotes"><label class="h3" for="ef-notes" style="display:block">Notes</label><textarea id="ef-notes" class="in" rows="5" data-ch="e-notes" data-id="' + id + '" placeholder="Notes (saved as note: lines)">' + esc(notesOf(e).join('\n')) + '</textarea></section>';
     var ls = linksOf(e);
-    f += vUrls(id, ls);
+    f += vUrls(id, ls) + vDescComments(id, e, 'What this ' + D.word + ' is and anything worth knowing');
     if (S.confirm === 'del:' + id) {
       var nt = kind === 'PRJ' ? allItems().filter(function (i) { return prjOf(i).indexOf(id) >= 0; }).length : 0;
       f += '<div class="confirm" data-k="confirm" role="alert"><span style="flex:1;min-width:200px">Delete ' + id + '? Its ' + plural(rels.length, 'relationship') + ' will be removed' + (nt ? ' and ' + plural(nt, 'task') + ' will lose this project' : '') + '. You can undo straight after.</span>' + bt('Delete', 'e-del-yes', { id: id, cls: 'danger sm' }) + bt('Cancel', 'e-del-no', { cls: 'sm' }) + '</div>';
@@ -3238,7 +3370,7 @@ function select(id, o) {
   o = o || {};
   if (S.sel !== id) {
     S.tab = o.tab || 'details';
-    S.subDraft = ''; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
+    S.subDraft = ''; S.cmtDraft = ''; S.cmtEdit = null; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
   } else if (o.tab) S.tab = o.tab;
   S.sel = id; S.panel = true;
   if (kindOf(id) === 'T') S.cur = id;
@@ -3411,7 +3543,7 @@ function addQuick() {
   if (!q.title) { focusLater('#qa-in'); return; }
   var it0 = quickItem(q, { urg: S.qaUrg, description: S.qaDesc, today: todayStr(), now: nowStamp() });
   var out = {};
-  commit(OPS.addTask({ title: it0.title, meta: it0.meta, date: todayStr(), notes: it0.notes, newProjects: q.prjNew }, out));
+  commit(OPS.addTask({ title: it0.title, meta: it0.meta, date: todayStr(), description: it0.description, newProjects: q.prjNew }, out));
   S.qa = ''; S.qaType = null; S.qaUrg = ''; S.qaDesc = ''; S.qaMore = false; forceClear('qa-in'); forceClear('qa-desc');
   var it = out.id ? item(out.id) : null;
   if (it) toastShow('Added ' + out.id + ' to ' + listName(it) + ' · ' + when(it).label + (q.prjNew.length ? ' · new project ' + q.prjNew.join(', ') : ''), OPS.removeAdded(out.id));
@@ -3425,6 +3557,26 @@ function setDue(id, date, time) {
   var p = { due: date ? date + (time ? ' ' + time : '') : '' };
   if (date && i.meta.ty !== 'FYI') p.urg = urgFor(date);
   patch(id, p);
+}
+// the Item or Record an ID names, and the Comment at k among its Comments
+function recOf(id) { var r = recIn(S.m, id); return r ? r.x : null; }
+function commentAt(id, k) { var x = recOf(id); return x ? commentsOf(x)[k] || null : null; }
+function addCommentFrom(id) {
+  var text = cleanText(S.cmtDraft);
+  if (!text) { focusLater('#f-cmt'); return; }
+  var c = { at: nowStamp(), author: 'user', text: text };
+  S.cmtDraft = '';
+  forceClear('f-cmt');
+  // the new Comment's place once added: after every other Comment
+  var x = recOf(id), k = x ? commentsOf(x).length : 0;
+  commit(OPS.comment(id, c), { toast: 'Added a comment to ' + id + '.', undo: OPS.delComment(id, k, text) });
+  focusLater('#f-cmt');
+}
+function saveComment(id, k) {
+  var c = commentAt(id, k), text = cleanText(S.cmtEditText);
+  S.cmtEdit = null;
+  if (!c || !text || text === c.v) { render(); return; }
+  commit(OPS.editComment(id, k, c.v, text), { toast: 'Comment updated.', undo: OPS.editComment(id, k, text, c.v) });
 }
 function queueAsk(id) {
   var text = String(S.composer[id] || '').trim();
@@ -3561,6 +3713,22 @@ var ACT = {
   'qa-type': function () { var q = parseQuick(S.qa || '', S.qaType); S.qaType = QA_TYPES[(QA_TYPES.indexOf(q.ty) + 1) % QA_TYPES.length]; render(); },
   'prj-del': function (el) { var id = did(el), v = dvv(el); commit(OPS.setPrj(id, v, false), { toast: 'Removed ' + id + ' from ' + (labelOf(v) || v) + '.', undo: OPS.setPrj(id, v, true) }); focusLater('#f-prj'); },
   'tag-del': function (el) { commit(OPS.removeTag(did(el), dvv(el))); focusLater('#f-tag'); },
+  'cmt-add': function (el) { addCommentFrom(did(el)); },
+  'cmt-edit': function (el) { var id = did(el), k = +dvv(el), c = commentAt(id, k); if (!c || c.f.author !== 'user') return; S.cmtEdit = id + '|' + k; S.cmtEditText = c.v; render(); focusLater('#cmt-edit'); },
+  'cmt-cancel': function () { S.cmtEdit = null; render(); },
+  'cmt-save': function (el) { saveComment(did(el), +dvv(el)); },
+  'cmt-del': function (el) {
+    var id = did(el), k = +dvv(el), c = commentAt(id, k);
+    if (!c) return;
+    S.cmtEdit = null;
+    commit(OPS.delComment(id, k, c.v), { toast: 'Deleted the comment “' + clip(c.v, 40) + '”.', undo: OPS.putComment(id, k, { f: Object.assign({}, c.f), v: c.v }) });
+  },
+  'cmt-ack': function (el) {
+    var id = did(el), x = recOf(id);
+    if (!x) return;
+    var list = commentsOf(x), which = list.filter(toAck).map(function (c) { return [list.indexOf(c), c.v]; });
+    if (which.length) commit(OPS.ack(id, which, false), { toast: 'Acknowledged ' + plural(which.length, 'comment') + ' on ' + id + '.', undo: OPS.ack(id, which, true) });
+  },
   'sub-del': function (el) {
     var id = did(el), k = +el.getAttribute('data-i'), i = item(id), s = i ? subsOf(i)[k] : null;
     if (!s) return;
@@ -3681,7 +3849,7 @@ var CH = {
   ty: function (el) { var p = { ty: el.value }, i = item(did(el)); if (i && !isDay(i.meta.due)) { if (el.value === 'FYI') p.urg = 'fyi'; else if (i.meta.urg === 'fyi') p.urg = 'week'; } patch(did(el), p); },
   who: function (el) { var i = item(did(el)), v = cleanName(el.value); if (i && v !== realWho(i)) patch(did(el), { who: v }); },
   asg: function (el) { var v = el.value ? el.value.replace('T', ' ').slice(0, 16) : ''; patch(did(el), { asg: v }); },
-  my: function (el) { var id = did(el), i = item(id), l = linesOf(el.value); if (i && !same(l, myOf(i))) commit(OPS.my(id, l)); },
+  desc: function (el) { var id = did(el), r = recIn(S.m, id); if (r && cleanText(el.value) !== descOf(r.x)) commit(OPS.desc(id, el.value)); },
   sub: function (el) { var id = did(el), k = +el.getAttribute('data-i'), i = item(id), s = i ? subsOf(i)[k] : null; if (s) commit(OPS.setSub(id, k, s.v, el.checked)); },
   'link-done': function (el) { S.linkDone = el.checked; render(); },
   suggest: function (el) { S.suggestOn[did(el) + '|' + dvv(el)] = el.checked; render(); },
@@ -3696,14 +3864,12 @@ var CH = {
     commit(OPS.patchPerson(p.name, o, todayStr()));
   },
   'p-ext': function (el) { var p = personOf(did(el)); if (p) commit(OPS.patchPerson(p.name, { ext: el.checked ? 'Y' : '' }, todayStr())); },
-  'p-notes': function (el) { var p = personOf(did(el)), l = linesOf(el.value); if (p && !same(l, notesOf(p))) commit(OPS.personNotes(p.name, l)); },
   'e-name': function (el) { var id = did(el), e = entById(id), v = cleanName(el.value); if (!e) return; if (!v) { forceClear(el.id); render(); return; } if (v !== e.name) commit(OPS.renameEnt(kindOf(id), id, v)); },
   'e-type': function (el) { commit(OPS.patchEnt(kindOf(did(el)), did(el), { type: el.value })); },
   'e-st': function (el) { commit(OPS.patchEnt(kindOf(did(el)), did(el), { st: el.value })); },
   'e-parent': function (el) { var id = did(el), D = EDEF[kindOf(id)], o = {}; o[D.pk] = el.value; commit(OPS.patchEnt(kindOf(id), id, o)); },
   'e-owner': function (el) { var e = entById(did(el)), v = cleanName(el.value); if (e && v !== (e.meta.owner || '')) commit(OPS.patchEnt('SYS', did(el), { owner: v })); },
   'e-grp': function (el) { var e = entById(did(el)), v = cleanName(el.value); if (e && v !== e.grp) commit(OPS.entGroup(kindOf(did(el)), did(el), v)); },
-  'e-notes': function (el) { var id = did(el), e = entById(id), l = linesOf(el.value); if (e && !same(l, notesOf(e))) commit(OPS.entNotes(kindOf(id), id, l)); },
   pgroup: function (el) { S.pgroup = el.value; lsSet('discerny-pgroup', S.pgroup); render(); },
   'wb-sort': function (el) { setWb({ sort: el.value }); },
   'wb-tag': function (el) { setWb({ tag: el.value }); },
@@ -3740,6 +3906,8 @@ var IN = {
   wq: function (el) { S.wq = el.value; render(); },
   qaDesc: function (el) { S.qaDesc = el.value; },
   composer: function (el) { if (S.sel) S.composer[S.sel] = el.value; },
+  cmtDraft: function (el) { S.cmtDraft = el.value; },
+  cmtEditText: function (el) { S.cmtEditText = el.value; },
   subDraft: function (el) { S.subDraft = el.value; },
   tagDraft: function (el, ev) { S.tagDraft = el.value; if (ev && ev.inputType === 'insertReplacementText') addTagFrom(el); },
   newPrj: function (el, ev) { S.newPrj = el.value; if (ev && ev.inputType === 'insertReplacementText') addPrjFrom(el, false); else render(); },
@@ -3821,6 +3989,11 @@ var KD = {
     else if (ev.key === 'Escape' && el.value) { ev.preventDefault(); S.newPrj = ''; forceClear(el.id); render(); }
   },
   composer: function (el, ev) { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); if (S.sel) queueAsk(S.sel); } },
+  cmt: function (el, ev) { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); addCommentFrom(did(el)); } },
+  'cmt-edit': function (el, ev) {
+    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); var k = String(S.cmtEdit || '').split('|')[1]; if (k !== undefined) saveComment(did(el), +k); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); S.cmtEdit = null; render(); }
+  },
   linkq: function (el, ev) {
     if (ev.key === 'Enter') { ev.preventDefault(); var lm = S.sel && kindOf(S.sel) === 'T' ? S.linkMode : 'related', r = S.sel ? linkCands(S.sel, lm, S.linkQ, { kind: S.linkKind, done: S.linkDone && lm !== 'blocked' }) : null; if (r && r.list.length) addLink(S.sel, r.list[0].id); }
     else if (ev.key === 'Escape' && el.value) { ev.preventDefault(); S.linkQ = ''; forceClear(el.id); render(); }

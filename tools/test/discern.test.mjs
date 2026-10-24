@@ -50,12 +50,14 @@ function pinned(d) {
 }
 
 // The tests expect the Example in the app's Format, so their copy is upgraded first when it is older.
-// The Upgrade's backup beside it is deleted.
+// A Migration whose instructions stop the Upgrade is recorded as done: the Example needs none of them carried
+// out, since they only ask who the user is, and its user is P-0001 already. The Upgrade's backup beside it is deleted.
 function upgraded(d) {
   const up = (...args) => {
     const r = spawnSync(process.execPath, [CLI, 'upgrade', ...args, '--dir', d], { encoding: 'utf8' });
-    if (r.status !== 0) throw new Error(`upgrade ${args.join(' ')} failed on ${d}: ${r.stdout}${r.stderr}`);
-    return JSON.parse(r.stdout);
+    const json = r.status === 0 || r.status === 2 ? JSON.parse(r.stdout) : null;
+    if (!json || (r.status === 2 && !json.stopped)) throw new Error(`upgrade ${args.join(' ')} failed on ${d}: ${r.stdout}${r.stderr}`);
+    return json;
   };
   if (!up().pending.length) return d;
   if (d === DATA) {
@@ -63,7 +65,7 @@ function upgraded(d) {
     fs.cpSync(d, c, { recursive: true, filter: (f) => path.basename(f) !== '.git' });
     d = c;
   }
-  up('--write');
+  for (let r = up('--write'); r.stopped; r = up('--write')) up('--done', r.stopped);
   fs.readdirSync(path.dirname(d)).filter(n => n.startsWith(path.basename(d) + '.backup-'))
     .forEach(n => fs.rmSync(path.join(path.dirname(d), n), { recursive: true, force: true }));
   return d;
@@ -190,7 +192,7 @@ test('every source skill command refuses a folder in another Format with exit 2,
     [['add', 'outlook-mail'], [draft()]],
     [['meetings'], [event()]],
     [['ignore'], [{ ref: 'mail|Bake-off Friday sign-up', reason: 'social' }]],
-    [['note', 'T-0028', 'Print order moved']],
+    [['comment', 'T-0028', '--author', 'email', 'Print order moved']],
     [['ref', 'T-0020', 'cal|2026-10-23|fable range 2027 – go/no-go']],
     [['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z']],
     [['log'], 'outlook-mail · fetched 3'],
@@ -253,8 +255,10 @@ test('mail matching: short subjects, ambiguity, notices, waiting and replies (E1
   assert.equal(by.E4.outcome, 'waiting');
   assert.deepEqual(by.E4.ids, ['T-0022']);
   assert.equal(by.E4.who, 'Helena Sørensen');
-  assert.match(by.E5.action, /T-0007 chased 2026-10-09/);
-  assert.match(by.E6.action, /you replied 2026-10-09, consider closing T-0009/);
+  // News from the person an Item waits on is a Comment to acknowledge; what the user did is a Comment needing none.
+  assert.match(by.E4.action, /^if it is from the person T-0022 waits on, comment: discern comment T-0022 --author email --to-acknowledge "Helena replied on <d Mon>: <what they said, in a sentence>"/);
+  assert.equal(by.E5.action, 'comment: discern comment T-0007 --author email "Chased <who> on 9 Oct."');
+  assert.equal(by.E6.action, 'comment: discern comment T-0009 --author email "You replied on 9 Oct."');
   assert.equal(by.acc.outcome, 'drop');
   assert.equal(by.ign.outcome, 'ignored');
   assert.equal(by.self.from_user, true);
@@ -281,7 +285,7 @@ test('an ask ambiguous between a Meeting and another Item may update the other I
   const e2 = r.json[0];
   assert.equal(e2.outcome, 'ambiguous');
   assert.match(e2.action, /plainly continues T-0030, propose an update to it/);
-  assert.match(e2.action, /about T-0013 is assessed as a new Task related to T-0013[^;]*name T-0013, T-0030 in its note/);
+  assert.match(e2.action, /about T-0013 is assessed as a new Task related to T-0013[^;]*name T-0013, T-0030 in its description/);
   assert.doesNotMatch(e2.action, /one of T-00\d\d, T-00\d\d/);
 });
 
@@ -474,7 +478,7 @@ test('meetings matches a Meeting already tracked by its cal source key, and a se
   assert.equal(read(d, 'TASKS.md'), after);
 });
 
-test('meetings gives a moved Meeting its new Due date and title, and a second run leaves it be', () => {
+test('meetings gives a moved Meeting its new Due date and title, with a Comment to acknowledge, and a second run leaves it be', () => {
   const d = folder();
   const moved = event({ subject: 'Fable Range 2027 – go/no-go', start: { dateTime: '2026-10-23T14:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-fable-gonogo-1021' });
   const r = run(d, ['meetings'], [moved]);
@@ -484,13 +488,14 @@ test('meetings gives a moved Meeting its new Due date and title, and a second ru
   const tasks = read(d, 'TASKS.md');
   assert.match(tasks, /^- \[ \] T-0020 Fable Range 2027 – go\/no-go \{ty:Meeting; who:Hattie Lindqvist; prj:PRJ-0001; tg:Product Safety; urg:soon; p:1; due:2026-10-23 14:00; dep:T-0019; asg:2026-10-05 09:10\}\r?$/m);
   assert.match(tasks, /  - ref: cal\|2026-10-23\|fable range 2027 – go\/no-go/);
+  assert.match(tasks, /\n  - comment: \{added-datetime: 2026-10-12 16:00; author: calendar; acknowledged: no\}\r?\n    Moved from 21 Oct 14:00 to 23 Oct 14:00\.\r?\n/);
   const again = run(d, ['meetings'], [moved]);
   assert.deepEqual(again.json.unchanged, ['T-0020']);
   assert.equal(read(d, 'TASKS.md'), tasks);
   assert.equal(run(d, ['check']).code, 0);
 });
 
-test('meetings keeps a cancelled or declined Meeting open, retitled "Cancelled: …" with a note of when, and adds no untracked cancelled one', () => {
+test('meetings keeps a cancelled or declined Meeting open, retitled "Cancelled: …" with a Comment to acknowledge, and adds no untracked cancelled one', () => {
   const d = folder();
   const evs = [
     event({ subject: 'Canceled: Weekly QA sync', start: { dateTime: '2026-10-15T09:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-weekly-qa-sync-1015', cancelled: true }),
@@ -504,7 +509,7 @@ test('meetings keeps a cancelled or declined Meeting open, retitled "Cancelled: 
   const tasks = read(d, 'TASKS.md');
   assert.match(tasks, /^- \[ \] T-0031 Cancelled: Weekly QA sync \{ty:Meeting; [^}]*due:2026-10-15 09:00;/m);
   assert.match(tasks, /^- \[ \] T-0018 Cancelled: 1:1 with Oliver \{/m);
-  assert.equal(tasks.match(/  - note: Found cancelled by the calendar Run on 2026-10-12 16:00/g).length, 2);
+  assert.equal(tasks.match(/\n  - comment: \{added-datetime: 2026-10-12 16:00; author: calendar; acknowledged: no\}\r?\n    Found cancelled\.\r?\n/g).length, 2);
   assert.doesNotMatch(tasks, /Calibration review/);
   assert.doesNotMatch(read(d, 'DONE.md'), /T-0031|T-0018/);
   const again = run(d, ['meetings'], evs);
@@ -526,7 +531,7 @@ test('meetings never takes an older prep item carrying the Meeting\'s plain cal 
 });
 
 const draft = (o = {}) => ({ title: 'Review the supplier sampling plan', ty: 'Task', who: 'Meera Ilangovan', urg: 'week', p: 2,
-  received: '2026-10-24T09:00:00Z', src: 'Email "Sampling plan" from Meera Ilangovan (24 Oct)', refs: ['mail|Sampling plan'], notes: ['Asks for comments by Fri.'], ...o });
+  received: '2026-10-24T09:00:00Z', src: 'Email "Sampling plan" from Meera Ilangovan (24 Oct)', refs: ['mail|Sampling plan'], description: 'Asks for comments by Fri.', ...o });
 
 test('add raises the counter first, writes the inbox and refuses duplicates (E10)', () => {
   const d = folder();
@@ -715,14 +720,46 @@ test('commit after a Run that left an ask unclassified on 9 Oct reports the days
   assert.deepEqual(r.json.behind, { days: 3, report: 'outlook-mail: 3 days still to read, run again' });
 });
 
-test('ref is always allowed; note only with apply_task_updates', () => {
+test('ref adds a source key after the others, once', () => {
   const d = folder();
   assert.equal(run(d, ['ref', 'T-0020', 'cal|2026-10-23|fable range 2027 – go/no-go']).code, 0);
   assert.match(read(d, 'TASKS.md'), /calid\|AAMkAGI-fable-gonogo-1021\n {2}- ref: cal\|2026-10-21\|fable range 2027 – go\/no-go\n {2}- ref: cal\|2026-10-23/);
-  assert.equal(run(d, ['note', 'T-0020', 'Moved to 23 Oct']).code, 2);
-  run(d, ['commit', 'defaults', 'apply_task_updates=true']);
-  assert.equal(run(d, ['note', 'T-0028', 'Print order moved to Thu 15 Oct']).code, 0);
-  assert.match(read(d, 'INBOX.md'), /- note: Print order moved to Thu 15 Oct/);
+  const tasks = read(d, 'TASKS.md'), again = run(d, ['ref', 'T-0020', 'cal|2026-10-23|fable range 2027 – go/no-go']);
+  assert.equal(again.json.unchanged, true);
+  assert.equal(read(d, 'TASKS.md'), tasks);
+  assert.equal(run(d, ['ref', 'P-0003', 'mail|x']).code, 1);
+});
+
+test('note is no longer a command, and apply_task_updates is gone from the state', () => {
+  const d = folder();
+  assert.equal(run(d, ['note', 'T-0028', 'Print order moved']).code, 1);
+  assert.equal('apply_task_updates' in run(d, ['state', 'outlook-mail']).json, false);
+});
+
+test('comment appends a stamped Comment after the item\'s others, before its sub-tasks, and keeps every other line', () => {
+  const d = folder(), before = read(d, 'TASKS.md');
+  const r = run(d, ['comment', 'T-0001', '--author', 'email', '--to-acknowledge', 'Meera replied on 12 Oct: the fixture passed.']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json, { id: 'T-0001', author: 'email', 'added-datetime': '2026-10-12 16:00', acknowledge: true, file: 'TASKS.md' });
+  const tasks = read(d, 'TASKS.md');
+  assert.match(tasks, /    Ask Meera whether[^\n]*\n  - comment: \{added-datetime: 2026-10-12 16:00; author: email; acknowledged: no\}\n    Meera replied on 12 Oct: the fixture passed\.\n  - \[x\] Root cause analysis signed off\n/);
+  const added = '  - comment: {added-datetime: 2026-10-12 16:00; author: email; acknowledged: no}\n    Meera replied on 12 Oct: the fixture passed.\n';
+  assert.equal(tasks.replace(added, ''), before);
+  // One that needs no acknowledging, and one on a Record, which goes after its Description and links.
+  run(d, ['comment', 'T-0001', '--author', 'email', 'You replied on 12 Oct.']);
+  assert.match(read(d, 'TASKS.md'), /the fixture passed\.\n  - comment: \{added-datetime: 2026-10-12 16:00; author: email\}\n    You replied on 12 Oct\.\n  - \[x\]/);
+  assert.equal(run(d, ['comment', 'PRJ-0001', '--author', 'agent', 'Go/no-go moved to 30 Oct.']).code, 0);
+  assert.match(read(d, 'PROJECTS.md'), /EN71-Test-Plan\.xlsx\)\n  - comment: \{added-datetime: 2026-10-12 16:00; author: agent\}\n    Go\/no-go moved to 30 Oct\.\n- Proscenium/);
+  assert.equal(run(d, ['check']).code, 0);
+});
+
+test('comment refuses a missing author, the user\'s word, a word that isn\'t one, and an ID that isn\'t there', () => {
+  const d = folder(), before = snapshot(d);
+  for (const args of [['T-0001', 'Text'], ['T-0001', '--author', 'user', 'Text'], ['T-0001', '--author', 'Outlook Mail', 'Text'],
+    ['T-0001', '--author', 'email'], ['T-0999', '--author', 'email', 'Text'], ['X-1', '--author', 'email', 'Text']]) {
+    assert.equal(run(d, ['comment', ...args]).code, 1, args.join(' '));
+  }
+  assert.deepEqual(snapshot(d), before);
 });
 
 test('a first name finds the one person who has it, and no one when two do, on its own and as an ask\'s recipient', () => {
@@ -751,7 +788,9 @@ test('migrate is no longer a command', () => {
 
 test('add takes lists as arrays or comma-separated strings, and has a dry run', () => {
   const d = folder();
-  const dry = run(d, ['add', 'outlook-mail', '--dry-run'], [draft({ tg: 'Supplier Quality, Document Control', notes: 'One note.' })]);
+  const dry = run(d, ['add', 'outlook-mail', '--dry-run'], [draft({ tg: 'Supplier Quality, Document Control', description: 'One line.\nAnother.' })]);
+  assert.match(dry.json.would_add[0], /\n  - description: One line\.\n    Another\.\n  - ref: mail\|Sampling plan$/);
+  assert.equal(run(d, ['add', 'outlook-mail', '--dry-run'], [draft({ notes: ['Old style.'] })]).code, 1);
   assert.match(dry.json.would_add[0], /tg:Supplier Quality,Document Control/);
   assert.doesNotMatch(read(d, 'INBOX.md'), /Review the supplier sampling plan/);
   const r = run(d, ['add', 'outlook-mail'], [draft({ tg: ['Supplier Quality', 'Document Control'], prj: 'PRJ-0001' })]);
@@ -1091,7 +1130,7 @@ function oldForms(d) {
     `  - ref: teams|ab12cd34${form ? '' : '|*'}`,
     '  - ref: mail|RE: Accepted:  Supplier day  agenda',
     ...(form ? [] : ['  - ref: cal|2026-10-23|supplier day agenda']),
-    '  - note: Bring the samples.',
+    '  - [ ] Bring the samples',
     '',
   ].join('\n');
   const done = (form) => read(d, 'DONE.md') + [
@@ -1154,7 +1193,9 @@ test('upgrade previews the first Migration on a folder with the older Source key
   assert.match(r.json.preview, /T-0033: gains cal\|2026-10-23\|supplier day agenda/);
   assert.match(r.json.preview, /teams\|c40e9a12 becomes teams\|c40e9a12\|\*/);
   assert.deepEqual(snapshot(d), before);
-  const w = run(d, ['upgrade', '--write']);
+  // A later Migration's required instructions stop the Upgrade; this folder's user is P-0001 already, so they need nothing.
+  let w = run(d, ['upgrade', '--write']);
+  for (; w.code === 2 && w.json.stopped; w = run(d, ['upgrade', '--write'])) assert.equal(run(d, ['upgrade', '--done', w.json.stopped]).code, 0);
   assert.equal(w.code, 0, w.out);
   assert.ok(read(d, 'DISCERNY.md').includes(`<!-- format: ${FORMAT} -->`));
   assert.deepEqual(beside(d), ['mine', 'mine.backup-0.1.0.0']);
@@ -1921,4 +1962,151 @@ test('the change Proposals Migration previews and changes nothing; --write rewor
   assert.equal(again.status, 0, again.stderr);
   assert.match(again.stdout, /Nothing to change/);
   assert.deepEqual(snapshot(d), after);
+});
+
+// The Migration that turns notes into a Description and Comments and makes the user P-0001. It is found by its
+// first line, whatever the build it landed in. Its tests make a small folder in the Format before it, since the
+// Example is in the Format after it.
+const DESCRIPTIONS_SCRIPT = (() => {
+  const dir = path.join(REPO, 'migrations');
+  const n = fs.readdirSync(dir).find(x => fs.existsSync(path.join(dir, x, 'migrate.mjs')) && /^\/\/ Notes become a Description and Comments/.test(fs.readFileSync(path.join(dir, x, 'migrate.mjs'), 'utf8')));
+  return path.join(dir, n, 'migrate.mjs');
+})();
+const migrateNotes = (d, ...args) => spawnSync(process.execPath, [DESCRIPTIONS_SCRIPT, d, ...args], { encoding: 'utf8' });
+
+// user: the P-id whose note says they are the user of Discerny, or none
+function notesFolder(user = 'P-0001') {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-notes-'));
+  const said = id => id === user ? '  - note: The user of Discerny. Head of QA.' : '  - note: Supplier quality.';
+  const files = {
+    'TASKS.md': ['# Tasks', '<!-- next-id: 4 -->', '',
+      '- [ ] T-0001 Close the CAPA {ty:Task; who:Meera Ilangovan; urg:week; p:1}',
+      '  - src: Email "CAPA" from Meera (10 Aug)',
+      '  - note: Two returns reported.',
+      '  - note: The effectiveness check is left.',
+      '  - link: [CAPA log](https://example.test/capa)',
+      '  - ref: mail|CAPA',
+      '  - my: Ask Meera about the fixture.',
+      '  - my: And the new jaw.',
+      '  - [x] Root cause signed off',
+      '  - my: Then tell Lena.',
+      '- [ ] T-0002 Cancelled: Weekly QA sync {ty:Meeting; urg:week; p:2; due:2026-10-15 09:00}',
+      '  - src: Calendar "Weekly QA sync" organised by Meera',
+      '  - ref: cal|2026-10-15|weekly qa sync',
+      '  - note: Found cancelled by the calendar Run on 2026-10-12 17:00',
+      '- [ ] T-0003 Ask P-0001 and P-0004 about it {ty:Task; urg:later; p:3}',
+      '  - src: Teams',
+      ''].join('\r\n'),
+    'PEOPLE.md': ['# People', '<!-- next-id: 5 -->', '', '## QA',
+      '- Imogen Hartley {id:P-0001; title:Head of QA}', said('P-0001'),
+      '- Meera Ilangovan {id:P-0003; mgr:Imogen Hartley}', '  - note: Leads EN 71 testing.', '  - note: Owns the app.', '  - hist: 2026-07-08 | Job title: a → b',
+      '- Tomasz Kowalczyk {id:P-0004; mgr:Imogen Hartley}', said('P-0004'), ''].join('\n'),
+    'PROJECTS.md': ['# Projects', '<!-- next-id: 2 -->', '', '- Fable Range {id:PRJ-0001; type:Project; st:Active}', '  - note: Eleven puppets.', '  - note: Go/no-go 28 Oct.', '  - link: [Site](https://example.test/fable)', ''].join('\n'),
+    'SYSTEMS.md': ['# Systems', '<!-- next-id: 2 -->', '', '- QualiTrack {id:SYS-0001; type:Application; st:Live}', ''].join('\n'),
+    'RELATIONSHIPS.md': ['# Relationships', '', '- P-0004 -> SYS-0001 | owns', '- T-0003 -> P-0001 | involves', ''].join('\n'),
+    'SOURCES.md': ['# Sources', '', '## defaults', '- timezone: Europe/London', '- priority_people: P-0004, P-0003', '- apply_task_updates: false', '- page_cap: 10', ''].join('\n'),
+    'ASK-AGENT.md': ['# Ask agent queue', '', '- P-0004 | 2026-10-11 09:00 | Ask P-0001 whether this is me', ''].join('\n'),
+    'drafts/T-0003-ask.md': '# Draft – not sent\n\n- For: T-0003\n\nHi P-0004 (not P-00041),\n',
+  };
+  for (const [f, t] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true }); fs.writeFileSync(path.join(d, f), t); }
+  return d;
+}
+
+test('the Descriptions Migration\'s script imports only Node\'s built-in modules', () => {
+  const src = fs.readFileSync(DESCRIPTIONS_SCRIPT, 'utf8');
+  const from = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g)].map(m => m[1] || m[2] || m[3]);
+  assert.ok(from.length);
+  assert.deepEqual(from.filter(s => !s.startsWith('node:')), []);
+});
+
+test('the Descriptions Migration previews and changes nothing; --write makes notes a Description and Comments, keeping line endings; again, nothing', () => {
+  const d = notesFolder(), before = snapshot(d), p = migrateNotes(d);
+  assert.equal(p.status, 0, p.stderr);
+  assert.match(p.stdout, /^The user is P-0001, Imogen Hartley \(found by the note saying so\)\.\nWould change:/);
+  assert.match(p.stdout, /T-0001: the first note becomes the Description; 1 more note becomes a Comment by agent; 2 runs of my: lines become Comments by user/);
+  assert.match(p.stdout, /T-0002: the note of when the calendar found it cancelled becomes a Comment by calendar/);
+  assert.match(p.stdout, /PRJ-0001 Fable Range: 2 notes become the Description/);
+  assert.match(p.stdout, /apply_task_updates goes/);
+  assert.deepEqual(snapshot(d), before);
+  const w = migrateNotes(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  assert.equal(read(d, 'TASKS.md'), ['# Tasks', '<!-- next-id: 4 -->', '',
+    '- [ ] T-0001 Close the CAPA {ty:Task; who:Meera Ilangovan; urg:week; p:1}',
+    '  - src: Email "CAPA" from Meera (10 Aug)',
+    '  - description: Two returns reported.',
+    '  - link: [CAPA log](https://example.test/capa)',
+    '  - ref: mail|CAPA',
+    '  - comment: {author: agent}', '    The effectiveness check is left.',
+    '  - comment: {author: user}', '    Ask Meera about the fixture.', '    And the new jaw.',
+    '  - comment: {author: user}', '    Then tell Lena.',
+    '  - [x] Root cause signed off',
+    '- [ ] T-0002 Cancelled: Weekly QA sync {ty:Meeting; urg:week; p:2; due:2026-10-15 09:00}',
+    '  - src: Calendar "Weekly QA sync" organised by Meera',
+    '  - ref: cal|2026-10-15|weekly qa sync',
+    '  - comment: {added-datetime: 2026-10-12 17:00; author: calendar}', '    Found cancelled.',
+    '- [ ] T-0003 Ask P-0001 and P-0004 about it {ty:Task; urg:later; p:3}',
+    '  - src: Teams',
+    ''].join('\r\n'));
+  assert.match(read(d, 'PEOPLE.md'), /- Imogen Hartley \{id:P-0001; title:Head of QA\}\n  - description: Head of QA\.\n- Meera Ilangovan \{id:P-0003; mgr:Imogen Hartley\}\n  - description: Leads EN 71 testing\.\n    Owns the app\.\n  - hist: 2026-07-08/);
+  assert.match(read(d, 'PROJECTS.md'), /\{id:PRJ-0001; type:Project; st:Active\}\n  - description: Eleven puppets\.\n    Go\/no-go 28 Oct\.\n  - link: \[Site\]/);
+  assert.doesNotMatch(read(d, 'SOURCES.md'), /apply_task_updates/);
+  assert.match(read(d, 'RELATIONSHIPS.md'), /- P-0004 -> SYS-0001 \| owns/);
+  const after = snapshot(d), again = migrateNotes(d, '--write');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Nothing to change/);
+  assert.deepEqual(snapshot(d), after);
+});
+
+test('the Descriptions Migration makes the user P-0001 by swapping IDs in every file, free text included', () => {
+  const d = notesFolder('P-0004'), w = migrateNotes(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  assert.match(w.stdout, /The user is P-0004, Tomasz Kowalczyk \(found by the note saying so\): P-0004 and P-0001 swap IDs/);
+  const people = read(d, 'PEOPLE.md');
+  assert.match(people, /- Imogen Hartley \{id:P-0004; title:Head of QA\}\n  - description: Supplier quality\./);
+  assert.match(people, /- Tomasz Kowalczyk \{id:P-0001; mgr:Imogen Hartley\}\n  - description: Head of QA\./);
+  assert.match(people, /<!-- next-id: 5 -->/);
+  assert.match(read(d, 'RELATIONSHIPS.md'), /- P-0001 -> SYS-0001 \| owns\n- T-0003 -> P-0004 \| involves/);
+  assert.match(read(d, 'SOURCES.md'), /- priority_people: P-0001, P-0003/);
+  assert.match(read(d, 'ASK-AGENT.md'), /- P-0001 \| 2026-10-11 09:00 \| Ask P-0004 whether this is me/);
+  assert.match(read(d, 'TASKS.md'), /T-0003 Ask P-0004 and P-0001 about it/);
+  assert.match(read(d, 'drafts/T-0003-ask.md'), /Hi P-0001 \(not P-00041\),/);
+  // The sentence is gone, so a second run finds no one, says so, and swaps nothing back.
+  const after = snapshot(d), again = migrateNotes(d, '--write');
+  assert.match(again.stdout, /No Person's note says they are the user of Discerny, so the user stays as P-0001 \(Tomasz Kowalczyk\)/);
+  assert.deepEqual(snapshot(d), after);
+});
+
+test('with no Person saying so, the Descriptions Migration leaves the IDs alone; --user and --new-user then make the user P-0001', () => {
+  const d = notesFolder('none'), w = migrateNotes(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  assert.match(w.stdout, /No Person's note says they are the user of Discerny, so the user stays as P-0001 \(Imogen Hartley\): INSTRUCTIONS\.md asks/);
+  assert.match(read(d, 'PEOPLE.md'), /- Imogen Hartley \{id:P-0001; title:Head of QA\}/);
+  assert.equal(migrateNotes(d, '--user', 'P-0099').status, 1);
+  const u = migrateNotes(d, '--user', 'P-0003', '--write');
+  assert.equal(u.status, 0, u.stderr);
+  assert.match(read(d, 'PEOPLE.md'), /- Meera Ilangovan \{id:P-0001; mgr:Imogen Hartley\}/);
+  assert.match(read(d, 'SOURCES.md'), /- priority_people: P-0004, P-0001/);
+
+  const n = notesFolder('none'), before = snapshot(n), p = migrateNotes(n, '--new-user', 'Sam Ng');
+  assert.match(p.stdout, /The user is P-0005, Sam Ng \(made with --new-user\): P-0005 and P-0001 swap IDs/);
+  assert.deepEqual(snapshot(n), before);
+  assert.equal(migrateNotes(n, '--new-user', 'Sam Ng', '--write').status, 0);
+  const people = read(n, 'PEOPLE.md');
+  assert.match(people, /<!-- next-id: 6 -->\n\n## Me\n- Sam Ng \{id:P-0001\}\n\n## QA\n- Imogen Hartley \{id:P-0005; title:Head of QA\}/);
+  assert.match(read(n, 'RELATIONSHIPS.md'), /- T-0003 -> P-0005 \| involves/);
+  assert.equal(migrateNotes(n, '--new-user', 'sam ng', '--write').status, 1);
+});
+
+test('upgrade stops at the Descriptions Migration\'s instructions, which are required, and --done records it', () => {
+  const d = notesFolder();
+  fs.writeFileSync(path.join(d, 'DISCERNY.md'), '# Discerny data folder\n\n<!-- format: 0.3.0.2 -->\n');
+  const pending = run(d, ['upgrade']).json.pending, me = pending.find(m => path.join(REPO, 'migrations', m.version, 'migrate.mjs') === DESCRIPTIONS_SCRIPT);
+  assert.equal(me.instructions, 'required');
+  let w = run(d, ['upgrade', '--write']);
+  while (w.code === 2 && w.json.stopped !== me.version) { run(d, ['upgrade', '--done', w.json.stopped]); w = run(d, ['upgrade', '--write']); }
+  assert.equal(w.code, 2, w.out);
+  assert.match(w.json.next, /INSTRUCTIONS\.md with the user, then run: discern upgrade --done/);
+  assert.match(read(d, 'TASKS.md'), /  - description: Two returns reported\./);
+  assert.equal(run(d, ['upgrade', '--done', me.version]).code, 0);
+  fs.readdirSync(path.dirname(d)).filter(n => n.startsWith(path.basename(d) + '.backup-')).forEach(n => fs.rmSync(path.join(path.dirname(d), n), { recursive: true, force: true }));
 });

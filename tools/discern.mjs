@@ -6,7 +6,7 @@
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
 //   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
-// Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, note, ref, commit, log, check, upgrade, serve.
+// Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, comment, ref, commit, log, check, upgrade, serve.
 // Input for match, add, propose, meetings, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
@@ -32,7 +32,7 @@ const DAY = 864e5, HOUR = 36e5;
 
 // ---------------------------------------------------------------- arguments and output
 const argv = process.argv.slice(2);
-const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '', port: '4790' };
+const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '', port: '4790', author: '', ack: false };
 const ARGS = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -44,6 +44,8 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--one') OPT.one = true;
   else if (a === '--done') OPT.done = argv[++i] || '';
   else if (a === '--port') OPT.port = argv[++i] || '';
+  else if (a === '--author') OPT.author = argv[++i] || '';
+  else if (a === '--to-acknowledge') OPT.ack = true;
   else ARGS.push(a);
 }
 // ---------------------------------------------------------------- config.toml
@@ -133,8 +135,8 @@ function loadCore() {
   const html = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
   const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
   if (a < 0 || b < a) fail('no //<core> ... //</core> block found in discerny.html next to tools/');
-  const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS', 'FILES', 'WATCH',
-    'CHANGES_HEAD', 'changesOf', 'changeKey', 'relLine', 'REL_RE'];
+  const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'eParse', 'TYPES', 'URG_ORDER', 'STATUS', 'FILES', 'WATCH',
+    'CHANGES_HEAD', 'changesOf', 'changeKey', 'relLine', 'REL_RE', 'serSub', 'placeSub', 'ITEM_RANK', 'PERSON_RANK', 'ENT_RANK', 'setDesc', 'addComment', 'USER_ID'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
   catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
@@ -270,9 +272,7 @@ function timezone(S) { return zoneOf(val(defaults(S), 'timezone')) || 'UTC'; }
 function people() { return C.pParse(read('PEOPLE.md')).people; }
 function csv(v) { return String(v || '').split(',').map(s => s.trim()).filter(Boolean); }
 function userRecord(P) {
-  P = P || people();
-  return P.find(p => p.subs.some(b => b.k === 'note' && /the user of (discerny|this tracker)/i.test(b.v)))
-    || P.find(p => p.meta.id === 'P-0001') || null;
+  return (P || people()).find(p => p.meta.id === C.USER_ID) || null;
 }
 function personView(p) { return p ? { id: p.meta.id || null, name: p.name, em: csv(p.meta.em), handle: csv(p.meta.handle), mgr: p.meta.mgr || null } : null; }
 function findPerson(q, P) {
@@ -415,26 +415,40 @@ function meetingRule(ids, meetings) {
 }
 const meetingAction = (ids, meetings) => { const m = meetingRule(ids, meetings); return `drop, unless it is an ask, a commitment or a material change (a new agenda, a pre-read): then assess it as ${m.task}; ${m.rest}`; };
 
+// A Source skill writes its Comments as the lowercase word for its kind of source, which its scheme gives.
+const AUTHOR = { mail: 'email', teams: 'teams', cal: 'calendar' };
+const MONTHS = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
+function dMon(date) { const m = /^\d{4}-(\d{2})-(\d{2})/.exec(date || ''); return m ? `${+m[2]} ${MONTHS[+m[1] - 1]}` : '<d Mon>'; }
+const firstName = (name, or) => name ? name.split(/\s+/)[0] : or;
+// The command that adds a Comment to the Item a candidate matched: one to acknowledge carries news from someone else.
+function commentCmd(ids, c, text, ack) {
+  const id = ids.length === 1 ? ids[0] : `<whichever of ${ids.join(', ')} it is about>`;
+  return `discern comment ${id} --author ${c.author}${ack ? ' --to-acknowledge' : ''} "${text}"`;
+}
+const NEWS = '<the news, in a sentence>';
+
 function actionFor(res, pass, c, meetings) {
   const id = res.ids && res.ids.length ? res.ids.join(', ') : '';
   const ask = pass === 'ask', onMeeting = res.ids && res.ids.length && res.ids.every(x => meetings.has(x)), onIds = res.ids || [];
+  const news = `a new date or another change to a field is an update to propose for ${id} in the report; other news, such as an answer, is a Comment to acknowledge: ${commentCmd(onIds, c, NEWS, true)}`;
   switch (res.outcome) {
     case 'drop': return 'drop';
     case 'new': return ask ? 'classify: ask, commitment or neither' : 'assess: capture it if actionable or FYI, otherwise ignore it';
     case 'ignored': return 'drop';
     case 'dismissed': return 'drop';
-    case 'done': return ask ? 'drop' : `drop, unless it reopens the work: then capture it with reopen:true and name ${id} in a note`;
+    case 'done': return ask ? 'drop' : `drop, unless it reopens the work: then capture it with reopen:true and name ${id} in its description`;
     case 'inbox': return ask ? 'drop' : onMeeting ? meetingAction(onIds, meetings) : `drop, unless it adds an ask or a date: then propose an update to ${id}`;
-    case 'open': return ask ? `report: you replied ${c.when || '<date>'}, consider closing ${id}` : onMeeting ? meetingAction(onIds, meetings) : `drop, unless it adds an ask, a date or an answer: then propose an update to ${id}`;
-    case 'waiting': return ask ? `report: ${id} chased ${c.when || '<date>'}` : `if it is from the person ${id} waits on: report "reply received, consider closing ${id}"; otherwise treat it as an update to an open item`;
-    case 'related': return ask ? (res.waiting ? `drop: ${id} already waits on this chat` : 'classify: ask, commitment or neither') : `same topic as ${id}: propose an update; another topic: assess it as new`;
+    case 'open': return ask ? `comment: ${commentCmd(onIds, c, `You replied on ${dMon(c.when)}.`)}` : onMeeting ? meetingAction(onIds, meetings) : `drop, unless it brings news: ${news}`;
+    case 'waiting': return ask ? `comment: ${commentCmd(onIds, c, `Chased ${firstName(c.who, '<who>')} on ${dMon(c.when)}.`)}`
+      : `if it is from the person ${id} waits on, comment: ${commentCmd(onIds, c, `${firstName(c.who, '<their first name>')} replied on ${dMon(c.when)}: <what they said, in a sentence>`, true)}; otherwise, drop it unless it brings news: ${news}`;
+    case 'related': return ask ? (res.waiting ? `drop: ${id} already waits on this chat` : 'classify: ask, commitment or neither') : `same topic as ${id}: ${news}; another topic: assess it as new`;
     case 'ambiguous': {
       if (ask) return 'classify: ask, commitment or neither';
       const mtgIds = res.ids.filter(x => meetings.has(x)), mtg = mtgIds.join(', '), other = res.ids.filter(x => !meetings.has(x));
-      if (!mtg) return `if it plainly continues one of ${id}, propose an update to that item; otherwise assess it as new and name ${id} in a note`;
+      if (!mtg) return `if it plainly continues one of ${id}, propose an update to that item; otherwise assess it as new and name ${id} in its description`;
       const onOther = other.length ? `if it plainly continues ${other.length > 1 ? `one of ${other.join(', ')}, propose an update to that item` : `${other[0]}, propose an update to it`}; ` : '';
       const m = meetingRule(mtgIds, meetings);
-      return `${onOther}an ask, a commitment or a material change (a new agenda, a pre-read) about ${mtg} is assessed as ${m.task}: name ${id} in its note; ${m.rest}; otherwise assess it as new and name ${id} in a note`;
+      return `${onOther}an ask, a commitment or a material change (a new agenda, a pre-read) about ${mtg} is assessed as ${m.task}: name ${id} in its description; ${m.rest}; otherwise assess it as new and name ${id} in its description`;
     }
     case 'moved': return `report: ${id} moved to ${res.to}; propose that due; then run: discern ref ${res.ids[0]} "${res.newRef}"`;
     case 'cancelled': return `report: ${id} cancelled, consider closing`;
@@ -529,7 +543,6 @@ CMD.state = function () {
     user, mention_terms: user ? [user.name.split(/\s+/)[0], ...user.handle] : [],
     priority_people: prio.filter(p => !p.missing).map(p => ({ id: p.meta.id || null, name: p.name, em: csv(p.meta.em) })),
     personal_domains: list(D, 'personal_domains'),
-    apply_task_updates: /^true$/i.test(val(D, 'apply_task_updates')),
     log_runs: /^true$/i.test(val(D, 'log_runs')), warnings,
   };
   if (!b) { out({ ...base, exists: false, next: `No "## ${name}" block yet. Ask the user how far back to start, then run: discern commit ${name} watermark=<ISO time>` }); process.exit(2); }
@@ -610,7 +623,7 @@ CMD.match = function () {
       if (scheme !== 'cal') r.from_user = own;
       if (!own && (sender || it.sender_name)) { const p = findPerson(sender, P) || findPerson(it.sender_name, P); r.who = p ? p.name : null; }
     }
-    const c = { when: it.when ? local(toInstant(it.when), tz).slice(0, 10) : '' };
+    const c = { when: it.when ? local(toInstant(it.when), tz).slice(0, 10) : '', author: AUTHOR[scheme] };
     let res = null;
     if (scheme === 'mail') {
       const n = normSubject(it.subject);
@@ -653,6 +666,7 @@ CMD.match = function () {
     } else fail(`item ${r.key}: scheme must be mail, teams or cal`);
     res = res || { outcome: 'new', ids: [] };
     if (r.from_user) res = { outcome: 'drop', ids: [] };
+    c.who = r.who;
     Object.assign(r, res); r.action = r.from_user ? "drop: the user's own message" : actionFor(res, pass, c, meetings);
     if (res.free) {
       delete r.free;
@@ -665,22 +679,35 @@ CMD.match = function () {
 };
 
 function itemLine(lines, id) { return lines.findIndex(l => new RegExp(`^- \\[( |x)\\] ${id} `).test(l)); }
-function blockEnd(lines, i) { let j = i + 1; while (j < lines.length && /^ {2,}\S/.test(lines[j])) j++; return j; }
-function lastOf(lines, i, j, kinds) { let at = -1; for (let k = i + 1; k < j; k++) if (kinds.some(x => lines[k].startsWith(`  - ${x}:`))) at = k; return at; }
-function insertSub(id, kind, text, after) {
-  for (const f of ['TASKS.md', 'INBOX.md']) {
+// An Item's or Record's lines run on while they are indented, a Description's or Comment's indented empty lines among them.
+function blockEnd(lines, i) { let j = i + 1; while (j < lines.length && /^ {2,}/.test(lines[j])) j++; return j; }
+const RECORD_FILES = { P: 'PEOPLE.md', PRJ: 'PROJECTS.md', SYS: 'SYSTEMS.md' };
+// Rewrites the sub-lines of one Item (in TASKS.md or INBOX.md) or Record in place, keeping its own line and every other
+// line of the file as they are. change gets the parsed Item or Record, with its sub-lines' rank, and edits its subs;
+// returning false leaves the file alone.
+function editSubs(id, change) {
+  const kind = id.split('-')[0], files = kind === 'T' ? ['TASKS.md', 'INBOX.md'] : [RECORD_FILES[kind]];
+  if (!files[0]) fail(`${id} is not the ID of an Item, a Person, a Project or a System`);
+  for (const f of files) {
     const t = read(f); if (!t) continue;
     const eol = eolOf(t), lines = t.split(/\r?\n/);
-    const i = itemLine(lines, id); if (i < 0) continue;
-    const j = blockEnd(lines, i);
-    if (kind === 'ref' && lines.slice(i + 1, j).some(l => l.trim() === `- ref: ${text}`)) return { file: f, unchanged: true };
-    let at = -1;
-    for (const ks of after) { at = lastOf(lines, i, j, ks); if (at >= 0) break; }
-    lines.splice((at >= 0 ? at : i) + 1, 0, `  - ${kind}: ${text.replace(/[\r\n]+/g, ' ')}`);
+    const i = kind === 'T' ? itemLine(lines, id) : lines.findIndex(l => /^- /.test(l) && new RegExp(`[{;]\\s*id:\\s*${id}\\s*[;}]`).test(l));
+    if (i < 0) continue;
+    const j = blockEnd(lines, i), block = lines.slice(i, j).join('\n');
+    const [x, rank] = kind === 'T' ? [C.parse(block).items[0], C.ITEM_RANK] : kind === 'P' ? [C.pParse(block).people[0], C.PERSON_RANK] : [C.eParse(block).ents[0], C.ENT_RANK];
+    if (change(x, rank) === false) return { file: f, unchanged: true };
+    lines.splice(i + 1, j - i - 1, ...x.subs.flatMap(b => C.serSub(b).split('\n')));
     write(f, lines.join(eol));
     return { file: f };
   }
-  fail(`${id} is not in TASKS.md or INBOX.md`);
+  fail(`${id} is not in ${files.join(' or ')}`);
+}
+// Adds a source key to an Item, after its others, unless it already has it.
+function addRef(id, ref) {
+  return editSubs(id, (it, rank) => {
+    if (it.subs.some(b => b.k === 'ref' && b.v.trim() === ref)) return false;
+    C.placeSub(it, { k: 'ref', v: ref }, rank);
+  });
 }
 
 // Rewrites one item's line in TASKS.md or INBOX.md in place, keeping its sub-lines as they are.
@@ -698,17 +725,22 @@ function rewriteItem(id, change) {
   fail(`${id} is not in TASKS.md or INBOX.md`);
 }
 
-CMD.note = function () {
-  const [, id, ...rest] = ARGS, text = rest.join(' ').trim();
-  if (!id || !text) fail('usage: discern note <T-id> <text>');
-  if (!/^true$/i.test(val(defaults(), 'apply_task_updates'))) fail('apply_task_updates is not true in SOURCES.md defaults: put this update in the report as a proposal instead', 2);
-  out({ id, ...insertSub(id, 'note', text, [['note'], ['src']]) });
+// A Comment from a Skill or an Agent, stamped now in the user's time zone and appended after the item's other Comments.
+// --to-acknowledge marks news from someone else, which waits in the Inbox until the user acknowledges it.
+CMD.comment = function () {
+  const [, id, ...rest] = ARGS, text = rest.join(' ').replace(/\r\n?/g, '\n').trim(), author = OPT.author.trim();
+  if (!id || !/^(T|P|PRJ|SYS)-\d+$/.test(id) || !text || !author) fail('usage: discern comment <id> --author <word> [--to-acknowledge] <text>');
+  if (!/^[a-z]+$/.test(author)) fail(`--author must be one lowercase word: the Skill's (email, calendar, teams), or agent for a request from the agent queue`);
+  if (author === 'user') fail('only the user writes Comments as user, in the UI: give your Skill\'s word, or agent');
+  const at = local(nowDate(), timezone());
+  out({ id, author, 'added-datetime': at, acknowledge: OPT.ack, ...editSubs(id, (x, rank) => { C.addComment(x, { at, author, ack: OPT.ack, text }, rank); }) });
 };
 
 CMD.ref = function () {
   const [, id, ref] = ARGS;
   if (!id || !ref || !/^[a-z][a-z0-9-]*\|/i.test(ref)) fail('usage: discern ref <T-id> <scheme|key...>');
-  out({ id, ref, ...insertSub(id, 'ref', ref, [['ref'], ['link', 'note', 'src']]) });
+  if (!/^T-\d+$/.test(id)) fail(`${id} is not an Item: only Items carry source keys`);
+  out({ id, ref, ...addRef(id, ref) });
 };
 
 function listOf(v) { return [].concat(v === undefined || v === null ? [] : v).flatMap(x => String(x).split(',')).map(x => x.trim()).filter(Boolean); }
@@ -731,12 +763,13 @@ CMD.add = function () {
     if (!['1', '2', '3'].includes(String(d.p))) e('p must be 1, 2 or 3');
     if (d.due && !/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2})?$/.test(d.due)) e('due must be YYYY-MM-DD or YYYY-MM-DD HH:MM');
     if (d.st && !['Waiting', 'In progress'].includes(d.st)) e('st must be Waiting or In progress');
-    if (d.who && !names.has(d.who)) e(`who "${d.who}" is not a name in PEOPLE.md: leave who out and name the person in a note (AGENTS.md requires an exact match)`);
+    if (d.who && !names.has(d.who)) e(`who "${d.who}" is not a name in PEOPLE.md: leave who out and name the person in the description (AGENTS.md requires an exact match)`);
     const prj = listOf(d.prj);
     prj.forEach(x => { if (!new RegExp(`id:${x}[;}]`).test(prjText)) e(`prj ${x} is not in PROJECTS.md`); });
     if (!d.src) e('src is required');
     const refs = [].concat(d.refs || []).map(s => String(s).trim()).filter(Boolean);
-    const notes = [].concat(d.notes || []).map(n => String(n).trim()).filter(Boolean);
+    if (d.notes !== undefined) e('notes is retired: give the item one description, its lines joined with \\n');
+    if (d.description !== undefined && typeof d.description !== 'string') e('description must be a string, its lines joined with \\n');
     if (!refs.length) e('at least one ref is required');
     refs.forEach(r => {
       if (!/^[a-z][a-z0-9-]*\|/i.test(r)) e(`ref "${r}" must start with a scheme such as mail|`);
@@ -762,11 +795,11 @@ CMD.add = function () {
       urg: d.urg, p: String(d.p), due: d.due || undefined, st: d.st || undefined,
       dep: listOf(d.dep).join(',') || undefined, asg, source };
     Object.keys(meta).forEach(k => { if (meta[k] === undefined || meta[k] === '') delete meta[k]; else meta[k] = cleanMeta(meta[k]); });
-    const subs = [{ k: 'src', v: String(d.src || '').replace(/[\r\n]+/g, ' ') }];
-    notes.forEach(n => subs.push({ k: 'note', v: n.replace(/[\r\n]+/g, ' ') }));
-    [].concat(d.links || []).forEach(l => subs.push({ k: 'link', v: typeof l === 'string' ? l : `[${l.label || 'link'}](${l.url})` }));
-    refs.forEach(r => subs.push({ k: 'ref', v: r }));
-    built.push({ title, meta, subs });
+    const x = { subs: [{ k: 'src', v: String(d.src || '').replace(/[\r\n]+/g, ' ') }] };
+    if (typeof d.description === 'string') C.setDesc(x, d.description, C.ITEM_RANK);
+    [].concat(d.links || []).forEach(l => x.subs.push({ k: 'link', v: typeof l === 'string' ? l : `[${l.label || 'link'}](${l.url})` }));
+    refs.forEach(r => x.subs.push({ k: 'ref', v: r }));
+    built.push({ title, meta, subs: x.subs });
   });
   if (errors.length) fail('nothing was written. ' + errors.join(' | '));
   if (!built.length) { out({ added: [] }); return; }
@@ -868,6 +901,12 @@ function raiseCounter(count) {
   return { start, next };
 }
 
+// A Meeting's time as a Comment gives it: HH:MM alone when the other time is on the same day, else d Mon HH:MM.
+function when(due, other) {
+  const [date, time] = String(due || '').split(' ');
+  return date === String(other || '').split(' ')[0] && time ? time : [dMon(date), time].filter(Boolean).join(' ');
+}
+
 // The calendar source skill mirrors every Meeting in its window: one not yet tracked goes straight into
 // TASKS.md as an open Meeting Item, keyed on its cal and calid source keys.
 CMD.meetings = function () {
@@ -888,17 +927,20 @@ CMD.meetings = function () {
       const hit = hits.find(x => x.id);
       if (!hit) return;
       const id = hit.id, open = hit.store === 'tasks' || hit.store === 'inbox';
-      if (calid && open && !hits.some(x => x.ref === calid)) insertSub(id, 'ref', calid, [['ref'], ['link', 'note', 'src']]);
+      if (calid && open && !hits.some(x => x.ref === calid)) addRef(id, calid);
+      // News from the calendar is a Comment for the user to acknowledge, stamped with this Run's time.
+      const tell = text => editSubs(id, (it, rank) => { C.addComment(it, { at: local(now, tz), author: AUTHOR.cal, ack: true, text }, rank); });
       // A cancelled or declined Meeting stays open for the user to deal with, and no Run closes it.
       if (open && gone) {
         let retitled = '';
         rewriteItem(id, it => { if (/^Cancelled: /.test(it.title)) return false; retitled = it.title = `Cancelled: ${it.title}`; });
-        if (retitled) { insertSub(id, 'note', `Found cancelled by the calendar Run on ${local(now, tz)}`, [['note'], ['src']]); cancelled.push({ id, title: retitled }); }
+        if (retitled) { tell('Found cancelled.'); cancelled.push({ id, title: retitled }); }
         else unchanged.push(id);
       // The calendar is the record for a mirrored Meeting's time and title: one moved or renamed takes both.
       } else if (open && (hit.due !== due || !hits.some(x => x.ref.toLowerCase() === cal.toLowerCase()))) {
         rewriteItem(id, it => { it.title = title; it.meta.due = due; });
-        insertSub(id, 'ref', cal, [['ref'], ['link', 'note', 'src']]);
+        addRef(id, cal);
+        if (hit.due !== due) tell(`Moved from ${when(hit.due, due)} to ${when(due, hit.due)}.`);
         moved.push({ id, title, from: hit.due, to: due });
       } else unchanged.push(id);
       return;
@@ -1040,9 +1082,22 @@ CMD.check = function () {
   Object.entries(sets).forEach(([f, m]) => m.items.forEach(it => {
     if (seen[it.id]) errors.push(`${it.id} appears in both ${seen[it.id]} and ${f}`);
     seen[it.id] = f; all.add(it.id); max = Math.max(max, parseInt(it.id.slice(2), 10));
-    it.subs.filter(s => s.k === 'raw' && s.v.trim()).forEach(s => warnings.push(`${f} ${it.id}: unrecognised line "${s.v.trim().slice(0, 60)}"`));
+    subLines(f, it.id, it);
     C.getSub(it, 'ref').forEach(s => { if (!/^[a-z][a-z0-9-]*\|./i.test(s.v.trim())) errors.push(`${f} ${it.id}: ref "${s.v}" has no scheme`); });
   }));
+  // Sub-lines the parser doesn't know, such as a note: or my: line from before Descriptions and Comments, and Comments without their fields.
+  function subLines(f, id, x) {
+    x.subs.filter(s => s.k === 'raw' && s.v.trim()).forEach(s => warnings.push(`${f} ${id}: unrecognised line "${s.v.trim().slice(0, 60)}"`));
+    C.getSub(x, 'comment').forEach(c => {
+      const at = c.f['added-datetime'], said = `${f} ${id}: a Comment ("${c.v.split('\n')[0].slice(0, 40)}")`;
+      if (!/^[a-z]+$/.test(c.f.author || '')) errors.push(`${said} has no author: give one lowercase word, such as user, email or agent`);
+      if (at && !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(at)) errors.push(`${said} has added-datetime "${at}": write YYYY-MM-DD HH:MM`);
+      if (c.f.acknowledged !== undefined && c.f.acknowledged !== 'no') errors.push(`${said} has acknowledged: ${c.f.acknowledged}: it is only ever no, and removed once acknowledged`);
+      if (!c.v.trim()) warnings.push(`${said} has no text`);
+    });
+  }
+  people().forEach(p => subLines('PEOPLE.md', p.meta.id || p.name, p));
+  ['PROJECTS.md', 'SYSTEMS.md'].forEach(f => C.eParse(read(f)).ents.forEach(e => subLines(f, e.meta.id || e.name, e)));
   const counter = (/<!-- next-id: (\d+) -->/.exec(read('TASKS.md')) || [])[1];
   if (!counter) errors.push('TASKS.md has no <!-- next-id: N --> counter');
   else if (+counter <= max) errors.push(`TASKS.md next-id is ${counter} but T-${String(max).padStart(4, '0')} exists: raise it to ${max + 1}`);
@@ -1245,7 +1300,7 @@ if (cmd === '--version' || cmd === 'version') {
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|note|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|comment|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
 // serve starts with no usable folder when it can switch to one, so the page can offer Change folder.

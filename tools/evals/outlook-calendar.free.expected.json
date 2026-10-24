@@ -9,7 +9,7 @@
     {
       "eval": "E26",
       "event": "AAMkAGI-weekly-qa-sync-1015",
-      "result": "Free but tracked (T-0031), and its read shows the user declined: T-0031 stays open in TASKS.md, retitled \"Cancelled: Weekly QA sync\", with a note \"Found cancelled by the calendar Run on 2026-10-12 17:00\" and a calid|AAMkAGI-weekly-qa-sync-1015 source key; the report's Meetings line says it was cancelled; no new item."
+      "result": "Free but tracked (T-0031), and its read shows the user declined: T-0031 stays open in TASKS.md, retitled \"Cancelled: Weekly QA sync\", with a Comment by calendar to acknowledge, \"Found cancelled.\", added 2026-10-12 17:00, and a calid|AAMkAGI-weekly-qa-sync-1015 source key; the report's Meetings line says it was cancelled; no new item."
     },
     {
       "eval": "E26",

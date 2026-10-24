@@ -11,7 +11,8 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 function loadCore() {
   const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
   const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-  const names = ['parse', 'serialize', 'changesOf', 'changeKey', 'setPriority', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue', 'REL_HEAD', 'ASK_HEAD'];
+  const names = ['parse', 'serialize', 'pParse', 'changesOf', 'changeKey', 'setPriority', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue', 'REL_HEAD', 'ASK_HEAD',
+    'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -131,10 +132,12 @@ test('a tag filter keeps only items carrying that exact tag', () => {
 test('search: every word must start a word somewhere in the item, and says where it matched', () => {
   const [it] = items([
     '- [ ] T-0042 Order reagents {who:Ana Silva; tg:Lab; prj:PRJ-0003}',
-    '  - note: supplier is Fisher',
-    '  - my: check the cold room first',
-    '  - [ ] get a quote',
     '  - src: mail from Ben',
+    '  - description: supplier is Fisher',
+    '    usually in stock',
+    '  - comment: {added-datetime: 2026-10-20 09:00; author: user}',
+    '    check the cold room first',
+    '  - [ ] get a quote',
   ].join('\n'));
   const prjName = id => ({ 'PRJ-0003': 'Pilot plant' })[id];
   const where = q => C.itemMatch(it, q, prjName);
@@ -142,11 +145,12 @@ test('search: every word must start a word somewhere in the item, and says where
   assert.equal(where('t-0042'), '');
   assert.equal(where('ana lab'), '');
   assert.equal(where('pilot'), 'project');
-  assert.equal(where('fisher'), 'notes');
-  assert.equal(where('cold'), 'your notes');
+  assert.equal(where('fisher'), 'the description');
+  assert.equal(where('stock'), 'the description');
+  assert.equal(where('cold'), 'comments');
   assert.equal(where('quote'), 'sub-tasks');
   assert.equal(where('ben'), 'the source');
-  assert.equal(where('order fisher'), 'notes');
+  assert.equal(where('order fisher'), 'the description');
   assert.equal(where('agents'), null);
   assert.equal(where('order zebra'), null);
 });
@@ -174,11 +178,91 @@ test('quick add: an Urgency the User picks wins over the one worked out from the
   assert.equal(fyi.meta.urg, 'today');
 });
 
-test('quick add: the Description is saved as note lines, one per non-blank line', () => {
-  const it = C.quickItem(parsed(), { ...at, description: '  Room 4 is free 9-12 on Tuesdays \r\n\r\nAsk facilities for the key\n  ' });
-  assert.deepEqual(it.notes, ['Room 4 is free 9-12 on Tuesdays', 'Ask facilities for the key']);
-  assert.deepEqual(C.quickItem(parsed(), { ...at, description: '  \n ' }).notes, []);
-  assert.deepEqual(C.quickItem(parsed(), at).notes, []);
+test('quick add: the Description keeps its lines and blank lines, without the blank ones at either end', () => {
+  const it = C.quickItem(parsed(), { ...at, description: '\n  Room 4 is free 9-12 on Tuesdays  \r\n\r\nAsk facilities for the key\n  ' });
+  assert.equal(it.description, '  Room 4 is free 9-12 on Tuesdays\n\nAsk facilities for the key');
+  assert.equal(C.quickItem(parsed(), { ...at, description: '  \n ' }).description, '');
+  assert.equal(C.quickItem(parsed(), at).description, '');
+});
+
+const ITEM_TEXT = [
+  '# Tasks',
+  '<!-- next-id: 3 -->',
+  '',
+  '- [ ] T-0001 Close the CAPA {ty:Task}',
+  '  - src: Email from Meera',
+  '  - description: Two returns reported.',
+  '    Root cause found.',
+  '    ',
+  '    Effectiveness check left.',
+  '  - ref: mail|CAPA',
+  '  - comment: {author: agent}',
+  '    From before the Migration.',
+  '  - comment: {added-datetime: 2026-10-22 09:12; author: email; acknowledged: no}',
+  '    Meera replied: the fixture passed.',
+  '  - [ ] Close it in the log',
+  '- [ ] T-0002 Nothing more {ty:Task}',
+  '',
+  '## Changes',
+  '- Relate T-0001 and T-0002 {kind: related; source: outlook-mail; received-datetime: 2026-10-22 09:14}',
+  '    - why: indented like a text line, but past the heading',
+  '',
+].join('\n');
+
+test('a Description and Comments carry on over the lines indented 4 spaces below them, and are written back as they were', () => {
+  const m = C.parse(ITEM_TEXT), [a, b] = m.items;
+  assert.equal(C.descOf(a), 'Two returns reported.\nRoot cause found.\n\nEffectiveness check left.');
+  assert.deepEqual(C.commentsOf(a).map(c => [c.f, c.v]), [
+    [{ author: 'agent' }, 'From before the Migration.'],
+    [{ 'added-datetime': '2026-10-22 09:12', author: 'email', acknowledged: 'no' }, 'Meera replied: the fixture passed.'],
+  ]);
+  assert.deepEqual(C.commentsOf(a).map(C.toAck), [false, true]);
+  assert.deepEqual(a.subs.map(s => s.k), ['src', 'description', 'ref', 'comment', 'comment', 'sub']);
+  assert.equal(C.descOf(b), '');
+  assert.equal(m.post[2], '    - why: indented like a text line, but past the heading');
+  assert.equal(C.serialize(m), ITEM_TEXT);
+});
+
+test('a truly empty line inside a Description stays in it when more of it follows, and is written back as an indented one', () => {
+  const m = C.parse('# Tasks\n- [ ] T-0001 A\n  - description: one\n\n    two\n\n- [ ] T-0002 B\n');
+  assert.equal(C.descOf(m.items[0]), 'one\n\ntwo');
+  assert.equal(C.serialize(m), '# Tasks\n- [ ] T-0001 A\n  - description: one\n    \n    two\n\n- [ ] T-0002 B\n');
+});
+
+test('setting a Description puts it after src, keeps it in place when it changes, and removes it when empty', () => {
+  const [it] = C.parse('# T\n- [ ] T-0001 A\n  - link: [x](https://x)\n  - src: mail\n  - [ ] sub\n').items;
+  C.setDesc(it, '\n What it is \r\nmore\n\n', C.ITEM_RANK);
+  assert.deepEqual(it.subs.map(s => s.k), ['link', 'src', 'description', 'sub']);
+  assert.equal(C.descOf(it), ' What it is\nmore');
+  C.setDesc(it, 'Changed', C.ITEM_RANK);
+  assert.deepEqual(it.subs.map(s => [s.k, s.v]).slice(1, 3), [['src', 'mail'], ['description', 'Changed']]);
+  C.setDesc(it, '  ', C.ITEM_RANK);
+  assert.deepEqual(it.subs.map(s => s.k), ['link', 'src', 'sub']);
+});
+
+test('a new Comment goes after the others and before sub-tasks; on a Person after their hist lines', () => {
+  const m = C.parse(ITEM_TEXT), [a, b] = m.items;
+  C.addComment(a, { at: '2026-10-24 10:00', author: 'user', text: 'Done:\nlogged it' }, C.ITEM_RANK);
+  assert.deepEqual(a.subs.map(s => s.k), ['src', 'description', 'ref', 'comment', 'comment', 'comment', 'sub']);
+  C.addComment(b, { at: '2026-10-24 10:01', author: 'email', ack: true, text: 'News' }, C.ITEM_RANK);
+  assert.match(C.serialize(m), /    Meera replied: the fixture passed\.\n  - comment: \{added-datetime: 2026-10-24 10:00; author: user\}\n    Done:\n    logged it\n  - \[ \] Close it in the log\n- \[ \] T-0002 Nothing more \{ty:Task\}\n  - comment: \{added-datetime: 2026-10-24 10:01; author: email; acknowledged: no\}\n    News\n/);
+  const P = C.pParse('# People\n\n## G\n- Ann {id:P-0001}\n  - description: me\n  - hist: 2026-01-01 | Job title: a → b\n');
+  C.addComment(P.people[0], { at: '2026-10-24 10:00', author: 'agent', text: 'Moved team' }, C.PERSON_RANK);
+  assert.deepEqual(P.people[0].subs.map(s => s.k), ['description', 'hist', 'comment']);
+});
+
+test('Comments in time order put the undated ones first, keeping the order they were written in', () => {
+  const c = (at, v) => ({ k: 'comment', f: at ? { 'added-datetime': at } : {}, v });
+  assert.deepEqual(C.byTime([c('2026-10-22 09:00', 'b'), c('', 'a1'), c('2026-10-21 09:00', 'x'), c('', 'a2')]).map(x => x.v), ['a1', 'a2', 'x', 'b']);
+});
+
+test('times are stamped in the timezone setting, like the helper\'s', () => {
+  const sources = '# Sources\n## outlook-mail\n- timezone: Asia/Tokyo\n\n## defaults\n- timezone: Europe/London\n- page_cap: 10\n';
+  assert.equal(C.tzOf(sources), 'Europe/London');
+  assert.equal(C.tzOf('# Sources\n'), '');
+  assert.equal(C.stampIn('Europe/London', Date.parse('2026-10-24T09:05:00Z')), '2026-10-24 10:05');
+  assert.equal(C.stampIn('Europe/London', Date.parse('2026-10-26T09:05:00Z')), '2026-10-26 09:05');
+  assert.match(C.stampIn('Not/A_Zone', Date.parse('2026-10-26T09:05:00Z')), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
 });
 
 test('quick add: with no Urgency picked, a due date sets it, no date means This week, and an FYI is FYI', () => {

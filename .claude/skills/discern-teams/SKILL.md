@@ -47,7 +47,7 @@ Channels listed in `candidate_channels` aren't scanned. When posts in one of the
 
 ## Source keys
 
-`teams` scheme. A source key is `teams|<chat20>|<message id>`, where chat20 is the chat ID without its `19:` prefix, cut to 20 characters; `match` returns it, so copy source keys from there. Each `discern match` candidate: `{"key": <id>, "scheme": "teams", "pass": <"ask" for D1 and D2, else "inbound">, "chat": <chatId>, "message": <id>, "sender": <from.email>, "sender_name": <from.displayName>, "when": <createdDateTime>}`, plus on the ask pass `"recipient_name"`: the name the ask addresses ("Gus, can you…"), or in a 1:1 chat the other person, so `match` returns the `who` for a waiting item; for channel posts `chat` is the channel ID. Add `subject` and `meeting_date` for a meeting with a known date. On a `related` outcome, judge whether the message is about the same work as that item: if so, propose an update; if not, assess it as new.
+`teams` scheme. A source key is `teams|<chat20>|<message id>`, where chat20 is the chat ID without its `19:` prefix, cut to 20 characters; `match` returns it, so copy source keys from there. Each `discern match` candidate: `{"key": <id>, "scheme": "teams", "pass": <"ask" for D1 and D2, else "inbound">, "chat": <chatId>, "message": <id>, "sender": <from.email>, "sender_name": <from.displayName>, "when": <createdDateTime>}`, plus on the ask pass `"recipient_name"`: the name the ask addresses ("Gus, can you…"), or in a 1:1 chat the other person, so `match` returns the `who` for a waiting item; for channel posts `chat` is the channel ID. Add `subject` and `meeting_date` for a meeting with a known date. On a `related` outcome, judge whether the message is about the same work as that item: if so, follow the action for news on it; if not, assess it as new.
 
 ## Assess cues
 
@@ -61,7 +61,8 @@ Channels listed in `candidate_channels` aren't scanned. When posts in one of the
 - `src`: `Teams <label> — <sender>, <d Mon>`. The label comes from `chat_labels` when the chat matches, else the channel's name or subject, else "1:1". For asks: `Teams <label> — <user> asked <person>, <d Mon>`.
 - `links`: `[Teams message](<webUrl>)`, plus any document link in the text.
 - `received`: `createdDateTime`.
-- `who` on an ask: the person asked, from the text, else from someone else's message in the same chat this run. Still unclear: leave `who` out and note "addressee unclear".
+- `who` on an ask: the person asked, from the text, else from someone else's message in the same chat this run. Still unclear: leave `who` out and say "Addressee unclear." in the description.
+- **Comments** are by `teams`: `discern comment <id> --author teams`, as `match`'s actions give them.
 
 ## Known limits
 
