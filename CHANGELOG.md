@@ -7,6 +7,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - Dismissing a Proposal now forgets only that message, so a later email on the same thread that needs action is proposed again, and "Already handled" marks the Proposal done instead of dismissing it.
 - The Inbox now asks about relationships, new people and new email addresses your source skills found, so you can add them with one click or say no for good.
 - Each item, project, system and person now has a Description and a list of Comments with their time and author, in place of notes, and news your source skills find on an item waits in the Inbox under "New comments" until you acknowledge it.
+- The Example now has a reply waiting to be acknowledged, so you can try New comments in the Inbox straight away.
 
 ## 0.2.0.1 (2026-10-23)
 
