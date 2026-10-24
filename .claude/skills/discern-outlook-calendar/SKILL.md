@@ -34,7 +34,7 @@ Fetch the state's `window`, up to `page_cap` pages. First drop events matching `
 - **Overlaps.** Among Meetings that are `busy` or `tentative`, report up to 5 pairs that overlap.
 - **T, transcripts**, only when `transcripts` is `organizer-only`. Search the state's `lookback` the same way and keep ended events the user organised. Read each event, then its `meetingTranscriptUrl`. Each explicit action item with an owner becomes an item, matched with suffix `transcript-<n>`. The user's own item is a task; someone else's is a waiting-for item, "Waiting: <what> from <person>" with `st:Waiting` and `who` that person, noted "agreed at <meeting> on <d Mon>". Give `due` only when a date is stated, and set urgency by the shared policy. Never copy transcript text into a file.
 
-Prep, invite and transcript items are proposals, each proposed as related to its Meeting item ("Relationships proposed" in the report).
+Prep, invite and transcript items are proposals, each proposed as related to its Meeting item with `discern propose`, once `discern add` has given it its ID.
 
 ## Source keys
 

@@ -11,7 +11,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 function loadCore() {
   const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
   const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-  const names = ['parse', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue', 'REL_HEAD', 'ASK_HEAD'];
+  const names = ['parse', 'serialize', 'changesOf', 'changeKey', 'setPriority', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue', 'REL_HEAD', 'ASK_HEAD'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -240,4 +240,58 @@ test('a Meeting stays overdue until it is marked done, and an item with no due d
   assert.equal(C.isOverdue(open, '2026-10-20'), true);
   assert.equal(C.isOverdue(done, '2026-10-20'), false);
   assert.equal(C.isOverdue(undated, '2026-10-20'), false);
+});
+
+const INBOX = [
+  '# Inbox',
+  '<!-- header -->',
+  '',
+  '- [ ] T-0050 Review the plan {ty:Task; urg:week; p:2}',
+  '  - src: Email "Plan"',
+  '',
+  '## Changes',
+  '- Relate T-0007 and T-0032 {kind: related; source: outlook-mail; received-datetime: 2026-10-22 09:14}',
+  '  - why: Both chase the SCAR-031 8D report.',
+  '- New person Jo Bloggs {email: jo@acme.com; company: Acme; title: Buyer; items: T-0050, T-0051; source: outlook-mail; received-datetime: 2026-10-22 09:14}',
+  '  - why: Signs the mail as buyer at Acme.',
+  '- Add email jo.b@acme.com to Jo Bloggs (P-0012) {source:outlook-mail; received-datetime:2026-10-22 09:14}',
+  '  - why: Writes from a second address.',
+  '',
+].join('\n');
+
+test('the Inbox\'s "## Changes" lines are kept apart from its Items, and written back as they were', () => {
+  const m = C.parse(INBOX);
+  assert.deepEqual(m.items.map(i => i.id), ['T-0050']);
+  assert.deepEqual(m.items[0].subs.map(s => s.k), ['src'], 'the blank line and the Changes are not lines of the last Item');
+  assert.equal(m.post[0], '## Changes');
+  assert.equal(C.serialize(m), INBOX);
+  const none = C.parse('# Inbox\n<!-- header -->\n\n## Changes\n- Relate T-0001 and T-0002 {kind: related}\n  - why: x\n');
+  assert.deepEqual(none.items, []);
+  assert.equal(C.serialize(none), '# Inbox\n<!-- header -->\n\n## Changes\n- Relate T-0001 and T-0002 {kind: related}\n  - why: x\n');
+  assert.equal(C.serialize(C.parse('# Tasks\n- [ ] T-0001 A\n')), '# Tasks\n- [ ] T-0001 A\n', 'a file with no Changes is as before');
+});
+
+test('changesOf reads each kind of change Proposal, its fields, either spacing, and its why', () => {
+  const cs = C.changesOf(C.parse(INBOX).post);
+  assert.deepEqual(cs.map(c => c.type), ['relationship', 'person', 'email']);
+  assert.deepEqual([cs[0].a, cs[0].b, cs[0].fields.kind, cs[0].why], ['T-0007', 'T-0032', 'related', 'Both chase the SCAR-031 8D report.']);
+  assert.deepEqual([cs[1].name, cs[1].email, cs[1].fields.items, cs[1].fields.company], ['Jo Bloggs', 'jo@acme.com', 'T-0050, T-0051', 'Acme']);
+  assert.deepEqual([cs[2].email, cs[2].name, cs[2].id, cs[2].fields.source], ['jo.b@acme.com', 'Jo Bloggs', 'P-0012', 'outlook-mail']);
+  assert.deepEqual(cs.map(c => c.lines.length), [2, 2, 2]);
+  assert.deepEqual(cs.map(C.changeKey), ['rel|T-0007|T-0032', 'person|jo@acme.com', 'person|jo.b@acme.com']);
+  assert.equal(C.changesOf(['## Changes', '- Rename T-0001 {source: x}'])[0].type, '');
+});
+
+test('setPriority adds a Person to priority_people in "## defaults" and takes them out, leaving every other line as it was', () => {
+  const src = '# Sources\n<!-- h -->\n\n## defaults\n- timezone: Europe/London\n- priority_people: P-0007, P-0010\n- page_cap: 10\n\n## outlook-mail\n- priority_people: P-0099\n';
+  const on = C.setPriority(src, 'P-0012', true);
+  assert.equal(on, src.replace('P-0007, P-0010', 'P-0007, P-0010, P-0012'));
+  assert.equal(C.setPriority(on, 'P-0012', true), on, 'once only');
+  assert.equal(C.setPriority(on, 'P-0012', false), src);
+  const none = '## defaults\n- timezone: Europe/London\n\n## outlook-mail\n- watermark: x\n';
+  assert.equal(C.setPriority(none, 'P-0012', true), '## defaults\n- timezone: Europe/London\n- priority_people: P-0012\n\n## outlook-mail\n- watermark: x\n');
+  const list = '## defaults\r\n- priority_people:\r\n  - P-0007\r\n- page_cap: 10\r\n';
+  assert.equal(C.setPriority(list, 'P-0012', true), '## defaults\r\n- priority_people:\r\n  - P-0007\r\n  - P-0012\r\n- page_cap: 10\r\n');
+  assert.equal(C.setPriority(C.setPriority(list, 'P-0012', true), 'P-0012', false), list);
+  assert.equal(C.setPriority('# Sources\n\n## outlook-mail\n- watermark: x\n', 'P-0012', true), '# Sources\n\n## defaults\n- priority_people: P-0012\n\n## outlook-mail\n- watermark: x\n');
 });

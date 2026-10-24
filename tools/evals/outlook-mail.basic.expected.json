@@ -9,7 +9,7 @@
     {
       "eval": "E1",
       "message": "m-101",
-      "result": "New inbox item to review the Academy QA checklist; no who (Rosa Kim is not in PEOPLE.md), her name in a note, and a \"new person?\" line in the report."
+      "result": "New inbox item to review the Academy QA checklist; no who (Rosa Kim is not in PEOPLE.md), her name in a note, and Rosa Kim proposed as a new person under \"## Changes\" in INBOX.md, through discern propose, with the item in her items and a why line."
     },
     {
       "eval": "E2",

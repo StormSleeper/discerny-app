@@ -33,7 +33,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 |---|---|---|
 | `TASKS.md` | Open items, flat list in ID order | by default |
 | `DONE.md` | Completed items | `ref:` lines (source keys), by source skills; otherwise only when asked |
-| `INBOX.md` | Proposals for new items from source skills, waiting for the user to clarify them | during a run, and when the user asks about the inbox |
+| `INBOX.md` | Proposals from source skills, waiting for the user to clarify them: new items, then changes under `## Changes` | during a run, and when the user asks about the inbox |
 | `PEOPLE.md` | One record per person: company, department, title, manager, notes, change history | when a person is involved |
 | `PROJECTS.md` | One record per project, workstream or pod (`PRJ-####`) | when an item has `prj:` or a project is named |
 | `SYSTEMS.md` | One record per system or platform (`SYS-####`) | when a system is involved |
@@ -42,7 +42,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `ASK-AGENT.md` | The agent queue: requests the user left for you from the UI ("Ask agent") | when running `discern-ask-agent` |
 | `ASK-AGENT-LOG.md` | Append-only record of agent requests you have actioned | append only; read when asked |
 | `SOURCES.md` | Settings shared by source skills (`## defaults`: time zone, priority people) and each source's state: watermark, filters, last run | by source skills; `timezone` whenever a time is written |
-| `IGNORED.md` | Source keys never to be proposed again: ignored by a source skill or deleted by the user | by source skills |
+| `IGNORED.md` | Source keys never to be proposed again: ignored by a source skill or deleted by the user, and the changes the user said No to | by source skills |
 | `DISMISSED.md` | Source keys of proposals the user dismissed, kept only until their source can no longer read the message again | by source skills, through `discern match` |
 | `REFRESH-LOG.md` | Reports of source-skill runs, newest last (created on the first run) | append only; read when asked |
 | `drafts/` | Messages you drafted for the user (`<ID>-<slug>.md`). Never sent | when asked |
@@ -143,6 +143,29 @@ A relationship is a stored connection between two items or records, of one kind:
 
 Both IDs must exist; no duplicates; nothing related to itself. `dep:` stays on the item and is not a relationship. A `link:` line on an item or record holds a URL, not a relationship.
 
+## Changes in the inbox (INBOX.md)
+
+Below the new items, `INBOX.md` may hold a `## Changes` heading: proposed changes to records, one line each, with the source skill's reason on a `- why:` sub-line. Field names follow `SOURCE-SKILLS.md`; `source` is the source's block in `SOURCES.md` and `received-datetime` is when the message reached it, in local time (`event-date: YYYY-MM-DD` for a horizon source). Nothing below the heading is an item.
+
+```
+## Changes
+- Relate T-0007 and T-0032 {kind: related; source: outlook-mail; received-datetime: 2026-10-22 09:14}
+  - why: Both chase the SCAR-031 8D report.
+- New person Jo Bloggs {email: jo@acme.com; company: Acme; title: Buyer; items: T-0050, T-0051; source: outlook-mail; received-datetime: 2026-10-22 09:14}
+  - why: Signs the mail as buyer at Acme.
+- Add email jo.b@acme.com to Jo Bloggs (P-0012) {source: outlook-mail; received-datetime: 2026-10-22 09:14}
+  - why: Writes from a second address.
+```
+
+The user answers each in the UI, Yes or No, and the UI removes the line:
+
+- **Relationship**: Yes writes the line to `RELATIONSHIPS.md`, with the kind its two ends allow. While either end is a new item still in the inbox, the question is asked on that item, and dismissing the item drops it.
+- **New person**: Add makes the record (a new `P-####`, `em:`, `co:` and `title:` as proposed) and sets `who` on the listed items that have none; Add as Priority person also adds the ID to `priority_people`. Either can also add an open Task to set up an introduction meeting, related to those items.
+- **New email**: Yes adds the address to the person's `em:`, with a `hist:` line.
+- **No** logs the change in `IGNORED.md` for good (see below), and the helper never proposes it again.
+
+Source skills write these lines only through `discern propose`; never edit them by hand.
+
 ## Agent queue (ASK-AGENT.md)
 
 The user leaves agent requests for you from the UI ("Ask agent"). They wait in the agent queue, one line each:
@@ -182,8 +205,8 @@ A source is anything outside Discerny that a source skill reads: a mailbox, Team
 
 1. A `discern-<source>` skill reads the shared `## defaults` block and its own `## <source-name>` block in `SOURCES.md`. For a stream source, such as a mailbox or Teams chat, it asks its connector only for messages after its cursor (`watermark` less `overlap`), in day-long windows. A horizon source, such as a calendar, re-reads a window ahead of now on every run instead.
 2. Each thing it finds is a candidate, which the skill assesses. A candidate whose source key already appears in `TASKS.md`, `INBOX.md`, `DONE.md`, `IGNORED.md` or `DISMISSED.md` is already tracked: it is skipped, or becomes a proposed change to the existing item, which appears only in the run report.
-3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `src:`, `ref:`, `asg:` and `source:`, the name of the source's block in `SOURCES.md`. Then the cursor moves past the last window fully processed. A run reads at most `page_cap` pages a pass, so after a gap a stream source takes several runs to catch up: its report ends by saying whether it is caught up, and a refresh runs it again while it isn't. Meetings come from the calendar: a horizon source writes each Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item and keeps it in step with the calendar, but never marks one done; the mail skill leaves invitations to it.
-4. The user clarifies each proposal in the UI's inbox. Accept moves the item to `TASKS.md`. Already handled accepts it and marks it done at once, so it goes to `DONE.md`. Dismiss, as Not actionable, Not mine or Duplicate, remembers only that message, in `DISMISSED.md`: later messages on the same thread can be proposed again. `discern commit` removes the line once the source can no longer read the message again.
+3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `src:`, `ref:`, `asg:` and `source:`, the name of the source's block in `SOURCES.md`. Relationships, new people and new email addresses the run found go under `## Changes` in `INBOX.md` too (see "Changes in the inbox"). Then the cursor moves past the last window fully processed. A run reads at most `page_cap` pages a pass, so after a gap a stream source takes several runs to catch up: its report ends by saying whether it is caught up, and a refresh runs it again while it isn't. Meetings come from the calendar: a horizon source writes each Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item and keeps it in step with the calendar, but never marks one done; the mail skill leaves invitations to it.
+4. The user clarifies each proposal in the UI's inbox. Accept moves the item to `TASKS.md`. Already handled accepts it and marks it done at once, so it goes to `DONE.md`. Dismiss, as Not actionable, Not mine or Duplicate, remembers only that message, in `DISMISSED.md`: later messages on the same thread can be proposed again. `discern commit` removes the line once the source can no longer read the message again. A change is answered Yes, which makes it, or No, which is for good.
 
 `SOURCES.md` starts with `## defaults`, then one block per source; each skill adds keys of its own:
 
@@ -207,7 +230,7 @@ A source is anything outside Discerny that a source skill reads: a mailbox, Team
 - last_result: fetched 11 · filtered 7 · duplicates 1 · inbox +3
 ```
 
-`IGNORED.md` lines are `ref | YYYY-MM-DD | reason`. Parse them from the right, because a source key may contain ` | `.
+`IGNORED.md` lines are `ref | YYYY-MM-DD | reason`. Parse them from the right, because a source key may contain ` | `. A No to a proposed change is kept as `rel|<id>|<id>` for a Relationship, matching the pair in either order and whatever its kind, or `person|<address>` for a new person or email address.
 
 `DISMISSED.md` lines follow the field names in `SOURCE-SKILLS.md`, with the source key as the line's text and the braces parsed from the final ` {`:
 

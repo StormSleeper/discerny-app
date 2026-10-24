@@ -24,7 +24,7 @@ Microsoft 365 connector: `outlook_email_search` for message metadata, and the ho
 
 `## outlook-mail`, a stream source: `watermark`, `overlap`, `exclude_subject` (regular expressions), `exclude_sender` (address fragments), `scan_sent_asks`, `waiting_min_age`, `waiting_max_age`, `waiting_checked_through`, `waiting_check_cap` (the read budget for sent mail), `last_run`, `last_result`; optional `invite_count_cap` (the calendar reads for invited counts, default 5), `page_cap`, `split`, `gap` and `fixture`.
 
-An `exclude_subject` rule that drops Accepted or Tentative replies, such as `^(Accepted|Tentative):`, stops them reaching `match`, so a tentative proposing a new time, or an Accepted reply that asks something, never becomes a Task. When the block has one, propose taking it out under "People and settings proposed".
+An `exclude_subject` rule that drops Accepted or Tentative replies, such as `^(Accepted|Tentative):`, stops them reaching `match`, so a tentative proposing a new time, or an Accepted reply that asks something, never becomes a Task. When the block has one, propose taking it out under "Settings proposed".
 
 ## Passes
 

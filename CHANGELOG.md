@@ -5,6 +5,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 ## Unreleased
 
 - Dismissing a Proposal now forgets only that message, so a later email on the same thread that needs action is proposed again, and "Already handled" marks the Proposal done instead of dismissing it.
+- The Inbox now asks about relationships, new people and new email addresses your source skills found, so you can add them with one click or say no for good.
 
 ## 0.2.0.1 (2026-10-23)
 

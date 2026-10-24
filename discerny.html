@@ -223,6 +223,16 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .meta{font-size:13px;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
 .right{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:6px;max-width:min(52cqi,460px)}
 .reasons{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}
+.chg .q{font-weight:600;font-size:15px;line-height:1.35;color:var(--ink);overflow-wrap:anywhere}
+.t.inl{display:inline;width:auto}
+.why{font-size:13px;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
+.ends{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px;margin-top:8px}
+.end{border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-width:0}
+.end .k{font-size:12px;color:var(--muted)}
+.end .t{font-size:14px}
+.relq{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px;font-size:13.5px}
+.relq .why{flex-basis:100%;margin-top:0}
+.intro{display:inline-flex;gap:6px;align-items:center;margin-top:8px}
 @container (max-width:720px){
   .row{grid-template-columns:auto minmax(0,1fr)}
   .row .right{grid-column:2;justify-content:flex-start;max-width:none;margin-top:4px}
@@ -412,8 +422,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.0.1'; // the app's version; tools/discern.mjs reads it from here
-var FORMAT='0.3.0.1'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
+var VERSION='0.3.0.2'; // the app's version; tools/discern.mjs reads it from here
+var FORMAT='0.3.0.2'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','week','soon','later','fyi'];
 var TYPES=['Task','Meeting','Process','Document','FYI'];
@@ -426,10 +436,17 @@ function ol(s){return String(s).replace(/[\r\n\u2028\u2029\u0085]+/g,' ');}
 function metaParts(meta,order){var parts=[];order.forEach(function(k){if(meta[k]!==undefined&&meta[k]!=='')parts.push(k+':'+ol(meta[k]).replace(/;/g,','));});
   Object.keys(meta).forEach(function(k){if(order.indexOf(k)<0&&k.charAt(0)!==' '&&meta[k]!=='')parts.push(k+':'+ol(meta[k]).replace(/;/g,','));});
   (meta[' bare']||[]).forEach(function(b){parts.push(ol(b).replace(/;/g,','));});return parts;}
+// INBOX.md holds new Items, then the change Proposals under CHANGES_HEAD. parse keeps those lines, from the heading on, in post.
+var CHANGES_HEAD='## Changes';
 function parse(text){
-  var lines=String(text||'').replace(/\r/g,'').split('\n');var pre=[],items=[],cur=null;
+  var lines=String(text||'').replace(/\r/g,'').split('\n');var pre=[],items=[],cur=null,post=null;
   if(lines.length&&lines[lines.length-1]==='')lines.pop();
   lines.forEach(function(ln){
+    if(post){post.push(ln);return;}
+    if(ln===CHANGES_HEAD){post=[ln];var t=cur?cur.subs:null;
+      if(t)while(t.length&&t[t.length-1].k==='raw'&&!t[t.length-1].v.trim())t.pop();
+      else while(pre.length&&!pre[pre.length-1].trim())pre.pop();
+      return;}
     var m=ITEM_RE.exec(ln);
     if(m){var rest=m[3],meta={},bi=rest.lastIndexOf(' {');
       if(bi>-1&&rest.charAt(rest.length-1)==='}'){meta=parseMeta(rest.slice(bi+2,-1));rest=rest.slice(0,bi);}
@@ -441,7 +458,7 @@ function parse(text){
     if(c){cur.subs.push({k:'sub',v:c[2],x:c[1]==='x'});return;}
     cur.subs.push({k:'raw',v:ln});
   });
-  return {pre:pre,items:items};}
+  return {pre:pre,items:items,post:post||[]};}
 var META_ORDER=['ty','who','prj','tg','top','urg','p','due','st','dep','done','asg'];
 function serItem(it){
   var parts=metaParts(it.meta,META_ORDER);
@@ -451,7 +468,26 @@ function serItem(it){
     else if(b.k==='sub')s+='\n  - ['+(b.x?'x':' ')+'] '+ol(b.v);
     else s+='\n  - '+b.k+': '+ol(b.v);});
   return s;}
-function serialize(model){return model.pre.join('\n')+'\n'+model.items.map(serItem).join('\n')+(model.items.length?'\n':'');}
+function serialize(model){var post=model.post||[];
+  return model.pre.join('\n')+'\n'+model.items.map(serItem).join('\n')+(model.items.length?'\n':'')+(post.length?'\n'+post.join('\n')+'\n':'');}
+// change Proposals under "## Changes" in INBOX.md: "- <what> {key: value; …}" then "  - why: …", the braces parsed from the final " {"
+var CHANGE_KINDS=[[/^Relate ((?:T|P|PRJ|SYS)-\d+) and ((?:T|P|PRJ|SYS)-\d+)$/,'relationship',['a','b']],[/^New person (.+)$/,'person',['name']],
+  [/^Add email (\S+) to (.+) \((P-\d+)\)$/,'email',['email','name','id']]];
+function fieldsOf(s){var f={};s.split(';').forEach(function(p){var i=p.indexOf(':');if(i>0)f[p.slice(0,i).trim()]=p.slice(i+1).trim();});return f;}
+// -> [{type: relationship|person|email|'', line, lines, at, fields, why, a, b | name, email | email, name, id}], at its index in post
+function changesOf(post){var out=[],cur=null;
+  (post||[]).forEach(function(ln,at){
+    var m=/^- (.*)$/.exec(ln);
+    if(m){var t=m[1],f={},bi=t.lastIndexOf(' {');if(bi>-1&&t.charAt(t.length-1)==='}'){f=fieldsOf(t.slice(bi+2,-1));t=t.slice(0,bi);}
+      cur={type:'',line:ln,lines:[ln],at:at,text:t.trim(),fields:f,why:''};
+      for(var k=0;k<CHANGE_KINDS.length;k++){var x=CHANGE_KINDS[k][0].exec(cur.text);if(x){cur.type=CHANGE_KINDS[k][1];CHANGE_KINDS[k][2].forEach(function(n,j){cur[n]=x[j+1].trim();});break;}}
+      if(cur.type==='person')cur.email=f.email||'';
+      out.push(cur);return;}
+    if(cur&&/^ {2,}\S/.test(ln)){cur.lines.push(ln);var w=/^ {2,}- why: ?(.*)$/.exec(ln);if(w)cur.why=w[1];return;}
+    cur=null;});
+  return out;}
+// the IGNORED.md source key a No to a change writes: rel|<id>|<id> (matched in either order), or person|<address>
+function changeKey(c){return c.type==='relationship'?'rel|'+c.a+'|'+c.b:'person|'+String(c.email||'').toLowerCase();}
 function nextId(model){var n=0;model.pre.forEach(function(l){var m=/next-id:\s*(\d+)/.exec(l);if(m)n=parseInt(m[1],10);});
   model.items.forEach(function(i){var k=parseInt(i.id.slice(2),10);if(k>=n)n=k+1;});return n;}
 function setNextId(model,n){var f=false;model.pre=model.pre.map(function(l){if(/next-id:/.test(l)){f=true;return '<!-- next-id: '+n+' -->';}return l;});
@@ -565,6 +601,27 @@ function relLine(a,b){
   if(REL_PAIRS[k1])return {line:'- '+a+' -> '+b+' | '+REL_PAIRS[k1]};
   if(REL_PAIRS[k2])return {line:'- '+b+' -> '+a+' | '+REL_PAIRS[k2]};
   return {err:'Cannot relate '+ka+' to '+kb+' (an item joins a project through its Project field).'};}
+// SOURCES.md: a Person's ID added to priority_people in "## defaults" (on), or taken out of it, every other line kept as it was
+function setPriority(text,id,on){
+  var t=String(text||''),eol=/\r\n/.test(t)?'\r\n':'\n',ls=t.split(/\r?\n/),d=-1,end=-1,at=-1,i;
+  for(i=0;i<ls.length;i++){
+    if(/^## /.test(ls[i])){if(d>=0)break;if(/^## defaults\s*$/.test(ls[i]))d=end=i;continue;}
+    if(d<0)continue;
+    if(/^ *- /.test(ls[i]))end=i;
+    if(/^- priority_people:/.test(ls[i]))at=i;}
+  if(at<0){
+    if(!on)return t;
+    if(d<0){var f=ls.findIndex(function(l){return /^## /.test(l);});if(f<0)f=ls.length&&ls[ls.length-1]===''?ls.length-1:ls.length;ls.splice(f,0,'## defaults','- priority_people: '+id,'');}
+    else ls.splice(end+1,0,'- priority_people: '+id);
+    return ls.join(eol);}
+  var v=ls[at].replace(/^- priority_people:\s*/,''),sub=[];
+  for(i=at+1;i<ls.length&&/^ {2,}- /.test(ls[i]);i++)sub.push(i);
+  if(!v.trim()&&sub.length){
+    var has=sub.filter(function(k){return ls[k].replace(/^ {2,}- /,'').trim()===id;});
+    if(on&&!has.length)ls.splice(sub[sub.length-1]+1,0,'  - '+id);
+    if(!on)has.reverse().forEach(function(k){ls.splice(k,1);});}
+  else{var ids=csv(v);if(on&&ids.indexOf(id)<0)ids.push(id);if(!on)ids=ids.filter(function(x){return x!==id;});ls[at]='- priority_people:'+(ids.length?' '+ids.join(', '):'');}
+  return ls.join(eol);}
 // versions compare part by part, a missing part counting as 0; 'next' (an unlanded Migration) is newer than any
 function versionCmp(a,b){if(a===b)return 0;if(a==='next')return 1;if(b==='next')return -1;
   var x=String(a).split('.'),y=String(b).split('.');
@@ -636,7 +693,7 @@ function quickItem(q,o){
   var notes=String(o.description||'').split(/[\r\n\u2028\u2029\u0085]/).map(function(s){return s.trim();}).filter(Boolean);
   return {title:q.title,meta:meta,notes:notes};}
 // The data folder files the page reads and writes; `discern serve` serves these and no others.
-var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md' };
+var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md', settings: 'SOURCES.md' };
 var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
 // The header the page writes when it creates a missing RELATIONSHIPS.md or ASK-AGENT.md: the starter file's, word for word.
 var REL_HEAD = ['# Relationships', '<!-- One line per relationship, stored once (shown on both): `- A ~ B | related` (symmetric) or `- A -> B | type` (involves, concerns, owns, uses). Validate: both IDs exist, no duplicates, nothing related to itself. `dep:` on items is separate. -->', ''];
@@ -649,7 +706,7 @@ var EDEF = {
   PRJ: { file: 'PROJECTS.md', key: 'projects', word: 'project', Word: 'Project', types: ['Project', 'Workstream', 'Pod'], sts: ['Active', 'On hold', 'Done'], pk: 'parent' },
   SYS: { file: 'SYSTEMS.md', key: 'systems', word: 'system', Word: 'System', types: ['Platform', 'Pipeline', 'Registry', 'Application', 'Instrument', 'Other'], sts: ['Live', 'In build', 'Delayed', 'Retired'], pk: 'part-of' }
 };
-var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, ignored: function (t) { return { text: String(t || '') }; }, dismissed: function (t) { return { text: String(t || '') }; } };
+var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, ignored: function (t) { return { text: String(t || '') }; }, dismissed: function (t) { return { text: String(t || '') }; }, settings: function (t) { return { text: String(t || '') }; } };
 function serKey(k, m) {
   if (k === 'tasks' || k === 'inbox' || k === 'done') return serialize(m);
   if (k === 'people') { ensurePIds(m); return pSerialize(m); }
@@ -676,7 +733,7 @@ var S = {
   group: lsGet('discerny-group', 'project'), pf: 'all', pq: '', pgroup: lsGet('discerny-pgroup', 'none'),
   wb: Object.assign({ group: 'urg', sort: 'urg', tag: '' }, lsJson('discerny-wb', {})), wq: '',
   qa: '', qaType: null, qaMore: false, qaUrg: '', qaDesc: '', palette: false, palQ: '', palI: 0, dialog: null,
-  composer: {}, subDraft: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', linkKind: 'All', linkDone: false, sysQ: '', suggestOn: {},
+  composer: {}, introOn: {}, subDraft: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', linkKind: 'All', linkDone: false, sysQ: '', suggestOn: {},
   dismissFor: null, snoozeFor: null, confirm: null, editAsk: null, editAskText: '', adding: null, addName: '', addGrp: '', addType: '',
   linkLabel: '', linkUrl: '', toasts: [], doneLimit: 60, copied: null,
   gate: { mode: 'pick', msg: '' }, side: lsGet('discerny-side', 'auto'), theme: lsGet('discerny-theme', 'system')
@@ -837,7 +894,7 @@ async function loadAll() {
     people: pParse(t['PEOPLE.md']), projects: eParse(t['PROJECTS.md']), systems: eParse(t['SYSTEMS.md']),
     rels: rParse(t['RELATIONSHIPS.md']), asks: aParse(t['ASK-AGENT.md']),
     log: parseLog(t['ASK-AGENT-LOG.md']), sources: parseSources(t['SOURCES.md']),
-    drafts: await readDrafts(), ignored: { text: '' }, dismissed: { text: '' }
+    drafts: await readDrafts(), ignored: { text: '' }, dismissed: { text: '' }, settings: { text: t['SOURCES.md'] }
   };
   keys.forEach(function (k) { BASE[k] = countOf(k, out[k]); });
   return out;
@@ -885,6 +942,31 @@ function dismissLine(it, ref, why) {
   else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(it.meta.asg || '')) f.push('received-datetime: ' + it.meta.asg);
   f.push('dismissed-date: ' + todayStr(), 'reason: ' + why);
   return '- ' + ref + ' {' + f.join('; ') + '}';
+}
+// A change Proposal's lines in the Inbox model's post: dropped once answered, put back by an undo. The heading goes with the last one.
+function dropChange(m, line) {
+  var p = m.post || [], k = p.indexOf(line), n = 1;
+  if (k < 0) return false;
+  while (k + n < p.length && /^ {2,}\S/.test(p[k + n])) n++;
+  p.splice(k, n);
+  if (!p.some(function (l) { return /^- /.test(l); })) m.post = [];
+  return true;
+}
+function putChange(m, lines) {
+  var p = m.post = m.post || [];
+  if (p.indexOf(lines[0]) >= 0) return;
+  if (!p.length) p.push(CHANGES_HEAD);
+  while (p.length > 1 && !p[p.length - 1].trim()) p.pop();
+  Array.prototype.push.apply(p, lines);
+}
+// The Relationship Proposals with an end on this Item, which go when the Item is dismissed.
+function changesOn(m, id) { return changesOf(m.post).filter(function (c) { return c.type === 'relationship' && (c.a === id || c.b === id); }); }
+function noLine(c) { return changeKey(c) + ' | ' + todayStr() + ' | the user said no'; }
+function withEmail(p, addr, on) {
+  var ems = csv(p.meta.em), l = addr.toLowerCase(), has = ems.some(function (e) { return e.toLowerCase() === l; });
+  if (on && !has) ems.push(addr);
+  if (!on) ems = ems.filter(function (e) { return e.toLowerCase() !== l; });
+  if (ems.length) p.meta.em = ems.join(', '); else delete p.meta.em;
 }
 function findSub(it, idx, text) {
   var subs = getSub(it, 'sub');
@@ -1064,16 +1146,108 @@ var OPS = {
       var k = M.inbox.items.findIndex(function (i) { return i.id === id; });
       if (k < 0) return;
       M.inbox.items.splice(k, 1);
+      changesOn(M.inbox, id).forEach(function (c) { dropChange(M.inbox, c.line); });
       if (disLines.length && !M.dismissed.text.trim()) M.dismissed.text = DIS_HEAD.join('\n');
       M.dismissed.text = addLines(M.dismissed.text, disLines);
     });
   },
-  undismiss: function (text, disLines) {
+  undismiss: function (text, disLines, changes) {
     return op('Undo dismiss', ['inbox', 'dismissed'], function (M) {
       var it = parse(text).items[0];
       if (!it) return;
       if (!M.inbox.items.some(function (i) { return i.id === it.id; })) insertById(M.inbox.items, it);
+      (changes || []).forEach(function (c) { putChange(M.inbox, c.lines); });
       M.dismissed.text = dropLines(M.dismissed.text, disLines);
+    });
+  },
+  /* change Proposals: each answer drops the Proposal from the Inbox and makes the change, or logs a No in IGNORED.md */
+  relYes: function (c, line) {
+    return op('Relate ' + c.a + ' and ' + c.b, ['inbox', 'rels'], function (M) {
+      if (!dropChange(M.inbox, c.line)) return;
+      var R = M.rels, l = remapLine(line);
+      if (R.lines.indexOf(l) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); }
+    });
+  },
+  relUnyes: function (c, line) {
+    return op('Undo relate', ['inbox', 'rels'], function (M) {
+      putChange(M.inbox, c.lines);
+      var R = M.rels, k = R.lines.indexOf(remapLine(line));
+      if (k >= 0) { R.lines.splice(k, 1); relRefresh(R); }
+    });
+  },
+  changeNo: function (c) {
+    return op('No to a change', ['inbox', 'ignored'], function (M) { if (dropChange(M.inbox, c.line)) M.ignored.text = addLines(M.ignored.text, [noLine(c)]); });
+  },
+  changeUnno: function (c, line) {
+    return op('Undo no', ['inbox', 'ignored'], function (M) { putChange(M.inbox, c.lines); M.ignored.text = dropLines(M.ignored.text, [line]); });
+  },
+  // st keeps what the Person had before, for the undo
+  emailYes: function (c, date, st) {
+    return op('Add ' + c.email + ' to ' + c.name, ['inbox', 'people'], function (M) {
+      var p = M.people.people.filter(function (x) { return x.meta.id === rid(c.id); })[0];
+      if (!p || !dropChange(M.inbox, c.line)) return;
+      var old = { em: p.meta.em || '', chk: p.meta.chk || '' };
+      if (!st.old) st.old = old;
+      withEmail(p, c.email, true);
+      if (p.meta.em !== old.em) p.subs.push({ k: 'hist', v: date + ' | Email: ' + (old.em || '(none)') + ' → ' + p.meta.em });
+      p.meta.chk = date;
+    });
+  },
+  emailUnyes: function (c, st, date) {
+    return op('Undo add email', ['inbox', 'people'], function (M) {
+      putChange(M.inbox, c.lines);
+      var p = M.people.people.filter(function (x) { return x.meta.id === rid(c.id); })[0];
+      if (!p || !st.old) return;
+      withEmail(p, c.email, false);
+      p.subs = p.subs.filter(function (s) { return !(s.k === 'hist' && s.v.indexOf(date + ' | Email: ') === 0 && s.v.slice(-c.email.length) === c.email); });
+      if (st.old.chk) p.meta.chk = st.old.chk; else delete p.meta.chk;
+    });
+  },
+  // Add, or Add as Priority person: a new Person record, who on the Items that named them only in a note, and an introduction Task if asked
+  personAdd: function (c, o, st) {
+    var ap = OPS.addPerson(c.name, 'Other'), spec = null, task = {};
+    if (o.intro) spec = { title: 'Set up an introduction meeting with ' + c.name, meta: { ty: 'Task', who: c.name, urg: 'week', p: '2', asg: o.now }, notes: [], newProjects: [], date: o.date };
+    var at = spec ? OPS.addTask(spec, task) : null, items = csv(c.fields.items);
+    st.whos = []; st.rels = [];
+    var keys = ['inbox', 'people', 'tasks', 'done', 'rels'].concat(o.priority ? ['settings'] : []);
+    return op('Add ' + c.name, keys, function (M) {
+      if (!dropChange(M.inbox, c.line)) return;
+      var had = M.people.people.some(function (x) { return x.name.toLowerCase() === c.name.toLowerCase(); });
+      ap.fn(M);
+      var p = M.people.people.filter(function (x) { return x.name.toLowerCase() === c.name.toLowerCase(); })[0];
+      if (!p) return;
+      if (!had) st.created = true;
+      st.pid = p.meta.id;
+      withEmail(p, c.email, true);
+      if (c.fields.company && !p.meta.co) p.meta.co = cleanName(c.fields.company);
+      if (c.fields.title && !p.meta.title) p.meta.title = cleanName(c.fields.title);
+      p.meta.chk = o.date;
+      items.forEach(function (x) { var f = fItem(M, x); if (f && f.k !== 'done' && !realWho(f.it)) { f.it.meta.who = p.name; if (st.whos.indexOf(f.it.id) < 0) st.whos.push(f.it.id); } });
+      if (o.priority) M.settings.text = setPriority(M.settings.text, p.meta.id, true);
+      if (!at) return;
+      at.fn(M);
+      st.task = task.id;
+      var R = M.rels, n = R.lines.length;
+      items.forEach(function (x) { var f = fItem(M, x), r = f ? relLine(task.id, f.it.id) : {}; if (r.line && R.lines.indexOf(r.line) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(r.line); if (st.rels.indexOf(r.line) < 0) st.rels.push(r.line); } });
+      if (R.lines.length !== n) relRefresh(R);
+    });
+  },
+  personUnadd: function (c, o, st) {
+    var keys = ['inbox', 'people', 'tasks', 'done', 'rels'].concat(o.priority ? ['settings'] : []);
+    return op('Undo add ' + c.name, keys, function (M) {
+      putChange(M.inbox, c.lines);
+      var pid = rid(st.pid), p = M.people.people.filter(function (x) { return x.meta.id === pid; })[0];
+      if (p && st.created) {
+        var hw = pNextId(M.people);
+        M.people.people = M.people.people.filter(function (x) { return x !== p; });
+        pSetNextId(M.people, hw);
+      } else if (p) withEmail(p, c.email, false);
+      st.whos.forEach(function (x) { var f = fItem(M, x); if (f && p && f.it.meta.who === p.name) delete f.it.meta.who; });
+      if (o.priority && pid) M.settings.text = setPriority(M.settings.text, pid, false);
+      if (st.task) { var t = rid(st.task); M.tasks.items = M.tasks.items.filter(function (i) { return !(i.id === t && getSub(i, 'src').some(function (b) { return /^Added /.test(b.v); })); }); }
+      var R = M.rels, n = R.lines.length, drop = st.rels.map(remapLine);
+      R.lines = R.lines.filter(function (l) { return drop.indexOf(l) < 0; });
+      if (R.lines.length !== n) relRefresh(R);
     });
   },
   del: function (id, igLines) {
@@ -1814,7 +1988,7 @@ function counts() {
   var open = openList();
   return {
     today: todayItems().length,
-    inbox: S.m.inbox.items.length,
+    inbox: inboxCount(),
     next: nextList().length,
     waiting: open.filter(isWaiting).length,
     upcoming: open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) > 0 && i.meta.ty !== 'FYI'; }).length,
@@ -1998,7 +2172,7 @@ function vRow(i, o) {
     '<div class="lead">' + lead + '</div>' +
     '<div class="body"><button type="button" class="t" data-act="open" data-id="' + i.id + '"' + (sel ? ' aria-current="true"' : '') + '>' + (time ? '<span class="tm">' + time + '</span>' : '') + esc(title) + '</button>' +
     (meta.length ? '<div class="meta">' + esc(meta.join(' · ')) + '</div>' : '') +
-    (o.showTags && tagsOf(i).length ? '<div class="pills">' + tagsOf(i).map(function (t) { return '<button type="button" class="chipbtn" data-act="wb-tag" data-v="' + esc(t) + '"' + pressed(S.wb.tag === t) + ' title="Show only #' + esc(t) + '">#' + esc(t) + '</button>'; }).join('') + '</div>' : '') + reasons + '</div>' +
+    (o.showTags && tagsOf(i).length ? '<div class="pills">' + tagsOf(i).map(function (t) { return '<button type="button" class="chipbtn" data-act="wb-tag" data-v="' + esc(t) + '"' + pressed(S.wb.tag === t) + ' title="Show only #' + esc(t) + '">#' + esc(t) + '</button>'; }).join('') + '</div>' : '') + (inbox ? vItemChanges(i.id) : '') + reasons + '</div>' +
     '<div class="right">' + badges + (showWhen ? '<span class="b when' + (wh.tone ? ' ' + wh.tone : '') + '">' + esc(whenLabel) + '</span>' : '') + acts + '<span class="id">' + i.id + '</span></div></div>';
 }
 var REASONS = ['Not actionable', 'Already handled', 'Duplicate', 'Not mine'];
@@ -2051,7 +2225,7 @@ function vCards() {
   var meetings = open.filter(function (i) { return i.meta.ty === 'Meeting' && isDay(i.meta.due); });
   var meetToday = meetings.filter(function (i) { return dd(i.meta.due) === 0; });
   var nextM = sortByDue(meetings.filter(function (i) { var n = dd(i.meta.due); return n > 0 || (n === 0 && (timeOf(i.meta.due) || '23:59') >= hm); }))[0];
-  var inbox = S.m.inbox.items.length;
+  var inbox = inboxCount();
   var waiting = open.filter(isWaiting).sort(function (a, b) { return age(b) - age(a); });
   var asks = S.m.asks.notes.length;
   var drafts = S.m.drafts.filter(function (d) { var id = draftId(d.name); return id && whereOf(id) === 'open'; }).length;
@@ -2090,11 +2264,75 @@ function vQuick() {
   }
   return h + '</div>';
 }
+/* ===================== change Proposals =====================
+   A Relationship with an end still in the Inbox is asked on that Item; every other change has a card of its own. */
+function inboxChanges() { return changesOf(S.m.inbox.post).filter(function (c) { return c.type; }); }
+function onInboxItem(c) { return c.type === 'relationship' && (whereOf(c.a) === 'inbox' || whereOf(c.b) === 'inbox'); }
+function changeCards() { return inboxChanges().filter(function (c) { return !onInboxItem(c); }); }
+function inboxCount() { return S.m.inbox.items.length + changeCards().length; }
+function changeByLine(line) { return inboxChanges().filter(function (c) { return c.line === line; })[0] || null; }
+// the line Yes writes to RELATIONSHIPS.md, with its ends in the order it stores them
+function relOf(c) { var r = relLine(c.a, c.b), m = r.line ? REL_RE.exec(r.line) : null; return m ? { line: r.line, from: m[1], to: m[3], type: m[4] } : null; }
+function relName(id) { return kindOf(id) === 'T' ? id : (labelOf(id) || id); }
+function relQuestion(c) {
+  var r = relOf(c);
+  if (!r) return 'Relate ' + c.a + ' and ' + c.b + '?';
+  var a = relName(r.from), b = relName(r.to);
+  return { related: 'Are these 2 related?', concerns: 'Does ' + a + ' concern ' + b + '?', involves: 'Is ' + b + ' involved in ' + a + '?', owns: 'Does ' + a + ' own ' + b + '?', uses: 'Does ' + a + ' use ' + b + '?' }[r.type] || 'Relate ' + a + ' and ' + b + '?';
+}
+function vWhy(c) { return c.why ? '<div class="why">Why: ' + esc(c.why) + '</div>' : ''; }
+function vSeen(c) {
+  var f = c.fields, at = f['received-datetime'] || f['event-date'] || '';
+  return f.source || at ? 'From ' + (f.source || 'a source') + (at ? ' on ' + fmtDT(at) : '') : '';
+}
+// one end of a Relationship: its type, ID, title or name, and Description; each opens its page
+function vEnd(id) {
+  var k = kindOf(id), label = labelOf(id), kind = KIND_WORD[k] || k, desc = '', sub = '';
+  if (k === 'T') { var t = item(id); if (t) { kind = t.meta.ty || 'Task'; desc = notesOf(t)[0] || ''; if (whereOf(id) === 'done') sub = 'done'; else if (whereOf(id) === 'inbox') sub = 'in the inbox'; } }
+  else if (k === 'P') { var p = personById(id); if (p) { sub = [p.meta.title, p.meta.co].filter(Boolean).join(', '); desc = notesOf(p)[0] || ''; } }
+  else { var e = entById(id); if (e) desc = notesOf(e)[0] || ''; }
+  return '<div class="end" data-k="end-' + id + '"><div class="k">' + esc(kind) + (sub ? ' · ' + esc(sub) : '') + ' <span class="id">' + id + '</span></div>' +
+    (label === null ? '<div class="hint">Not found in your files.</div>' : '<button type="button" class="t" data-act="open" data-id="' + id + '">' + esc(label) + '</button>') +
+    (desc ? '<div class="meta">' + esc(clip(desc, 160)) + '</div>' : '') + '</div>';
+}
+function vChange(c) {
+  var key = changeKey(c), body = '', acts = '', v = { v: c.line };
+  if (c.type === 'relationship') {
+    var ok = !!relOf(c) && exists(c.a) && exists(c.b);
+    body = '<div class="q">' + esc(relQuestion(c)) + '</div>' + vWhy(c) + '<div class="ends">' + vEnd(c.a) + vEnd(c.b) + '</div>';
+    acts = (ok ? bt('Yes', 'chg-yes', { v: c.line, cls: 'primary sm' }) : '') + bt('No', 'chg-no', { v: c.line, cls: 'sm' });
+  } else if (c.type === 'person') {
+    var items = csv(c.fields.items).filter(exists), who = [c.fields.title, c.fields.company].filter(Boolean).join(', '), cid = 'intro-' + slug(key);
+    body = '<div class="q">New person: ' + esc(c.name) + '</div><div class="meta">' + esc([c.email, who].filter(Boolean).join(' · ')) + '</div>' +
+      '<div class="meta">' + esc(vSeen(c)) + '</div>' +
+      (items.length ? '<div class="pills">' + items.map(function (x) { return '<button type="button" class="chipbtn" data-act="open" data-id="' + x + '"><span class="id">' + x + '</span> ' + esc(clip(labelOf(x), 60)) + '</button>'; }).join('') + '</div>' : '') + vWhy(c) +
+      '<label class="hint intro" for="' + cid + '"><input type="checkbox" id="' + cid + '" data-ch="intro" data-v="' + esc(key) + '"' + (S.introOn[key] ? ' checked' : '') + '>Add a Task to set up an introduction meeting</label>';
+    acts = bt('Add', 'person-add', { v: c.line, cls: 'primary sm' }) + bt('Add as Priority person', 'person-prio', { v: c.line, cls: 'sm' }) + bt('No', 'chg-no', { v: c.line, cls: 'sm' });
+  } else {
+    var p = personById(c.id);
+    body = '<div class="q">New email for ' + (p ? '<button type="button" class="t inl" data-act="open" data-id="' + c.id + '">' + esc(p.name) + '</button>' : esc(c.name)) + '</div>' +
+      '<div class="meta">' + esc([c.email, p ? [p.meta.title, p.meta.co].filter(Boolean).join(', ') : c.id + ' is not in People'].filter(Boolean).join(' · ')) + '</div>' + vWhy(c);
+    acts = (p ? bt('Yes', 'email-yes', { v: c.line, cls: 'primary sm' }) : '') + bt('No', 'chg-no', v);
+  }
+  return '<div class="row chg" data-k="c-' + esc(key) + '"><div class="lead"><span class="pip" aria-hidden="true"></span></div><div class="body">' + body + '</div><div class="right">' + acts + '</div></div>';
+}
+// the Relationship Proposals asked on an Item still in the Inbox: "Related to T-0012 title? Yes | No"
+function vItemChanges(id) {
+  return changesOn(S.m.inbox, id).map(function (c) {
+    var r = relOf(c), other = c.a === id ? c.b : c.a, label = labelOf(other);
+    if (!r || label === null) return '';
+    var word = r.type === 'related' ? 'Related to' : relWord({ type: r.type, from: r.from === id });
+    return '<div class="relq" data-k="rq-' + esc(changeKey(c)) + '"><span>' + esc(word) + ' <button type="button" class="link" data-act="open" data-id="' + other + '">' + (kindOf(other) === 'T' ? other + ' ' : '') + '<em>' + esc(clip(label, 60)) + '</em></button>?</span>' +
+      bt('Yes', 'chg-yes', { v: c.line, cls: 'sm' }) + bt('No', 'chg-no', { v: c.line, cls: 'sm' }) + (c.why ? '<span class="why">' + esc(c.why) + '</span>' : '') + '</div>';
+  }).join('');
+}
 function viewInbox() {
-  var l = inboxList(), r = lastRefresh();
+  var l = inboxList(), cs = changeCards(), r = lastRefresh();
+  var body = vSec('triage', 'To clarify', rowsOf(l), { hint: 'oldest first', empty: cs.length ? 'No new items to clarify.' : 'Inbox zero. Nothing is waiting to be clarified.' });
+  if (cs.length) body += vSec('changes', 'Changes', cs.map(vChange), { hint: 'relationships and people' });
   return {
-    title: 'Inbox', sub: plural(l.length, 'proposal') + (r ? ' · last run ' + r : ''),
-    body: '<div class="list">' + vSec('triage', 'To clarify', rowsOf(l), { hint: 'oldest first', empty: 'Inbox zero. Nothing is waiting to be clarified.' }) + '</div>'
+    title: 'Inbox', sub: plural(l.length + cs.length, 'proposal') + (r ? ' · last run ' + r : ''),
+    body: '<div class="list">' + body + '</div>'
   };
 }
 function viewNext() {
@@ -2617,7 +2855,8 @@ function panelTask(i) {
     var my = '<section data-k="sec-my"><label class="h3" for="f-my" style="display:block">Your notes</label><textarea id="f-my" class="in" rows="4" data-ch="my" data-id="' + id + '" placeholder="Anything you want to remember about this">' + esc(myOf(i).join('\n')) + '</textarea></section>';
     var tail = '';
     if (inbox) {
-      var sg = suggestions(i), il = inboxList(), pos = il.map(function (x) { return x.id; }).indexOf(id);
+      var sg = suggestions(i), il = inboxList(), pos = il.map(function (x) { return x.id; }).indexOf(id), rq = vItemChanges(id);
+      if (rq) tail += '<div class="box" data-k="rq"><div class="h3" style="margin:0">Proposed relationships</div>' + rq + '</div>';
       if (sg.length) tail += '<div class="box" data-k="sug"><div class="h3" style="margin:0">Looks related</div>' + sg.map(function (g) {
         var cid = 'sg-' + g.id, on = !!S.suggestOn[id + '|' + g.id];
         return '<div class="subrow"><input type="checkbox" id="' + cid + '" data-ch="suggest" data-id="' + id + '" data-v="' + g.id + '"' + (on ? ' checked' : '') + '><label for="' + cid + '"><span class="id">' + g.id + '</span> ' + esc(g.title) + ' <span class="hint">· ' + esc(g.why) + '</span></label></div>';
@@ -2965,7 +3204,7 @@ function afterRender() {
     S.scrollRow = null;
     if (r && r.scrollIntoView) r.scrollIntoView({ block: 'nearest' });
   }
-  var n = S.ready && S.m ? S.m.inbox.items.length : 0;
+  var n = S.ready && S.m ? inboxCount() : 0;
   var title = (S.ready ? VIEW_TITLE[S.view] + ' · ' : '') + 'Discerny' + (n ? ' (' + n + ' in inbox)' : '');
   if (document.title !== title) document.title = title;
 }
@@ -3111,11 +3350,36 @@ function dismiss(id, reason) {
   if (reason === 'Already handled') { acceptDone(id); return; }
   var why = String(reason || 'not actionable').toLowerCase();
   var lines = ignorable(getSub(i, 'ref').map(function (b) { return b.v.trim(); })).map(function (r) { return dismissLine(i, r, why); });
-  var text = serItem(i), nx = nextInbox(id);
+  var text = serItem(i), nx = nextInbox(id), cs = changesOn(S.m.inbox, id);
   S.dismissFor = null;
   commit(OPS.dismiss(id, lines));
-  toastShow('Dismissed ' + id + ' (' + why + '). This message won’t be proposed again; later news on the thread may be.', OPS.undismiss(text, lines));
+  toastShow('Dismissed ' + id + ' (' + why + '). This message won’t be proposed again; later news on the thread may be.', OPS.undismiss(text, lines, cs));
   afterTriage(id, nx);
+}
+// Answers to change Proposals. Each says what it did, with an undo; a No is for good.
+function relYes(line) {
+  var c = changeByLine(line), r = c && relOf(c);
+  if (!r || !exists(c.a) || !exists(c.b)) return;
+  commit(OPS.relYes(c, r.line), { toast: 'Related ' + c.a + ' and ' + c.b + '.', undo: OPS.relUnyes(c, r.line) });
+}
+function changeNo(line) {
+  var c = changeByLine(line);
+  if (!c) return;
+  var what = c.type === 'relationship' ? c.a + ' and ' + c.b + ' won’t be proposed as related again.' : c.email + ' won’t be proposed again.';
+  commit(OPS.changeNo(c), { toast: 'No: ' + what, undo: OPS.changeUnno(c, noLine(c)) });
+}
+function emailYes(line) {
+  var c = changeByLine(line), st = {};
+  if (!c || c.type !== 'email' || !personById(c.id)) return;
+  commit(OPS.emailYes(c, todayStr(), st), { toast: 'Added ' + c.email + ' to ' + c.name + '.', undo: OPS.emailUnyes(c, st, todayStr()) });
+}
+function personAdd(line, priority) {
+  var c = changeByLine(line), st = {};
+  if (!c || c.type !== 'person') return;
+  var o = { priority: priority, intro: !!S.introOn[changeKey(c)], date: todayStr(), now: nowStamp() };
+  commit(OPS.personAdd(c, o, st));
+  delete S.introOn[changeKey(c)];
+  toastShow('Added ' + c.name + ' to People' + (priority ? ' as a Priority person' : '') + (st.task ? ', with ' + st.task + ' to set up an introduction meeting' : '') + '.', OPS.personUnadd(c, o, st));
 }
 function deleteTask(id) {
   var i = item(id);
@@ -3283,6 +3547,11 @@ var ACT = {
   'dismiss-open': function (el) { var id = did(el), at = el.closest('.panel') ? 'panel' : 'row'; if (S.dismissFor === id && S.dismissAt === at) { S.dismissFor = null; render(); return; } S.dismissFor = id; S.dismissAt = at; focusLater(at === 'panel' ? '.panel .reasons .chipbtn' : '.main [data-row="' + id + '"] .reasons .chipbtn'); },
   'dismiss-cancel': function () { S.dismissFor = null; render(); },
   dismiss: function (el) { dismiss(did(el), dvv(el)); },
+  'chg-yes': function (el) { relYes(dvv(el)); },
+  'chg-no': function (el) { changeNo(dvv(el)); },
+  'email-yes': function (el) { emailYes(dvv(el)); },
+  'person-add': function (el) { personAdd(dvv(el), false); },
+  'person-prio': function (el) { personAdd(dvv(el), true); },
   chase: function (el) { chase(did(el)); },
   gotit: function (el) { gotIt(did(el)); },
   ack: function (el) { acknowledge(did(el)); },
@@ -3416,6 +3685,7 @@ var CH = {
   sub: function (el) { var id = did(el), k = +el.getAttribute('data-i'), i = item(id), s = i ? subsOf(i)[k] : null; if (s) commit(OPS.setSub(id, k, s.v, el.checked)); },
   'link-done': function (el) { S.linkDone = el.checked; render(); },
   suggest: function (el) { S.suggestOn[did(el) + '|' + dvv(el)] = el.checked; render(); },
+  intro: function (el) { S.introOn[dvv(el)] = el.checked; render(); },
   review: function (el) { var st = reviewState(); st.done[dvv(el)] = el.checked; lsSet('discerny-review', JSON.stringify(st)); render(); },
   'tag-add': function (el) { addTagFrom(el); },
   pf: function (el) {

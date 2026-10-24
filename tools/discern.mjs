@@ -6,8 +6,8 @@
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
 //   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
-// Commands: connect, new, state, match, who, local, add, ignore, note, ref, commit, log, check, upgrade, serve.
-// Input for match, add, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
+// Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, note, ref, commit, log, check, upgrade, serve.
+// Input for match, add, propose, meetings, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
 //
@@ -133,7 +133,8 @@ function loadCore() {
   const html = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
   const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
   if (a < 0 || b < a) fail('no //<core> ... //</core> block found in discerny.html next to tools/');
-  const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS', 'FILES', 'WATCH'];
+  const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'TYPES', 'URG_ORDER', 'STATUS', 'FILES', 'WATCH',
+    'CHANGES_HEAD', 'changesOf', 'changeKey', 'relLine', 'REL_RE'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
   catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
@@ -154,6 +155,25 @@ function appendLines(f, lines, header) {
   const eol = eolOf(t);
   if (!t.endsWith('\n')) t += eol;
   write(f, t + lines.join(eol) + eol);
+}
+const INBOX_HEAD = '# Inbox\n<!-- Proposals from the discern-* source skills, waiting for the user to clarify them. New items come first: Accept moves an item to TASKS.md; Dismiss remembers its message in DISMISSED.md. IDs come from the next-id counter in TASKS.md. Changes to records follow under "## Changes", one line each with a "- why:" sub-line: a Relationship, a new person or a new email address, which the user answers Yes or No. -->\n';
+const IGNORED_HEAD = '# Ignored\n<!-- One line per source key never to be proposed again, ignored by a source skill or deleted by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). A Proposal the user dismisses goes in DISMISSED.md instead. A No to a proposed change is kept here too, as rel|<id>|<id> (either order) or person|<address>. -->\n';
+// New Items go in INBOX.md above "## Changes", and change Proposals at its end, under that heading.
+function addToInbox(lines, changes) {
+  let t = read('INBOX.md');
+  if (!t.trim()) t = INBOX_HEAD + '\n';
+  const eol = eolOf(t), ls = t.replace(/\r?\n$/, '').split(/\r?\n/), c = ls.indexOf(C.CHANGES_HEAD);
+  if (c < 0) ls.push(...lines);
+  else if (lines.length) {
+    let at = c;
+    while (at > 0 && !ls[at - 1].trim()) at--;
+    ls.splice(at, 0, ...lines, ...(at === c ? [''] : []));
+  }
+  if (changes.length) {
+    if (ls.indexOf(C.CHANGES_HEAD) < 0) { while (ls.length && !ls[ls.length - 1].trim()) ls.pop(); ls.push('', C.CHANGES_HEAD); }
+    ls.push(...changes);
+  }
+  write('INBOX.md', ls.join(eol) + eol);
 }
 
 // ---------------------------------------------------------------- time
@@ -753,9 +773,86 @@ CMD.add = function () {
   if (OPT.dry) { out({ dry_run: true, would_add: built.map(b => C.serItem({ id: 'T-????', done: false, title: b.title, meta: b.meta, subs: b.subs })) }); return; }
   const { start, next } = raiseCounter(built.length);
   const added = built.map((b, k) => ({ id: 'T-' + String(start + k).padStart(4, '0'), ...b }));
-  appendLines('INBOX.md', added.map(a => C.serItem({ id: a.id, done: false, title: a.title, meta: a.meta, subs: a.subs })),
-    '# Inbox\n<!-- Proposals for new items from the discern-* source skills, waiting for the user to clarify them. Accept moves an item to TASKS.md; Dismiss remembers its message in DISMISSED.md. IDs come from the next-id counter in TASKS.md. -->\n');
+  addToInbox(added.map(a => C.serItem({ id: a.id, done: false, title: a.title, meta: a.meta, subs: a.subs }).replace(/\n/g, eolOf(read('INBOX.md') || '\n'))), []);
   out({ added: added.map(a => ({ id: a.id, title: a.title, refs: a.subs.filter(s => s.k === 'ref').map(s => s.v) })), counter: next });
+};
+
+// Changes to records go to INBOX.md under "## Changes", for the user to answer Yes or No: a Relationship, a new person,
+// or a new email address for a person. One the folder already has, already proposed, or said No to is skipped, not an error.
+const EMAIL = /^[^\s@,;{}]+@[^\s@,;{}]+\.[^\s@,;{}]+$/;
+CMD.propose = function () {
+  const source = ARGS[1], S = sources();
+  if (!source) fail('name the source the Proposals come from: discern propose <source>, as its "## <source>" block in SOURCES.md does');
+  if (!S.blocks[source] || source === 'defaults') fail(`SOURCES.md has no "## ${source}" block: name the source as its block does`);
+  const rows = stdinJson(), tz = timezone(S), P = people();
+  const items = new Map(), done = new Set();
+  [['TASKS.md', 'open'], ['INBOX.md', 'inbox'], ['DONE.md', 'done']].forEach(([f, w]) => C.parse(read(f)).items.forEach(it => { if (!items.has(it.id)) items.set(it.id, w); }));
+  const records = new Set([...P.map(p => p.meta.id).filter(Boolean),
+    ...(read('PROJECTS.md') + read('SYSTEMS.md')).match(/id:(PRJ|SYS)-\d+/g)?.map(s => s.slice(3)) || []]);
+  const exists = id => items.has(id) || records.has(id);
+  const rels = new Set(read('RELATIONSHIPS.md').replace(/\r/g, '').split('\n').map(l => C.REL_RE.exec(l)).filter(Boolean).map(m => [m[1], m[3]].sort().join('|')));
+  const ignored = new Set(loadIndex().filter(r => r.store === 'ignored').map(r => r.ref.toLowerCase()));
+  const pending = new Set(C.changesOf(C.parse(read('INBOX.md')).post).filter(c => c.type).map(c => c.type === 'relationship' ? [c.a, c.b].sort().join('|') : C.changeKey(c)));
+  const known = new Map(P.flatMap(p => csv(p.meta.em).map(e => [e.toLowerCase(), p])));
+  const errors = [], built = [], skipped = [], batch = new Set();
+  const one = s => String(s || '').replace(/[\r\n\u2028\u2029\u0085]+/g, ' ').trim();
+  const meta = s => one(s).replace(/;/g, ',').replace(/[{}]/g, '');
+  rows.forEach((r, i) => {
+    const e = m => errors.push(`proposal ${i}: ${m}`), skip = why => skipped.push({ proposal: i, why });
+    const why = one(r.why), f = [];
+    if (!why) e('why is required: one line saying what the source showed');
+    let when = '';
+    if (r.event_date) { if (!/^\d{4}-\d{2}-\d{2}$/.test(r.event_date)) e('event_date must be YYYY-MM-DD'); else when = `event-date: ${r.event_date}`; }
+    else if (r.received) when = `received-datetime: ${local(toInstant(r.received), tz)}`;
+    else e('give received (the message time, ISO with Z), or event_date for a horizon source');
+    const tail = [`source: ${source}`, when];
+    let line, key;
+    if (r.change === 'relationship') {
+      const [a, b] = listOf(r.ids);
+      if (!a || !b || listOf(r.ids).length !== 2) { e('ids must name the two ends, such as ["T-0007", "T-0032"]'); return; }
+      [a, b].forEach(x => { if (!exists(x)) e(`${x} is not in the folder: add a new item first, then propose its Relationship with the ID add gave it`); });
+      const rl = C.relLine(a, b);
+      if (rl.err) { e(rl.err); return; }
+      const kind = C.REL_RE.exec(rl.line)[4];
+      if (r.kind && r.kind !== kind) e(`${a} and ${b} can only be ${kind}, not ${r.kind}`);
+      key = [a, b].sort().join('|');
+      if (rels.has(key)) return skip(`${a} and ${b} are already related`);
+      if (ignored.has(`rel|${a}|${b}`.toLowerCase()) || ignored.has(`rel|${b}|${a}`.toLowerCase())) return skip(`the user said no to relating ${a} and ${b}`);
+      line = `- Relate ${a} and ${b} {${[`kind: ${kind}`, ...tail].join('; ')}}`;
+    } else if (r.change === 'person' || r.change === 'email') {
+      const addr = one(r.email);
+      if (!EMAIL.test(addr)) { e(`email "${addr}" is not an email address`); return; }
+      key = `person|${addr.toLowerCase()}`;
+      const p = known.get(addr.toLowerCase());
+      if (p) return skip(`${addr} is already ${p.name}'s (${p.meta.id})`);
+      if (ignored.has(key)) return skip(`the user said no to ${addr}`);
+      if (r.change === 'person') {
+        const name = meta(r.name);
+        if (!name) { e('name is required'); return; }
+        const same = P.find(x => x.name.toLowerCase() === name.toLowerCase());
+        if (same) { e(`${name} is already in PEOPLE.md as ${same.meta.id}: propose the address as a new email for them, with "change": "email" and "person": "${same.meta.id}"`); return; }
+        const on = listOf(r.items);
+        on.forEach(x => { if (!/^T-\d+$/.test(x) || !items.has(x) || items.get(x) === 'done') e(`items: ${x} is not an open or inbox item`); });
+        if (r.company) f.push(`company: ${meta(r.company)}`);
+        if (r.title) f.push(`title: ${meta(r.title)}`);
+        if (on.length) f.push(`items: ${on.join(', ')}`);
+        line = `- New person ${name} {${[`email: ${addr}`, ...f, ...tail].join('; ')}}`;
+      } else {
+        const p2 = P.find(x => x.meta.id === r.person);
+        if (!p2) { e(`person must be the P-id of someone in PEOPLE.md, not "${r.person || ''}"`); return; }
+        line = `- Add email ${addr} to ${meta(p2.name)} (${p2.meta.id}) {${tail.join('; ')}}`;
+      }
+    } else { e('change must be relationship, person or email'); return; }
+    if (pending.has(key)) return skip(`already proposed in the Inbox`);
+    if (batch.has(key)) return skip(`appears twice in this batch`);
+    batch.add(key);
+    built.push([line, `  - why: ${why}`]);
+  });
+  if (errors.length) fail('nothing was written. ' + errors.join(' | '));
+  const lines = built.map(b => b[0]);
+  if (OPT.dry) { out({ dry_run: true, would_propose: lines, skipped }); return; }
+  if (built.length) addToInbox([], built.flat());
+  out({ proposed: lines, skipped });
 };
 
 // Raise the counter first, so an interrupted run leaves a gap, never a duplicate ID.
@@ -839,7 +936,7 @@ CMD.ignore = function () {
     have.add(ref.toLowerCase());
     lines.push(`${ref} | ${date} | ${String(r.reason || 'not actionable').replace(/\|/g, '/').replace(/[\r\n]+/g, ' ').trim()}`);
   });
-  if (lines.length) appendLines('IGNORED.md', lines, '# Ignored\n<!-- One line per source key never to be proposed again, ignored by a source skill or deleted by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). A Proposal the user dismisses goes in DISMISSED.md instead. -->\n');
+  if (lines.length) appendLines('IGNORED.md', lines, IGNORED_HEAD);
   out({ ignored: lines.length, skipped });
 };
 
@@ -965,6 +1062,11 @@ CMD.check = function () {
     if (m[1] === m[3]) errors.push(`RELATIONSHIPS.md: self-link ${l.trim()}`);
     const k = m[2] === '~' ? [m[1], m[3]].sort().join('~') : m[1] + '->' + m[3];
     if (rels.has(k)) errors.push(`RELATIONSHIPS.md: duplicate ${l.trim()}`); rels.add(k);
+  });
+  C.changesOf(sets['INBOX.md'].post).forEach(c => {
+    if (!c.type) warnings.push(`INBOX.md ${C.CHANGES_HEAD}: unrecognised line "${c.line.slice(0, 60)}"`);
+    else if (c.type === 'relationship') [c.a, c.b].forEach(id => { if (!exists(id)) warnings.push(`INBOX.md: the Relationship proposed in "${c.text}" names ${id}, which does not exist`); });
+    else if (c.type === 'email' && !pids.has(c.id)) warnings.push(`INBOX.md: "${c.text}" names ${c.id}, who is not in PEOPLE.md`);
   });
   const S = sources();
   if (!S.blocks.defaults) warnings.push('SOURCES.md has no "## defaults" block');
@@ -1143,7 +1245,7 @@ if (cmd === '--version' || cmd === 'version') {
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|meetings|ignore|note|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|note|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
 // serve starts with no usable folder when it can switch to one, so the page can offer Change folder.

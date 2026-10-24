@@ -1765,12 +1765,159 @@ test('the Dismiss Migration previews and changes nothing; --write removes past D
   const w = migrateDismiss(d, '--write');
   assert.equal(w.status, 0, w.stderr);
   const starter = f => fs.readFileSync(path.join(REPO, 'new_discerny_repo', f), 'utf8').replace(/\r\n/g, '\n').split('\n')[1];
-  assert.deepEqual(read(d, 'IGNORED.md').split('\n'), ['# Ignored', starter('IGNORED.md'), '', ...keep, '']);
+  // The starter's IGNORED.md header has changed since, so this is the one the Migration writes.
+  const ignoredHead = '<!-- One line per source key never to be proposed again, ignored by a source skill or deleted by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). A Proposal the user dismisses goes in DISMISSED.md instead. -->';
+  assert.deepEqual(read(d, 'IGNORED.md').split('\n'), ['# Ignored', ignoredHead, '', ...keep, '']);
   assert.equal(read(d, 'DISMISSED.md'), fs.readFileSync(path.join(REPO, 'new_discerny_repo', 'DISMISSED.md'), 'utf8').replace(/\r\n/g, '\n'));
   assert.equal(read(d, 'SOURCES.md').split('\n')[1], starter('SOURCES.md'));
   assert.match(read(d, 'INBOX.md'), /Dismiss remembers its message in DISMISSED\.md\. -->\r\n/);
   assert.doesNotMatch(read(d, 'INBOX.md'), /[^\r]\n/);
   const after = snapshot(d), again = migrateDismiss(d, '--write');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Nothing to change/);
+  assert.deepEqual(snapshot(d), after);
+});
+
+// ---------------------------------------------------------------- change Proposals in the Inbox
+const rel = (ids, o = {}) => ({ change: 'relationship', ids, received: '2026-10-12T08:14:00Z', why: 'Both chase the SCAR-031 8D report.', ...o });
+const newPerson = (o = {}) => ({ change: 'person', name: 'Jo Bloggs', email: 'jo@acme.example', company: 'Acme', title: 'Buyer', items: ['T-0027'], received: '2026-10-12T08:14:00Z', why: 'Asked about the dashboard.', ...o });
+const newEmail = (o = {}) => ({ change: 'email', email: 'meera.i@pennywhistle.example', person: 'P-0003', received: '2026-10-12T08:14:00Z', why: 'Signs as Meera Ilangovan.', ...o });
+// A copy of the Example with no change Proposals of its own, so a test sees only what it proposes.
+function noChanges(d) {
+  const t = read(d, 'INBOX.md'), at = t.search(/^## Changes\r?$/m);
+  if (at >= 0) fs.writeFileSync(path.join(d, 'INBOX.md'), t.slice(0, at).replace(/(\r?\n)+$/, '$1'));
+  return d;
+}
+const changeLines = d => { const t = read(d, 'INBOX.md').replace(/\r\n/g, '\n'); return t.slice(t.search(/^## Changes$/m)).trimEnd().split('\n'); };
+
+test('propose writes a Relationship, a new person and a new email under "## Changes", in the field names of SOURCE-SKILLS.md, and check passes', () => {
+  const d = noChanges(folder()), before = read(d, 'INBOX.md').replace(/\r\n/g, '\n');
+  const r = run(d, ['propose', 'outlook-mail'], [rel(['T-0012', 'T-0025']), rel(['SYS-0001', 'T-0028']), newPerson(), newEmail()]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.skipped, []);
+  assert.deepEqual(changeLines(d), [
+    '## Changes',
+    '- Relate T-0012 and T-0025 {kind: related; source: outlook-mail; received-datetime: 2026-10-12 09:14}',
+    '  - why: Both chase the SCAR-031 8D report.',
+    '- Relate SYS-0001 and T-0028 {kind: concerns; source: outlook-mail; received-datetime: 2026-10-12 09:14}',
+    '  - why: Both chase the SCAR-031 8D report.',
+    '- New person Jo Bloggs {email: jo@acme.example; company: Acme; title: Buyer; items: T-0027; source: outlook-mail; received-datetime: 2026-10-12 09:14}',
+    '  - why: Asked about the dashboard.',
+    '- Add email meera.i@pennywhistle.example to Meera Ilangovan (P-0003) {source: outlook-mail; received-datetime: 2026-10-12 09:14}',
+    '  - why: Signs as Meera Ilangovan.',
+  ]);
+  assert.ok(read(d, 'INBOX.md').replace(/\r\n/g, '\n').startsWith(before.trimEnd() + '\n\n## Changes\n'), 'the Items above are untouched, with one blank line before the heading');
+  const c = run(d, ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.deepEqual(c.json.warnings.filter(w => /INBOX/.test(w)), []);
+});
+
+test('add puts new Items above "## Changes", and a later propose adds below what is there', () => {
+  const d = noChanges(folder());
+  assert.equal(run(d, ['propose', 'outlook-mail'], [rel(['T-0012', 'T-0025'])]).code, 0);
+  const a = run(d, ['add', 'outlook-mail'], [draft()]);
+  assert.equal(a.code, 0, a.out);
+  assert.equal(run(d, ['propose', 'outlook-mail'], [newEmail()]).code, 0);
+  const raw = read(d, 'INBOX.md'), t = raw.replace(/\r\n/g, '\n'), id = a.json.added[0].id;
+  assert.ok(t.indexOf(id) < t.search(/^## Changes$/m), 'the new Item is above the heading');
+  assert.match(t, /  - ref: mail\|Sampling plan\n\n## Changes\n- Relate T-0012 and T-0025 [^\n]*\n  - why: [^\n]*\n- Add email meera\.i@/);
+  assert.ok(!/\r\n/.test(raw) || !/[^\r]\n/.test(raw), 'one kind of line ending');
+  assert.equal(run(d, ['check']).code, 0);
+});
+
+test('propose skips what is already related, already proposed, said No to, or already someone\'s address, so a second run proposes nothing', () => {
+  const d = noChanges(folder());
+  fs.appendFileSync(path.join(d, 'IGNORED.md'), 'rel|T-0025|T-0009 | 2026-10-10 | the user said no\nperson|no.thanks@acme.example | 2026-10-10 | the user said no\n');
+  const r = run(d, ['propose', 'outlook-mail'], [
+    rel(['T-0007', 'T-0017']), rel(['T-0009', 'T-0025']), newPerson({ email: 'No.Thanks@acme.example' }),
+    newPerson({ name: 'Someone Else', email: 'meera.ilangovan@pennywhistle.example' }), rel(['T-0012', 'T-0025']), rel(['T-0025', 'T-0012']),
+  ]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.proposed, ['- Relate T-0012 and T-0025 {kind: related; source: outlook-mail; received-datetime: 2026-10-12 09:14}']);
+  assert.deepEqual(r.json.skipped.map(s => s.proposal), [0, 1, 2, 3, 5]);
+  assert.match(r.json.skipped[3].why, /Meera Ilangovan's \(P-0003\)/);
+  const again = run(d, ['propose', 'outlook-mail'], [rel(['T-0025', 'T-0012']), newPerson(), newPerson()]);
+  assert.equal(again.code, 0, again.out);
+  assert.equal(again.json.proposed.length, 1, 'Jo Bloggs once');
+  assert.match(again.json.skipped[0].why, /already proposed/);
+  assert.match(again.json.skipped[1].why, /twice in this batch/);
+});
+
+test('propose refuses a Proposal with no why, an end not in the folder, the wrong kind, a known name or a bad address, and writes nothing', () => {
+  const d = folder(), before = read(d, 'INBOX.md');
+  for (const [p, said] of [
+    [rel(['T-0012', 'T-0025'], { why: '' }), /why is required/],
+    [rel(['T-0012', 'T-0999']), /T-0999 is not in the folder: add a new item first/],
+    [rel(['T-0012', 'SYS-0001'], { kind: 'related' }), /can only be concerns, not related/],
+    [rel(['T-0012', 'T-0012']), /itself/],
+    [rel(['T-0012']), /two ends/],
+    [newPerson({ name: 'Meera Ilangovan' }), /already in PEOPLE\.md as P-0003: propose the address as a new email/],
+    [newPerson({ email: 'jo at acme' }), /not an email address/],
+    [newPerson({ items: ['T-0999'] }), /T-0999 is not an open or inbox item/],
+    [newEmail({ person: 'P-0999' }), /P-id of someone in PEOPLE\.md/],
+    [newEmail({ received: undefined }), /give received/],
+    [{ change: 'priority', why: 'x', received: '2026-10-12T08:14:00Z' }, /relationship, person or email/],
+  ]) {
+    const r = run(d, ['propose', 'outlook-mail'], [newEmail({ email: 'ok@pennywhistle.example' }), p]);
+    assert.equal(r.code, 1, `${JSON.stringify(p)}: ${r.out}`);
+    assert.match(r.json.error, said);
+    assert.match(r.json.error, /^nothing was written/);
+  }
+  assert.equal(run(d, ['propose', 'nowhere'], [rel(['T-0012', 'T-0025'])]).code, 1);
+  assert.equal(read(d, 'INBOX.md'), before);
+});
+
+test('propose --dry-run shows the lines and writes nothing; a horizon source gives event_date in place of received', () => {
+  const d = folder(), before = read(d, 'INBOX.md');
+  const r = run(d, ['propose', 'outlook-calendar', '--dry-run'], [rel(['T-0029', 'T-0028'], { received: undefined, event_date: '2026-10-27' })]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.would_propose, ['- Relate T-0029 and T-0028 {kind: related; source: outlook-calendar; event-date: 2026-10-27}']);
+  assert.equal(read(d, 'INBOX.md'), before);
+});
+
+test('check warns about a line under "## Changes" it cannot read, or a Relationship naming an ID that is gone', () => {
+  const d = folder();
+  fs.appendFileSync(path.join(d, 'INBOX.md'), '\n## Changes\n- Rename T-0012 {source: outlook-mail}\n- Relate T-0012 and T-0999 {kind: related; source: outlook-mail}\n  - why: x\n');
+  const c = run(d, ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.ok(c.json.warnings.some(w => /unrecognised line "- Rename T-0012/.test(w)), c.out);
+  assert.ok(c.json.warnings.some(w => /names T-0999, which does not exist/.test(w)), c.out);
+  assert.ok(!c.json.warnings.some(w => /T-0030: unrecognised/.test(w)), 'the Changes are not taken for lines of the last Item');
+});
+
+// The Migration that brought in change Proposals, found by what it says it does, as next or once it has its number.
+const CHANGES_SCRIPT = (() => {
+  const dir = path.join(REPO, 'migrations');
+  const n = fs.readdirSync(dir).find(x => fs.existsSync(path.join(dir, x, 'migrate.mjs')) && /holds change Proposals too/.test(fs.readFileSync(path.join(dir, x, 'migrate.mjs'), 'utf8')));
+  return path.join(dir, n || 'next', 'migrate.mjs');
+})();
+const OLD_HEADS_2 = {
+  'INBOX.md': '<!-- Proposals for new items from the discern-* source skills, waiting for the user to clarify them. Accept moves an item to TASKS.md; Dismiss remembers its message in DISMISSED.md. IDs come from the next-id counter in TASKS.md. -->',
+  'IGNORED.md': '<!-- One line per source key never to be proposed again, ignored by a source skill or deleted by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). A Proposal the user dismisses goes in DISMISSED.md instead. -->',
+};
+const migrateChanges = (d, ...args) => spawnSync(process.execPath, [CHANGES_SCRIPT, d, ...args], { encoding: 'utf8' });
+
+test('the change Proposals Migration\'s script imports only Node\'s built-in modules', () => {
+  const src = fs.readFileSync(CHANGES_SCRIPT, 'utf8');
+  const from = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g)].map(m => m[1] || m[2] || m[3]);
+  assert.ok(from.length);
+  assert.deepEqual(from.filter(s => !s.startsWith('node:')), []);
+});
+
+test('the change Proposals Migration previews and changes nothing; --write rewords the INBOX.md and IGNORED.md headers, keeping line endings; again, it changes nothing', () => {
+  const d = folder();
+  for (const f of Object.keys(OLD_HEADS_2)) fs.writeFileSync(path.join(d, f), read(d, f).replace(/\r\n/g, '\n').replace(/^<!--.*-->$/m, OLD_HEADS_2[f]).replace(/\n/g, f === 'INBOX.md' ? '\r\n' : '\n'));
+  const before = snapshot(d), p = migrateChanges(d);
+  assert.equal(p.status, 0, p.stderr);
+  assert.match(p.stdout, /Would change:\nINBOX\.md\n  header comment reworded\nIGNORED\.md\n  header comment reworded/);
+  assert.deepEqual(snapshot(d), before);
+  const w = migrateChanges(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  const starter = f => fs.readFileSync(path.join(REPO, 'new_discerny_repo', f), 'utf8').replace(/\r\n/g, '\n').split('\n')[1];
+  for (const f of Object.keys(OLD_HEADS_2)) assert.equal(read(d, f).replace(/\r\n/g, '\n').split('\n')[1], starter(f));
+  assert.doesNotMatch(read(d, 'INBOX.md'), /[^\r]\n/);
+  assert.doesNotMatch(read(d, 'IGNORED.md'), /\r/);
+  const after = snapshot(d), again = migrateChanges(d, '--write');
   assert.equal(again.status, 0, again.stderr);
   assert.match(again.stdout, /Nothing to change/);
   assert.deepEqual(snapshot(d), after);
