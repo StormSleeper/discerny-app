@@ -9,6 +9,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - Each item, project, system and person now has a Description and a list of Comments with their time and author, in place of notes, and news your source skills find on an item waits in the Inbox under "New comments" until you acknowledge it.
 - The Example now has a reply waiting to be acknowledged, so you can try New comments in the Inbox straight away.
 - The Discerny logo in the sidebar and on the folder screen is larger and easier to see.
+- You can merge a duplicate item into the item it duplicates, and dismissing an inbox proposal as Duplicate now merges it too, so nothing it carried is lost.
 
 ## 0.2.0.1 (2026-10-23)
 

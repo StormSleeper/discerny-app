@@ -428,7 +428,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.0.5'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.3.0.6'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.3.0.3'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','week','soon','later','fyi'];
@@ -760,8 +760,68 @@ function stampIn(tz,ms){try{var o={};new Intl.DateTimeFormat('en-GB',{timeZone:t
 // Comments in time order, the undated ones (older than any stamp) first; those with the same time keep their order
 function byTime(list){return list.map(function(c,k){return {c:c,k:k,t:String((c.f||{})['added-datetime']||'')};})
   .sort(function(a,b){return a.t<b.t?-1:a.t>b.t?1:a.k-b.k;}).map(function(x){return x.c;});}
+// ---- Merge: a duplicate Item d folded into the Item s it duplicates, which keeps its ID. Meetings never merge.
+function canMerge(s,d){return !!s&&!!d&&s.id!==d.id&&s.meta.ty!=='Meeting'&&d.meta.ty!=='Meeting';}
+// due a before due b: the earlier day, and on the same day a time before none or a later one
+function dueBefore(a,b){var x=String(a).slice(0,10),y=String(b).slice(0,10);if(x!==y)return x<y;
+  var ta=String(a).slice(11),tb=String(b).slice(11);return !!ta&&(!tb||ta<tb);}
+function union(a,b){var out=[];a.concat(b).forEach(function(x){if(out.indexOf(x)<0)out.push(x);});return out;}
+// s gains d's fields: priority the higher, urgency the sooner, due the earlier; title and type s's; who s's, else d's; Projects, tags,
+// Dependencies, URLs, Source keys and sub-tasks combined; d's Description after s's under "From <d>:"; both Comment trails in time
+// order; then a Comment from the User saying so, at `at`. One of them done and the other open leaves s open and In progress.
+function mergeItem(s,d,at){
+  var sm=s.meta,dm=d.meta;
+  function urgRank(u){var n=URG_ORDER.indexOf(u);return n<0?URG_ORDER.indexOf('later'):n;}
+  function real(w){return w&&w!=='Unassigned';}
+  if(dm.p&&(!sm.p||+dm.p<+sm.p))sm.p=dm.p;
+  if(dm.urg&&(!sm.urg||urgRank(dm.urg)<urgRank(sm.urg)))sm.urg=dm.urg;
+  if(dm.due&&(!sm.due||dueBefore(dm.due,sm.due)))sm.due=dm.due;
+  if(!real(sm.who)&&real(dm.who))sm.who=dm.who;
+  if(!sm.asg&&dm.asg)sm.asg=dm.asg;
+  var prj=union(prjOf(s),prjOf(d));if(prj.length)sm.prj=prj.join(',');
+  var tg=union(tagsOf(s),tagsOf(d));if(tg.length){sm.tg=tg.join(',');delete sm.top;}
+  var dep=union(depList(s),depList(d)).filter(function(x){return x!==s.id&&x!==d.id;});if(dep.length)sm.dep=dep.join(',');else delete sm.dep;
+  if(s.done!==d.done){s.done=false;delete sm.done;sm.st='In progress';}
+  else if(!s.done&&!sm.st&&dm.st)sm.st=dm.st;
+  if(s.done&&!sm.done&&dm.done)sm.done=dm.done;
+  var dd=descOf(d);if(dd.trim()){var sd=descOf(s);setDesc(s,(sd?sd+'\n\n':'')+'From '+d.id+':\n'+dd,ITEM_RANK);}
+  d.subs.forEach(function(b){
+    if(b.k==='src'||b.k==='link'||b.k==='ref'){if(!s.subs.some(function(x){return x.k===b.k&&x.v.trim()===b.v.trim();}))placeSub(s,{k:b.k,v:b.v},ITEM_RANK);}
+    else if(b.k==='sub'){var have=s.subs.filter(function(x){return x.k==='sub'&&x.v===b.v;})[0];if(have)have.x=have.x||b.x;else placeSub(s,{k:'sub',v:b.v,x:b.x},ITEM_RANK);}
+    else if(b.k==='raw'&&b.v.trim())s.subs.push({k:'raw',v:b.v});});
+  var cs=byTime(commentsOf(s).concat(commentsOf(d)));
+  s.subs=s.subs.filter(function(b){return b.k!=='comment';});
+  cs.forEach(function(c){placeSub(s,{k:'comment',f:Object.assign({},c.f),v:c.v},ITEM_RANK);});
+  addComment(s,{at:at,author:'user',text:'Merged '+d.id+' into this.'},ITEM_RANK);
+  return s;}
+// the lines of RELATIONSHIPS.md ('rels'), ASK-AGENT.md ('asks'), ASK-AGENT-LOG.md ('log') or IGNORED.md ('ignored') that name d, made
+// to name s. A Relationship or a No to one that would then repeat another, or join s to itself, goes.
+// -> {lines, swaps: [[the old line, the new one or null, where the old one was]]}
+var LOG_ID_RE=/^(- (?:actioned )?\d{4}-\d{2}-\d{2} \d{2}:\d{2} \| )((?:T|P|PRJ|SYS)-\d+)( \| .*)$/;
+var IGN_REL_RE=/^((?:- )?rel\|)((?:T|P|PRJ|SYS)-\d+)\|((?:T|P|PRJ|SYS)-\d+)( \| .*)$/;
+function mergeRefs(kind,lines,d,s){
+  function to(x){return x===d?s:x;}
+  function moved(ln){var m;
+    if(kind==='rels'&&(m=REL_RE.exec(ln))&&(m[1]===d||m[3]===d)){var a=to(m[1]),b=to(m[3]);if(a===b)return null;
+      if(m[2]==='~'&&b<a){var t=a;a=b;b=t;}return '- '+a+' '+m[2]+' '+b+' | '+m[4];}
+    if(kind==='asks'&&(m=NOTE_RE.exec(ln))&&m[1]===d)return '- '+s+ln.slice(2+d.length);
+    if(kind==='log'&&(m=LOG_ID_RE.exec(ln))&&m[2]===d)return m[1]+s+m[3];
+    if(kind==='ignored'&&(m=IGN_REL_RE.exec(ln))&&(m[2]===d||m[3]===d)){if(to(m[2])===to(m[3]))return null;return m[1]+to(m[2])+'|'+to(m[3])+m[4];}
+    return undefined;}
+  function key(ln){var m;
+    if(kind==='rels'&&(m=REL_RE.exec(ln)))return m[2]==='~'?[m[1],m[3]].sort().join('~'):m[1]+'->'+m[3];
+    if(kind==='ignored'&&(m=IGN_REL_RE.exec(ln)))return [m[2],m[3]].sort().join('|');
+    return null;}
+  var seen={},swaps=[],out=[];
+  lines.forEach(function(ln){if(moved(ln)===undefined){var k=key(ln);if(k)seen[k]=1;}});
+  lines.forEach(function(ln,at){var n=moved(ln);
+    if(n===undefined){out.push(ln);return;}
+    var k=n===null?null:key(n);
+    if(n===null||(k&&seen[k])){swaps.push([ln,null,at]);return;}
+    if(k)seen[k]=1;out.push(n);swaps.push([ln,n,at]);});
+  return {lines:out,swaps:swaps};}
 // The data folder files the page reads and writes; `discern serve` serves these and no others.
-var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md', settings: 'SOURCES.md' };
+var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', asklog: 'ASK-AGENT-LOG.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md', settings: 'SOURCES.md' };
 var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
 // The header the page writes when it creates a missing RELATIONSHIPS.md or ASK-AGENT.md: the starter file's, word for word.
 var REL_HEAD = ['# Relationships', '<!-- One line per relationship, stored once (shown on both): `- A ~ B | related` (symmetric) or `- A -> B | type` (involves, concerns, owns, uses). Validate: both IDs exist, no duplicates, nothing related to itself. `dep:` on items is separate. -->', ''];
@@ -774,7 +834,7 @@ var EDEF = {
   PRJ: { file: 'PROJECTS.md', key: 'projects', word: 'project', Word: 'Project', types: ['Project', 'Workstream', 'Pod'], sts: ['Active', 'On hold', 'Done'], pk: 'parent' },
   SYS: { file: 'SYSTEMS.md', key: 'systems', word: 'system', Word: 'System', types: ['Platform', 'Pipeline', 'Registry', 'Application', 'Instrument', 'Other'], sts: ['Live', 'In build', 'Delayed', 'Retired'], pk: 'part-of' }
 };
-var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, ignored: function (t) { return { text: String(t || '') }; }, dismissed: function (t) { return { text: String(t || '') }; }, settings: function (t) { return { text: String(t || '') }; } };
+var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, asklog: function (t) { return { text: String(t || '') }; }, ignored: function (t) { return { text: String(t || '') }; }, dismissed: function (t) { return { text: String(t || '') }; }, settings: function (t) { return { text: String(t || '') }; } };
 function serKey(k, m) {
   if (k === 'tasks' || k === 'inbox' || k === 'done') return serialize(m);
   if (k === 'people') { ensurePIds(m); return pSerialize(m); }
@@ -804,7 +864,7 @@ var S = {
   wb: Object.assign({ group: 'urg', sort: 'urg', tag: '' }, lsJson('discerny-wb', {})), wq: '',
   qa: '', qaType: null, qaMore: false, qaUrg: '', qaDesc: '', palette: false, palQ: '', palI: 0, dialog: null,
   composer: {}, introOn: {}, subDraft: '', cmtDraft: '', cmtEdit: null, cmtEditText: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', linkKind: 'All', linkDone: false, sysQ: '', suggestOn: {},
-  dismissFor: null, snoozeFor: null, confirm: null, editAsk: null, editAskText: '', adding: null, addName: '', addGrp: '', addType: '',
+  dismissFor: null, dupFor: null, dupQ: '', mergeFor: null, mergeQ: '', snoozeFor: null, confirm: null, editAsk: null, editAskText: '', adding: null, addName: '', addGrp: '', addType: '',
   linkLabel: '', linkUrl: '', toasts: [], doneLimit: 60, copied: null,
   gate: { mode: 'pick', msg: '' }, side: lsGet('discerny-side', 'auto'), theme: lsGet('discerny-theme', 'system')
 };
@@ -964,7 +1024,7 @@ async function loadAll() {
     people: pParse(t['PEOPLE.md']), projects: eParse(t['PROJECTS.md']), systems: eParse(t['SYSTEMS.md']),
     rels: rParse(t['RELATIONSHIPS.md']), asks: aParse(t['ASK-AGENT.md']),
     log: parseLog(t['ASK-AGENT-LOG.md']), sources: parseSources(t['SOURCES.md']),
-    drafts: await readDrafts(), ignored: { text: '' }, dismissed: { text: '' }, settings: { text: t['SOURCES.md'] }
+    drafts: await readDrafts(), asklog: { text: t['ASK-AGENT-LOG.md'] }, ignored: { text: '' }, dismissed: { text: '' }, settings: { text: t['SOURCES.md'] }
   };
   keys.forEach(function (k) { BASE[k] = countOf(k, out[k]); });
   return out;
@@ -976,6 +1036,7 @@ async function loadAll() {
    written only when the operation changed them. */
 function op(label, keys, fn) { return { label: label, keys: keys, fn: fn }; }
 var ANY = ['tasks', 'inbox', 'done'];
+var MERGE_KEYS = ['tasks', 'inbox', 'done', 'rels', 'asks', 'asklog', 'ignored'];
 function fItem(M, id) {
   id = rid(id);
   for (var a = 0; a < ANY.length; a++) {
@@ -1379,6 +1440,73 @@ var OPS = {
       it.id = rid(it.id);
       if (!M.tasks.items.some(function (i) { return i.id === it.id; })) insertById(M.tasks.items, it);
       if (igLines.length) M.ignored.text = dropLines(M.ignored.text, igLines);
+    });
+  },
+  // Merge: duplicate did folded into sid (mergeItem), and every reference to did made one to sid. st keeps what changed, for the undo.
+  merge: function (sid, did, at, st) {
+    return op('Merge ' + did + ' into ' + sid, MERGE_KEYS, function (M) {
+      var s = fItem(M, sid), d = fItem(M, did);
+      if (!s || !d || !canMerge(s.it, d.it)) return;
+      var sx = s.it.id, dx = d.it.id;
+      st.s = { k: s.k, text: serItem(s.it) }; st.d = { k: d.k, text: serItem(d.it) }; st.deps = []; st.swaps = {}; st.post = [];
+      var hw = maxTaskId(M);
+      M[d.k].items.splice(M[d.k].items.indexOf(d.it), 1);
+      if (nextId(M.tasks) < hw) setNextId(M.tasks, hw);
+      mergeItem(s.it, d.it, at);
+      if (s.k === 'done' && !s.it.done) { M.done.items.splice(M.done.items.indexOf(s.it), 1); insertById(M.tasks.items, s.it); }
+      ANY.forEach(function (k) {
+        M[k].items.forEach(function (i) {
+          var ds = depList(i);
+          if (ds.indexOf(dx) < 0) return;
+          var was = i.meta.dep, now = union(ds.map(function (x) { return x === dx ? sx : x; }), []).filter(function (x) { return x !== i.id; });
+          if (now.length) i.meta.dep = now.join(','); else delete i.meta.dep;
+          st.deps.push([i.id, was, i.meta.dep || '']);
+        });
+      });
+      [['rels', 'rels'], ['asks', 'asks']].forEach(function (p) {
+        var A = M[p[0]], r = mergeRefs(p[1], A.lines, dx, sx);
+        if (!r.swaps.length) return;
+        A.lines = r.lines; st.swaps[p[0]] = r.swaps;
+        if (p[0] === 'rels') relRefresh(A); else askRefresh(A);
+      });
+      [['asklog', 'log'], ['ignored', 'ignored']].forEach(function (p) {
+        var T = M[p[0]];
+        if (!T) return;
+        var r = mergeRefs(p[1], String(T.text || '').split('\n'), dx, sx);
+        if (r.swaps.length) { T.text = r.lines.join('\n'); st.swaps[p[0]] = r.swaps; if (p[0] === 'asklog' && M.log) M.log = parseLog(T.text); }
+      });
+      // change Proposals in the Inbox naming did: a Relationship to sid itself goes
+      changesOf(M.inbox.post).forEach(function (c) {
+        if ((c.type !== 'relationship' && c.type !== 'person') || c.line.indexOf(dx) < 0) return;
+        var line = c.line.replace(new RegExp('\\b' + dx + '\\b', 'g'), sx);
+        if (c.type === 'relationship' && (c.a === dx ? c.b : c.a) === sx) { dropChange(M.inbox, c.line); st.post.push([c.lines, null]); return; }
+        M.inbox.post[M.inbox.post.indexOf(c.line)] = line;
+        st.post.push([c.lines, line]);
+      });
+    });
+  },
+  unmerge: function (sid, did, st) {
+    return op('Undo merge', MERGE_KEYS, function (M) {
+      if (!st.s) return;
+      var was = parse(st.s.text).items[0], dup = parse(st.d.text).items[0], s = fItem(M, sid);
+      if (!was || !dup) return;
+      if (s) M[s.k].items.splice(M[s.k].items.indexOf(s.it), 1);
+      insertById(M[st.s.k].items, was);
+      if (!fItem(M, dup.id)) insertById(M[st.d.k].items, dup);
+      st.deps.forEach(function (x) { var f = fItem(M, x[0]); if (f && (f.it.meta.dep || '') === x[2]) { if (x[1]) f.it.meta.dep = x[1]; else delete f.it.meta.dep; } });
+      function back(lines, swaps) {
+        swaps.forEach(function (w) {
+          var k = w[1] === null ? -1 : lines.indexOf(w[1]);
+          if (k >= 0) lines[k] = w[0];
+          else if (lines.indexOf(w[0]) < 0) lines.splice(Math.min(w[2], lines.length && lines[lines.length - 1] === '' ? lines.length - 1 : lines.length), 0, w[0]);
+        });
+        return lines;
+      }
+      if (st.swaps.rels) { M.rels.lines = back(M.rels.lines, st.swaps.rels); relRefresh(M.rels); }
+      if (st.swaps.asks) { M.asks.lines = back(M.asks.lines, st.swaps.asks); askRefresh(M.asks); }
+      ['asklog', 'ignored'].forEach(function (k) { if (st.swaps[k] && M[k]) M[k].text = back(String(M[k].text || '').split('\n'), st.swaps[k]).join('\n'); });
+      if (st.swaps.asklog && M.log) M.log = parseLog(M.asklog.text);
+      st.post.forEach(function (w) { var p = M.inbox.post || [], k = w[1] === null ? -1 : p.indexOf(w[1]); if (k >= 0) p[k] = w[0][0]; else putChange(M.inbox, w[0]); });
     });
   },
   addTask: function (spec, out) {
@@ -2282,6 +2410,10 @@ var SNOOZE = [[1, '+1 day'], [3, '+3 days'], [7, '+1 week'], [28, '+4 weeks']];
 function canSnooze(i) { return whereOf(i.id) === 'open' && isDay(i.meta.due) && i.meta.ty !== 'Meeting'; }
 function vSnooze(id) { return '<div class="seg" data-k="seg-snooze" role="group" aria-label="Snooze ' + id + ' from today">' + SNOOZE.map(function (x) { return '<button type="button" data-act="snooze" data-id="' + id + '" data-v="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>'; }
 function vReasons(id) {
+  if (S.dupFor === id) return '<div class="box" data-k="reasons-dup" style="margin-top:8px"><label class="h3" for="f-dupq" style="margin:0">Which item does ' + id + ' duplicate?</label>' +
+    '<div class="hint">It is merged into the item you pick, which keeps its own ID and gains everything ' + id + ' holds.</div>' +
+    '<input id="f-dupq" class="in" type="search" autocomplete="off" data-in="dupQ" data-kd="dupq" data-id="' + id + '" value="' + esc(S.dupQ) + '" placeholder="Find the item it duplicates">' +
+    vPicks(mergeCands(id, S.dupQ), 'dup-pick', 'No match. Meetings never merge.') + '<div>' + lk('Cancel', 'dismiss-cancel') + '</div></div>';
   return '<div class="reasons" data-k="reasons" role="group" aria-label="Why are you dismissing ' + id + '?"><span class="hint">Why?</span>' +
     REASONS.map(function (r) { return '<button type="button" class="chipbtn" data-act="dismiss" data-id="' + id + '" data-v="' + esc(r) + '">' + esc(r) + '</button>'; }).join('') +
     lk('Cancel', 'dismiss-cancel') + '</div>';
@@ -2877,6 +3009,28 @@ function vPicks(res, act, none) {
     return '<button type="button" class="pick" data-act="' + act + '" data-v="' + x.id + '"><span class="kind hint">' + esc(x.kind) + '</span><span style="flex:1;min-width:0">' + esc(x.label) + '</span>' + (x.done ? badge('Done', 'ok') : '') + '<span class="id">' + x.id + '</span></button>';
   }).join('') + '</div>' + (res.more ? '<div class="hint">' + res.more + ' more, refine your search.</div>' : '');
 }
+// the Items that can merge with id (not itself, never a Meeting), matching every word of q in their ID or title -> {list, more} or null
+function mergeCands(id, q) {
+  q = String(q || '').trim().toLowerCase();
+  var me = item(id);
+  if (!q || !me) return null;
+  var words = q.split(/\s+/), c = [];
+  allItems().forEach(function (x) {
+    var hay = (x.id + ' ' + x.title).toLowerCase(), w = whereOf(x.id);
+    if (canMerge(me, x) && words.every(function (v) { return hay.indexOf(v) >= 0; })) c.push({ id: x.id, label: x.title, kind: w === 'inbox' ? 'Proposal' : TYPE_WORD[x.meta.ty || 'Task'] || x.meta.ty, done: w === 'done', at: String((w === 'done' ? x.meta.done : x.meta.asg) || '') });
+  });
+  function rank(x) { return x.id.toLowerCase() === q ? 0 : (x.label.toLowerCase().indexOf(q) === 0 ? 1 : 2); }
+  c.sort(function (a, b) { return rank(a) - rank(b) || (!!a.done - !!b.done) || (a.at < b.at ? 1 : a.at > b.at ? -1 : 0) || idNum(b.id) - idNum(a.id); });
+  return { list: c.slice(0, LINK_MAX), more: Math.max(0, c.length - LINK_MAX) };
+}
+// on an Item's page: find the duplicate to merge into it
+function vMerge(id) {
+  if (S.mergeFor !== id) return '';
+  return '<section class="box" data-k="sec-merge"><label class="h3" for="f-mergeq" style="margin:0">Merge a duplicate into this</label>' +
+    '<div class="hint">The duplicate goes. Its fields, Description, Comments, URLs and links join this item, which keeps ' + id + '.</div>' +
+    '<input id="f-mergeq" class="in" type="search" autocomplete="off" data-in="mergeQ" data-kd="mergeq" data-id="' + id + '" value="' + esc(S.mergeQ) + '" placeholder="Find the duplicate">' +
+    vPicks(mergeCands(id, S.mergeQ), 'merge-pick', 'No match. Meetings never merge.') + '<div>' + lk('Cancel', 'merge-cancel') + '</div></section>';
+}
 function vLinkAdd(id, allowBlocked) {
   var mode = allowBlocked ? S.linkMode : 'related', blocked = mode === 'blocked';
   var kinds = blocked ? LINK_KINDS.slice(0, 6) : LINK_KINDS, kind = kinds.indexOf(S.linkKind) >= 0 ? S.linkKind : 'All';
@@ -2996,8 +3150,11 @@ function panelTask(i) {
       }).join('') + '<div class="hint">Tick an item to relate it when you accept.</div></div>';
       tail += '<div class="foot" data-k="foot-inbox">' + bt('Accept', 'accept', { id: id, cls: 'primary' }) + bt('Dismiss…', 'dismiss-open', { id: id, attrs: ' aria-expanded="' + (S.dismissFor === id) + '"' }) + (pos >= 0 ? '<span class="hint">' + (pos + 1) + ' of ' + il.length + ' in the inbox</span>' : '') + '</div>';
       if (S.dismissFor === id && S.dismissAt === 'panel') tail += vReasons(id);
-    } else if (!done) {
-      tail += '<div class="foot" data-k="foot-del">' + bt('Delete task', 'del', { id: id, cls: 'danger sm' }) + '<span class="hint">You can undo for a few seconds.</span></div>';
+    } else {
+      var canM = i.meta.ty !== 'Meeting';
+      if (!done || canM) tail += '<div class="foot" data-k="foot-del">' + (canM ? bt('Merge a duplicate into this…', 'merge-open', { id: id, cls: 'sm', attrs: ' aria-expanded="' + (S.mergeFor === id) + '"' }) : '') +
+        (done ? '' : bt('Delete task', 'del', { id: id, cls: 'danger sm' }) + '<span class="hint">You can undo for a few seconds.</span>') + '</div>';
+      if (canM) tail += vMerge(id);
     }
     h += tabPanel('details', f + sb + ctx + tail);
   }
@@ -3353,7 +3510,7 @@ function forceClear(id) { forced.add(id); }
 function go(view, entity) {
   var changed = S.view !== view || S.entity !== (entity || null);
   S.view = view; S.entity = entity || null;
-  S.panel = false; S.sel = null; S.cur = null; S.dismissFor = null; S.confirm = null; S.adding = null; S.linkQ = ''; S.tab = 'details'; S.editAsk = null; S.dialog = null;
+  S.panel = false; S.sel = null; S.cur = null; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.confirm = null; S.adding = null; S.linkQ = ''; S.tab = 'details'; S.editAsk = null; S.dialog = null;
   if (changed) { S.eq = ''; S.pq = ''; S.pf = 'all'; S.doneLimit = 60; }
   if (view === 'inbox' && !isDrawer()) { var l = inboxList(); if (l.length) { S.sel = l[0].id; S.panel = true; S.cur = l[0].id; } }
   if (changed) { var m = document.getElementById('main'); if (m) m.scrollTop = 0; S.scrolled = false; }
@@ -3370,7 +3527,7 @@ function select(id, o) {
   o = o || {};
   if (S.sel !== id) {
     S.tab = o.tab || 'details';
-    S.subDraft = ''; S.cmtDraft = ''; S.cmtEdit = null; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
+    S.subDraft = ''; S.cmtDraft = ''; S.cmtEdit = null; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.mergeQ = ''; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
   } else if (o.tab) S.tab = o.tab;
   S.sel = id; S.panel = true;
   if (kindOf(id) === 'T') S.cur = id;
@@ -3480,6 +3637,7 @@ function dismiss(id, reason) {
   var i = item(id);
   if (!i || whereOf(id) !== 'inbox') return;
   if (reason === 'Already handled') { acceptDone(id); return; }
+  if (reason === 'Duplicate') { S.dupFor = id; S.dupQ = ''; forceClear('f-dupq'); focusLater('#f-dupq'); return; }
   var why = String(reason || 'not actionable').toLowerCase();
   var lines = ignorable(getSub(i, 'ref').map(function (b) { return b.v.trim(); })).map(function (r) { return dismissLine(i, r, why); });
   var text = serItem(i), nx = nextInbox(id), cs = changesOn(S.m.inbox, id);
@@ -3487,6 +3645,17 @@ function dismiss(id, reason) {
   commit(OPS.dismiss(id, lines));
   toastShow('Dismissed ' + id + ' (' + why + '). This message won’t be proposed again; later news on the thread may be.', OPS.undismiss(text, lines, cs));
   afterTriage(id, nx);
+}
+// Merge: did folded into sid, which keeps its ID. Dismissing a Proposal as Duplicate is a Merge with the Proposal as did.
+function mergeItems(sid, did) {
+  var s = item(sid), d = item(did);
+  if (!canMerge(s, d)) return;
+  var st = {}, triage = whereOf(did) === 'inbox' && S.dupFor === did, nx = triage ? nextInbox(did) : null;
+  S.mergeFor = null; S.mergeQ = ''; S.dismissFor = null; S.dupFor = null; S.dupQ = '';
+  forceClear('f-mergeq');
+  commit(OPS.merge(sid, did, nowStamp(), st), { toast: 'Merged ' + did + ' into ' + sid + '. ' + did + ' now finds ' + sid + '.', undo: OPS.unmerge(sid, did, st) });
+  if (triage) { afterTriage(did, nx); return; }
+  if (S.sel === did) select(sid);
 }
 // Answers to change Proposals. Each says what it did, with an undo; a No is for good.
 function relYes(line) {
@@ -3696,8 +3865,12 @@ var ACT = {
   snooze: function (el) { snoozeItem(did(el), +dvv(el)); },
   'snooze-open': function (el) { var id = did(el); S.snoozeFor = S.snoozeFor === id ? null : id; if (S.snoozeFor) focusLater('.main [data-row="' + id + '"] .reasons button'); else render(); },
   'snooze-cancel': function () { S.snoozeFor = null; render(); },
-  'dismiss-open': function (el) { var id = did(el), at = el.closest('.panel') ? 'panel' : 'row'; if (S.dismissFor === id && S.dismissAt === at) { S.dismissFor = null; render(); return; } S.dismissFor = id; S.dismissAt = at; focusLater(at === 'panel' ? '.panel .reasons .chipbtn' : '.main [data-row="' + id + '"] .reasons .chipbtn'); },
-  'dismiss-cancel': function () { S.dismissFor = null; render(); },
+  'dismiss-open': function (el) { var id = did(el), at = el.closest('.panel') ? 'panel' : 'row'; S.dupFor = null; if (S.dismissFor === id && S.dismissAt === at) { S.dismissFor = null; render(); return; } S.dismissFor = id; S.dismissAt = at; focusLater(at === 'panel' ? '.panel .reasons .chipbtn' : '.main [data-row="' + id + '"] .reasons .chipbtn'); },
+  'dismiss-cancel': function () { S.dismissFor = null; S.dupFor = null; render(); },
+  'dup-pick': function (el) { if (S.dupFor) mergeItems(dvv(el), S.dupFor); },
+  'merge-open': function (el) { var id = did(el); if (S.mergeFor === id) { S.mergeFor = null; render(); return; } S.mergeFor = id; S.mergeQ = ''; forceClear('f-mergeq'); focusLater('#f-mergeq'); },
+  'merge-cancel': function () { S.mergeFor = null; S.mergeQ = ''; render(); },
+  'merge-pick': function (el) { if (S.mergeFor) mergeItems(S.mergeFor, dvv(el)); },
   dismiss: function (el) { dismiss(did(el), dvv(el)); },
   'chg-yes': function (el) { relYes(dvv(el)); },
   'chg-no': function (el) { changeNo(dvv(el)); },
@@ -3901,6 +4074,8 @@ var IN = {
   palQ: function (el) { S.palQ = el.value; S.palI = 0; render(); },
   linkQ: function (el) { S.linkQ = el.value; render(); },
   sysQ: function (el) { S.sysQ = el.value; render(); },
+  dupQ: function (el) { S.dupQ = el.value; render(); },
+  mergeQ: function (el) { S.mergeQ = el.value; render(); },
   pq: function (el) { S.pq = el.value; render(); },
   eq: function (el) { S.eq = el.value; render(); },
   wq: function (el) { S.wq = el.value; render(); },
@@ -3994,6 +4169,14 @@ var KD = {
     if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); var k = String(S.cmtEdit || '').split('|')[1]; if (k !== undefined) saveComment(did(el), +k); }
     else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); S.cmtEdit = null; render(); }
   },
+  dupq: function (el, ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); var r = S.dupFor ? mergeCands(S.dupFor, S.dupQ) : null; if (r && r.list.length) mergeItems(r.list[0].id, S.dupFor); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); S.dupFor = null; S.dismissFor = null; render(); }
+  },
+  mergeq: function (el, ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); var r = S.mergeFor ? mergeCands(S.mergeFor, S.mergeQ) : null; if (r && r.list.length) mergeItems(S.mergeFor, r.list[0].id); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); S.mergeFor = null; S.mergeQ = ''; render(); }
+  },
   linkq: function (el, ev) {
     if (ev.key === 'Enter') { ev.preventDefault(); var lm = S.sel && kindOf(S.sel) === 'T' ? S.linkMode : 'related', r = S.sel ? linkCands(S.sel, lm, S.linkQ, { kind: S.linkKind, done: S.linkDone && lm !== 'blocked' }) : null; if (r && r.list.length) addLink(S.sel, r.list[0].id); }
     else if (ev.key === 'Escape' && el.value) { ev.preventDefault(); S.linkQ = ''; forceClear(el.id); render(); }
@@ -4065,7 +4248,7 @@ function onKey(ev) {
     case 'Enter': if (!onButton && S.cur) { ev.preventDefault(); select(S.cur); } return;
     case 'x': { var id = targetId(); if (id && kindOf(id) === 'T' && (whereOf(id) === 'open' || whereOf(id) === 'done')) { ev.preventDefault(); toggleDone(id, true); } return; }
     case 'a': { var a = targetId(); if (a && whereOf(a) === 'inbox') { ev.preventDefault(); accept(a); } return; }
-    case 'd': { var d = targetId(); if (d && whereOf(d) === 'inbox') { ev.preventDefault(); S.dismissFor = d; S.dismissAt = S.panel && S.sel === d ? 'panel' : 'row'; if (!S.panel) S.cur = d; focusLater(S.dismissAt === 'panel' ? '.panel .reasons .chipbtn' : '.main [data-row="' + d + '"] .reasons .chipbtn'); } return; }
+    case 'd': { var d = targetId(); if (d && whereOf(d) === 'inbox') { ev.preventDefault(); S.dismissFor = d; S.dupFor = null; S.dismissAt = S.panel && S.sel === d ? 'panel' : 'row'; if (!S.panel) S.cur = d; focusLater(S.dismissAt === 'panel' ? '.panel .reasons .chipbtn' : '.main [data-row="' + d + '"] .reasons .chipbtn'); } return; }
     case 'c': { var c = S.panel && S.sel ? S.sel : targetId(); if (c) { ev.preventDefault(); select(c, { tab: 'claude', focus: '#f-composer' }); } return; }
   }
 }

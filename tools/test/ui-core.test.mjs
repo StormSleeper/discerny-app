@@ -12,7 +12,8 @@ function loadCore() {
   const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
   const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
   const names = ['parse', 'serialize', 'pParse', 'changesOf', 'changeKey', 'setPriority', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue', 'REL_HEAD', 'ASK_HEAD',
-    'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK'];
+    'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK',
+    'serItem', 'canMerge', 'mergeItem', 'mergeRefs'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -378,4 +379,122 @@ test('setPriority adds a Person to priority_people in "## defaults" and takes th
   assert.equal(C.setPriority(list, 'P-0012', true), '## defaults\r\n- priority_people:\r\n  - P-0007\r\n  - P-0012\r\n- page_cap: 10\r\n');
   assert.equal(C.setPriority(C.setPriority(list, 'P-0012', true), 'P-0012', false), list);
   assert.equal(C.setPriority('# Sources\n\n## outlook-mail\n- watermark: x\n', 'P-0012', true), '# Sources\n\n## defaults\n- priority_people: P-0012\n\n## outlook-mail\n- watermark: x\n');
+});
+
+// Merge: the duplicate folded into the Item it duplicates
+const one = text => C.parse('# Tasks\n' + text + '\n').items[0];
+
+test('a Merge keeps the higher priority, the sooner urgency and the earlier due date, and the survivor\'s title, type and who', () => {
+  const s = one('- [ ] T-0001 Survivor {ty:Task; who:Ann Lee; urg:later; p:3; due:2026-11-10}');
+  const d = one('- [ ] T-0002 Duplicate {ty:Document; who:Bo Chan; urg:week; p:1; due:2026-11-03 09:00; asg:2026-10-01 12:00}');
+  C.mergeItem(s, d, '2026-10-24 10:00');
+  assert.equal(s.id, 'T-0001');
+  assert.equal(s.title, 'Survivor');
+  assert.deepEqual([s.meta.ty, s.meta.who, s.meta.urg, s.meta.p, s.meta.due, s.meta.asg], ['Task', 'Ann Lee', 'week', '1', '2026-11-03 09:00', '2026-10-01 12:00']);
+  const t = one('- [ ] T-0003 No one {who:Unassigned; due:2026-11-03}');
+  C.mergeItem(t, one('- [ ] T-0004 Someone {who:Bo Chan; due:2026-11-03 14:00}'), '2026-10-24 10:00');
+  assert.deepEqual([t.meta.who, t.meta.due], ['Bo Chan', '2026-11-03 14:00'], 'on the same day, a time is the earlier');
+});
+
+test('a Merge combines Projects, tags, Dependencies, URLs, Source keys and sub-tasks without repeats', () => {
+  const s = one([
+    '- [ ] T-0001 S {prj:PRJ-0001; tg:Lab; dep:T-0009,T-0002}',
+    '  - src: mail',
+    '  - link: [Spec](https://a.example)',
+    '  - ref: mail|spec',
+    '  - [ ] Draft',
+    '  - [ ] Send'].join('\n'));
+  const d = one([
+    '- [ ] T-0002 D {prj:PRJ-0001,PRJ-0002; tg:Lab,Audit; dep:T-0009,T-0001,T-0008}',
+    '  - src: teams',
+    '  - link: [Spec](https://a.example)',
+    '  - link: [Notes](https://b.example)',
+    '  - ref: teams|chat|42',
+    '  - ref: mail|spec',
+    '  - [x] Draft',
+    '  - [ ] Review'].join('\n'));
+  C.mergeItem(s, d, '2026-10-24 10:00');
+  assert.deepEqual([s.meta.prj, s.meta.tg, s.meta.dep], ['PRJ-0001,PRJ-0002', 'Lab,Audit', 'T-0009,T-0008']);
+  const subs = k => s.subs.filter(b => b.k === k).map(b => k === 'sub' ? (b.x ? 'x ' : '  ') + b.v : b.v);
+  assert.deepEqual(subs('src'), ['mail', 'teams']);
+  assert.deepEqual(subs('link'), ['[Spec](https://a.example)', '[Notes](https://b.example)']);
+  assert.deepEqual(subs('ref'), ['mail|spec', 'teams|chat|42']);
+  assert.deepEqual(subs('sub'), ['x Draft', '  Send', '  Review']);
+  assert.deepEqual(s.subs.map(b => b.k), ['src', 'src', 'link', 'link', 'ref', 'ref', 'comment', 'sub', 'sub', 'sub'], 'sub-lines stay in their order');
+});
+
+test('a Merge adds the duplicate\'s Description under "From <id>:", combines the Comments in time order and says so in a Comment', () => {
+  const s = one([
+    '- [ ] T-0001 S',
+    '  - description: What it is.',
+    '  - comment: {added-datetime: 2026-10-20 09:00; author: user}',
+    '    Later one',
+    '  - comment: {author: agent}',
+    '    Undated on S'].join('\n'));
+  const d = one([
+    '- [ ] T-0002 D',
+    '  - description: The other view.',
+    '    Second line.',
+    '  - comment: {author: user}',
+    '    Undated on D',
+    '  - comment: {added-datetime: 2026-10-18 15:30; author: email; acknowledged: no}',
+    '    Reply came'].join('\n'));
+  C.mergeItem(s, d, '2026-10-24 10:00');
+  assert.equal(C.descOf(s), 'What it is.\n\nFrom T-0002:\nThe other view.\nSecond line.');
+  const cs = C.commentsOf(s);
+  assert.deepEqual(cs.map(c => c.v), ['Undated on S', 'Undated on D', 'Reply came', 'Later one', 'Merged T-0002 into this.']);
+  assert.ok(C.toAck(cs[2]), 'a Comment still to acknowledge stays so');
+  assert.deepEqual(cs[4].f, { 'added-datetime': '2026-10-24 10:00', author: 'user' });
+  assert.match(C.serItem(s), /\n  - comment: \{added-datetime: 2026-10-24 10:00; author: user\}\n    Merged T-0002 into this\.$/);
+  const bare = one('- [ ] T-0003 Bare');
+  C.mergeItem(bare, one('- [ ] T-0004 D\n  - description: Only here.'), '2026-10-24 10:00');
+  assert.equal(C.descOf(bare), 'From T-0004:\nOnly here.');
+});
+
+test('a Merge sets the status and Done as the rules say', () => {
+  const st = (a, b) => { const s = one(a), d = one(b); C.mergeItem(s, d, '2026-10-24 10:00'); return [s.done, s.meta.st || '', s.meta.done || '']; };
+  assert.deepEqual(st('- [ ] T-0001 S', '- [ ] T-0002 D {st:Waiting}'), [false, 'Waiting', '']);
+  assert.deepEqual(st('- [ ] T-0001 S {st:In progress}', '- [ ] T-0002 D {st:Waiting}'), [false, 'In progress', ''], 'both set: the survivor\'s');
+  assert.deepEqual(st('- [ ] T-0001 S {st:Waiting}', '- [x] T-0002 D {done:2026-10-01}'), [false, 'In progress', ''], 'one done: open and In progress');
+  assert.deepEqual(st('- [x] T-0001 S {done:2026-10-02}', '- [ ] T-0002 D'), [false, 'In progress', '']);
+  assert.deepEqual(st('- [x] T-0001 S {done:2026-10-02}', '- [x] T-0002 D {done:2026-10-01}'), [true, '', '2026-10-02'], 'both done: stays done');
+});
+
+test('Meetings never merge, and nothing merges with itself', () => {
+  const t = one('- [ ] T-0001 A'), m = one('- [ ] T-0002 B {ty:Meeting}');
+  assert.equal(C.canMerge(t, m), false);
+  assert.equal(C.canMerge(m, t), false);
+  assert.equal(C.canMerge(t, t), false);
+  assert.equal(C.canMerge(t, one('- [x] T-0003 C {ty:FYI}')), true);
+});
+
+test('mergeRefs moves Relationships to the survivor, dropping repeats and any to itself', () => {
+  const r = C.mergeRefs('rels', [
+    '# Relationships',
+    '- T-0001 ~ T-0009 | related',
+    '- T-0002 ~ T-0009 | related',
+    '- T-0001 ~ T-0002 | related',
+    '- T-0002 -> SYS-0001 | concerns',
+    '- T-0002 ~ T-0010 | related',
+    '- T-0003 ~ T-0004 | related'], 'T-0010', 'T-0002');
+  assert.deepEqual(r.lines, ['# Relationships', '- T-0001 ~ T-0009 | related', '- T-0002 ~ T-0009 | related', '- T-0001 ~ T-0002 | related', '- T-0002 -> SYS-0001 | concerns', '- T-0003 ~ T-0004 | related']);
+  const m = C.mergeRefs('rels', ['- T-0001 ~ T-0009 | related', '- T-0002 ~ T-0009 | related', '- T-0001 ~ T-0002 | related', '- T-0002 -> SYS-0001 | concerns'], 'T-0001', 'T-0005');
+  assert.deepEqual(m.lines, ['- T-0005 ~ T-0009 | related', '- T-0002 ~ T-0009 | related', '- T-0002 ~ T-0005 | related', '- T-0002 -> SYS-0001 | concerns'], 'each line keeps its place, the ends of ~ in order');
+  const x = C.mergeRefs('rels', ['- T-0001 ~ T-0009 | related', '- T-0002 ~ T-0009 | related', '- T-0001 ~ T-0002 | related'], 'T-0002', 'T-0001');
+  assert.deepEqual(x.lines, ['- T-0001 ~ T-0009 | related']);
+  assert.deepEqual(x.swaps, [['- T-0002 ~ T-0009 | related', null, 1], ['- T-0001 ~ T-0002 | related', null, 2]]);
+});
+
+test('mergeRefs moves agent requests, the log and Noes to Relationships, and leaves other lines alone', () => {
+  assert.deepEqual(C.mergeRefs('asks', ['# Ask', '- T-0002 | 2026-10-08 18:02 | ask about T-0002', '- T-0020 | 2026-10-08 18:03 | other'], 'T-0002', 'T-0001').lines,
+    ['# Ask', '- T-0001 | 2026-10-08 18:02 | ask about T-0002', '- T-0020 | 2026-10-08 18:03 | other']);
+  assert.deepEqual(C.mergeRefs('log', ['- 2026-10-06 08:41 | T-0002 | queued 2026-10-05 17:15 | a | b', '- actioned 2026-10-07 08:41 | T-0002 | queued x | c | d', '- 2026-10-06 08:41 | T-0021 | queued x | e | f'], 'T-0002', 'T-0001').lines,
+    ['- 2026-10-06 08:41 | T-0001 | queued 2026-10-05 17:15 | a | b', '- actioned 2026-10-07 08:41 | T-0001 | queued x | c | d', '- 2026-10-06 08:41 | T-0021 | queued x | e | f']);
+  assert.deepEqual(C.mergeRefs('ignored', [
+    'mail|T-0002 thread | 2026-09-10 | newsletter',
+    'rel|T-0002|T-0009 | 2026-10-01 | the user said no',
+    'rel|T-0009|T-0001 | 2026-10-01 | the user said no',
+    'rel|T-0001|T-0002 | 2026-10-01 | the user said no',
+    'rel|T-0002|T-0007 | 2026-10-01 | the user said no'], 'T-0002', 'T-0001').lines,
+    ['mail|T-0002 thread | 2026-09-10 | newsletter', 'rel|T-0009|T-0001 | 2026-10-01 | the user said no', 'rel|T-0001|T-0007 | 2026-10-01 | the user said no']);
 });
