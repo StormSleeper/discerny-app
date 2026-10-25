@@ -14,7 +14,7 @@
     {
       "eval": "E21",
       "event": "AAMkAGI-fable-gonogo-1021",
-      "result": "T-0020 in TASKS.md now has due:2026-10-23 14:00, the title \"Fable Range 2027 – go/no-go\" and the source key cal|2026-10-23|fable range 2027 – go/no-go, and a Comment by calendar to acknowledge, \"Moved from 21 Oct 14:00 to 23 Oct 14:00.\"; the report's Meetings line says it moved; no proposal and no new item."
+      "result": "T-0020 in TASKS.md now has due:2026-10-23 14:00, the title \"Fable Range 2027 – go/no-go\" and the source key cal|2026-10-23|fable range 2027 – go/no-go, and a Comment by calendar to acknowledge, \"Moved in the calendar.\", with changed: due; from: 2026-10-21 14:00; to: 2026-10-23 14:00; the report's Meetings line says it moved; no proposal and no new item."
     },
     {
       "eval": "E22",

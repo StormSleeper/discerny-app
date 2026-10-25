@@ -54,7 +54,7 @@ Channels listed in `candidate_channels` aren't scanned. When posts in one of the
 - Worth a proposal: direct asks to the user ("could you", "please", a question), files they are expected to read or use (pass C, or a URL in the text), scheduling asks, due dates, decisions needing their input, and posts in watched channels that ask the team for something.
 - Information-only messages from priority people that teach something lasting (a process, a system, who owns what): `ty:FYI` or `ty:Process`, `urg:fyi` or `later`.
 - Several messages in one chat on one topic make one item, with every source key.
-- Someone not in `priority_people` who sent two or more actionable messages this run: propose adding them, under "Settings proposed".
+- Someone not in `priority_people` who sent two or more actionable messages this run: propose them with `discern propose` (`"change": "priority"`), naming the person in the report's "Settings proposed" line.
 
 ## Item specifics
 

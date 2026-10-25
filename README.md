@@ -21,7 +21,7 @@ How the GTD steps map onto Discerny:
 | GTD step | In Discerny |
 |---|---|
 | Capture | Source skills read your mail, chat or other sources and propose new items into `INBOX.md` |
-| Clarify | You clarify each proposal in the UI's inbox: correct a new item if need be, then accept or dismiss it; answer Yes or No to a proposed relationship, person or email address |
+| Clarify | You clarify each proposal in the UI's inbox: correct a new item if need be, then accept or dismiss it; answer Yes or No to a proposed relationship, person, email address or Priority person; acknowledge the news a skill added, or undo a change it made to a Due date, status or person |
 | Organise | Items carry a type, urgency, person, project and tags; people, projects and systems have their own records, with relationships between them |
 | Reflect | Weekly review page |
 | Engage | Today, Next actions, Waiting for and Upcoming views, and an All items page that groups, sorts and searches everything open |
@@ -89,7 +89,7 @@ You can have more than one data folder, for example one to try things out in. Sw
 | File | What it is |
 |---|---|
 | `TASKS.md` | Your open items: tasks, meetings, processes, documents and FYIs |
-| `INBOX.md` | Proposals from source skills, waiting for you to clarify them: new items, then changes such as a relationship or a new person |
+| `INBOX.md` | Proposals from source skills, waiting for you to clarify them: new items, then changes such as a relationship, a new person or a Priority person |
 | `DONE.md` | Completed items |
 | `PEOPLE.md`, `PROJECTS.md`, `SYSTEMS.md` | One record each for the people, projects and systems you deal with |
 | `RELATIONSHIPS.md` | Relationships between items and records, such as which task concerns which system |

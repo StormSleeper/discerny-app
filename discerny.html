@@ -303,6 +303,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .cmt-h{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12.5px;color:var(--muted)}
 .cmt-a{margin-left:auto;display:flex;gap:10px}
 .cmt-t{font-size:14px;color:var(--ink-2);white-space:pre-line;overflow-wrap:anywhere;margin-top:2px}
+.cmt-chg{font-size:14px;font-weight:600;color:var(--ink);margin-top:2px;overflow-wrap:anywhere}
 .ent-note.pre{white-space:pre-line}
 .links{display:flex;flex-wrap:wrap;gap:6px 14px}
 .ext{display:inline-flex;align-items:center;gap:4px;font-size:14px;color:var(--accent);overflow-wrap:anywhere}
@@ -428,8 +429,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.0.6'; // the app's version; tools/discern.mjs reads it from here
-var FORMAT='0.3.0.3'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
+var VERSION='0.3.0.7'; // the app's version; tools/discern.mjs reads it from here
+var FORMAT='0.3.0.7'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','week','soon','later','fyi'];
 var TYPES=['Task','Meeting','Process','Document','FYI'];
@@ -486,7 +487,7 @@ function textLines(each,curOf,blank){var tx=null,gap=0;
     var cur=curOf(),last=cur&&cur.subs[cur.subs.length-1];
     tx=last&&(last.k==='description'||last.k==='comment')&&last.n!==undefined?last:null;
     if(i===all.length-1)end();};}
-var COMMENT_ORDER=['added-datetime','author','acknowledged'];
+var COMMENT_ORDER=['added-datetime','author','acknowledged','changed','from','to','suggests'];
 // one sub-line of an Item or Record as written: several physical lines for a Description or Comment
 function serSub(b){
   if(b.k==='raw')return b.v;
@@ -495,7 +496,8 @@ function serSub(b){
   var ls=nl(b.v).split('\n'),f=b.f||{},parts=[];
   var head='  - '+b.k+':';
   if(b.k==='comment'){COMMENT_ORDER.concat(Object.keys(f).filter(function(k){return COMMENT_ORDER.indexOf(k)<0;})).forEach(function(k){
-      if(f[k]!==undefined&&f[k]!=='')parts.push(k+': '+ol(f[k]).replace(/[;{}]/g,','));});
+      // a field change keeps an empty from or to: the field had no value, or was cleared
+      if(f[k]!==undefined&&(f[k]!==''||(f.changed&&(k==='from'||k==='to'))))parts.push(k+': '+ol(f[k]).replace(/[;{}]/g,','));});
     head+=' {'+parts.join('; ')+'}';}
   else head+=ls[0]?' '+ls[0]:'';
   return head+(b.k==='comment'?ls:ls.slice(1)).map(function(l){return '\n    '+l;}).join('');}
@@ -522,14 +524,26 @@ function setDesc(x,text,rank){var t=cleanText(text),at=-1,k=0;
 function commentsOf(x){return x.subs.filter(function(b){return b.k==='comment';});}
 function toAck(c){return /^no$/i.test(String((c.f||{}).acknowledged||''));}
 function addComment(x,c,rank){var f={};f['added-datetime']=c.at;f.author=c.author;if(c.ack)f.acknowledged='no';
+  Object.keys(c.fields||{}).forEach(function(k){f[k]=c.fields[k];});
   return placeSub(x,{k:'comment',f:f,v:cleanText(c.text)},rank);}
+// A Skill changes only these fields, with a Comment to acknowledge naming the field and its old and new value (discern change).
+// Closing an Item stays the User's: news that it is finished is a Comment that suggests: done.
+var CHANGE_FIELDS={T:['due','st','who'],P:['title','co','dept','mgr']};
+// a Comment's field change -> {field, from, to}, from '' when the field had no value and to '' when it was cleared; null for none
+function fieldChange(c){var f=(c&&c.f)||{};return f.changed?{field:f.changed,from:f.from||'',to:f.to||''}:null;}
+// Undo shows only on the latest unacknowledged change to a field, and goes back to the value from before the first of them,
+// acknowledging them all -> {field, value, which: [[idx, text]]}, or null for any other Comment
+function changeUndo(x,c){var g=fieldChange(c);if(!g||!toAck(c))return null;
+  var list=commentsOf(x),same=byTime(list.filter(function(b){var h=fieldChange(b);return !!h&&h.field===g.field&&toAck(b);}));
+  if(same[same.length-1]!==c)return null;
+  return {field:g.field,value:fieldChange(same[0]).from,which:same.map(function(b){return [list.indexOf(b),b.v];})};}
 function serialize(model){var post=model.post||[];
   return model.pre.join('\n')+'\n'+model.items.map(serItem).join('\n')+(model.items.length?'\n':'')+(post.length?'\n'+post.join('\n')+'\n':'');}
 // change Proposals under "## Changes" in INBOX.md: "- <what> {key: value; …}" then "  - why: …", the braces parsed from the final " {"
 var CHANGE_KINDS=[[/^Relate ((?:T|P|PRJ|SYS)-\d+) and ((?:T|P|PRJ|SYS)-\d+)$/,'relationship',['a','b']],[/^New person (.+)$/,'person',['name']],
-  [/^Add email (\S+) to (.+) \((P-\d+)\)$/,'email',['email','name','id']]];
+  [/^Add email (\S+) to (.+) \((P-\d+)\)$/,'email',['email','name','id']],[/^Make (.+) \((P-\d+)\) a Priority person$/,'priority',['name','id']]];
 function fieldsOf(s){var f={};s.split(';').forEach(function(p){var i=p.indexOf(':');if(i>0)f[p.slice(0,i).trim()]=p.slice(i+1).trim();});return f;}
-// -> [{type: relationship|person|email|'', line, lines, at, fields, why, a, b | name, email | email, name, id}], at its index in post
+// -> [{type: relationship|person|email|priority|'', line, lines, at, fields, why, a, b | name, email | email, name, id | name, id}], at its index in post
 function changesOf(post){var out=[],cur=null;
   (post||[]).forEach(function(ln,at){
     var m=/^- (.*)$/.exec(ln);
@@ -541,8 +555,12 @@ function changesOf(post){var out=[],cur=null;
     if(cur&&/^ {2,}\S/.test(ln)){cur.lines.push(ln);var w=/^ {2,}- why: ?(.*)$/.exec(ln);if(w)cur.why=w[1];return;}
     cur=null;});
   return out;}
-// the IGNORED.md source key a No to a change writes: rel|<id>|<id> (matched in either order), or person|<address>
-function changeKey(c){return c.type==='relationship'?'rel|'+c.a+'|'+c.b:'person|'+String(c.email||'').toLowerCase();}
+// the IGNORED.md source key a No to a change writes: rel|<id>|<id> (matched in either order), person|<address>, or priority|<P-id>
+function changeKey(c){return c.type==='relationship'?'rel|'+c.a+'|'+c.b:c.type==='priority'?'priority|'+c.id:'person|'+String(c.email||'').toLowerCase();}
+// A No to a Priority person is not for good: it pauses them for PRIORITY_PAUSE days from the date on its IGNORED.md line
+var PRIORITY_PAUSE=28;
+function priorityPaused(ignored,id,today){return String(ignored||'').replace(/\r/g,'').split('\n').some(function(l){
+  var m=/^(?:- )?priority\|(P-\d+) \| (\d{4}-\d{2}-\d{2}) \|/.exec(l);return !!m&&m[1]===id&&daysBetween(m[2],today)<PRIORITY_PAUSE;});}
 function nextId(model){var n=0;model.pre.forEach(function(l){var m=/next-id:\s*(\d+)/.exec(l);if(m)n=parseInt(m[1],10);});
   model.items.forEach(function(i){var k=parseInt(i.id.slice(2),10);if(k>=n)n=k+1;});return n;}
 function setNextId(model,n){var f=false;model.pre=model.pre.map(function(l){if(/next-id:/.test(l)){f=true;return '<!-- next-id: '+n+' -->';}return l;});
@@ -1194,6 +1212,48 @@ var OPS = {
     return op((on ? 'Undo acknowledge on ' : 'Acknowledge comments on ') + id, recKeys(id), function (M) {
       var r = recIn(M, id);
       if (r) which.forEach(function (w) { var c = findComment(r.x, w[0], w[1]); if (!c) return; if (on) c.f.acknowledged = 'no'; else delete c.f.acknowledged; });
+    });
+  },
+  // Undo of a Skill's field change: the field back to value, and the change Comments it names ([idx, text] each) acknowledged.
+  // A Person's change gets a hist: line, as any change to their fields does. st keeps what it replaced, for the redo.
+  fieldUndo: function (id, field, value, which, date, st) {
+    return op('Undo the change to ' + field + ' on ' + id, recKeys(id), function (M) {
+      var r = recIn(M, id);
+      if (!r) return;
+      var x = r.x, was = x.meta[field] || '';
+      if (st.was === undefined) { st.was = was; st.chk = x.meta.chk; }
+      if (value) x.meta[field] = value; else delete x.meta[field];
+      if (kindOf(id) === 'P' && st.was !== value) {
+        st.hist = st.hist || date + ' | ' + PLABEL[field] + ': ' + (st.was || '(none)') + ' → ' + (value || '(none)');
+        if (!x.subs.some(function (b) { return b.k === 'hist' && b.v === st.hist; })) placeSub(x, { k: 'hist', v: st.hist }, r.rank);
+        x.meta.chk = date;
+      }
+      which.forEach(function (w) { var c = findComment(x, w[0], w[1]); if (c) delete c.f.acknowledged; });
+    });
+  },
+  fieldRedo: function (id, field, which, st) {
+    return op('Redo the change to ' + field + ' on ' + id, recKeys(id), function (M) {
+      var r = recIn(M, id);
+      if (!r || st.was === undefined) return;
+      var x = r.x;
+      if (st.was) x.meta[field] = st.was; else delete x.meta[field];
+      if (st.hist) { x.subs = x.subs.filter(function (b) { return !(b.k === 'hist' && b.v === st.hist); }); if (st.chk) x.meta.chk = st.chk; else delete x.meta.chk; }
+      which.forEach(function (w) { var c = findComment(x, w[0], w[1]); if (c) c.f.acknowledged = 'no'; });
+    });
+  },
+  // Yes to a Priority person: their ID added to priority_people; st.had says it was there already, for the undo
+  prioYes: function (c, st) {
+    return op('Make ' + c.name + ' a Priority person', ['inbox', 'settings'], function (M) {
+      if (!dropChange(M.inbox, c.line)) return;
+      var t = setPriority(M.settings.text, rid(c.id), true);
+      if (st.had === undefined) st.had = t === M.settings.text;
+      M.settings.text = t;
+    });
+  },
+  prioUnyes: function (c, st) {
+    return op('Undo Priority person', ['inbox', 'settings'], function (M) {
+      putChange(M.inbox, c.lines);
+      if (st.had === false) M.settings.text = setPriority(M.settings.text, rid(c.id), false);
     });
   },
   addSub: function (id, text) {
@@ -2502,14 +2562,33 @@ function inboxChanges() { return changesOf(S.m.inbox.post).filter(function (c) {
 function onInboxItem(c) { return c.type === 'relationship' && (whereOf(c.a) === 'inbox' || whereOf(c.b) === 'inbox'); }
 function changeCards() { return inboxChanges().filter(function (c) { return !onInboxItem(c); }); }
 function inboxCount() { return S.m.inbox.items.length + changeCards().length + ackItems().length; }
-// the Items with Comments to acknowledge: news a Skill added, waiting in the Inbox under New comments until the User acknowledges it
-function ackItems() { return allItems().filter(function (i) { return commentsOf(i).some(toAck); }); }
-function vAckEntry(i) {
-  var cs = byTime(commentsOf(i).filter(toAck));
-  return '<div class="row chg" data-k="ack-' + i.id + '"><div class="lead"><span class="pip" aria-hidden="true"></span></div><div class="body">' +
-    '<button type="button" class="t" data-act="open" data-id="' + i.id + '">' + esc(i.title) + '</button>' +
-    cs.map(function (c) { return '<div class="cmt"><div class="cmt-h"><span>' + esc(whenOf(c)) + ' · ' + esc(authorOf(c)) + '</span></div><div class="cmt-t">' + esc(c.v) + '</div></div>'; }).join('') +
-    '</div><div class="right">' + bt('Acknowledged', 'cmt-ack', { id: i.id, cls: 'primary sm', attrs: ' aria-label="Acknowledged: ' + esc(clip(i.title, 60)) + '"' }) + '<span class="id">' + i.id + '</span></div></div>';
+// the Items and Records with Comments to acknowledge: news a Skill added, waiting in the Inbox under New comments until the User acknowledges it
+function ackItems() { return allItems().concat(S.m.people.people, entsOf('PRJ'), entsOf('SYS')).filter(function (x) { return commentsOf(x).some(toAck); }); }
+function recId(x) { return x.id || x.meta.id; }
+// The calendar is the record for a Meeting it mirrors, so a change to one is made there, not undone here.
+function fromCalendar(x, c) { return !!x.id && x.meta.ty === 'Meeting' && c.f.author === 'calendar'; }
+// the latest unacknowledged change to each field, which alone shows Undo -> [{field, value, which}]
+function undosOf(x) {
+  var seen = {};
+  return byTime(commentsOf(x)).reverse().map(function (c) {
+    var u = changeUndo(x, c);
+    if (!u || seen[u.field] || fromCalendar(x, c)) return null;
+    seen[u.field] = 1; return u;
+  }).filter(Boolean).reverse();
+}
+function vAckEntry(x) {
+  var id = recId(x), title = x.id ? x.title : x.name, cs = byTime(commentsOf(x).filter(toAck)), undos = undosOf(x), acts = '';
+  var done = !!x.id && whereOf(id) !== 'done' && cs.some(function (c) { return c.f.suggests === 'done'; });
+  undos.forEach(function (u) { acts += bt(undos.length > 1 ? 'Undo ' + (CHANGE_WORD[u.field] || u.field).toLowerCase() : 'Undo', 'chg-undo', { id: id, v: u.field, cls: 'sm', attrs: ' aria-label="Undo the ' + esc((CHANGE_WORD[u.field] || u.field).toLowerCase()) + ' change: ' + esc(clip(title, 60)) + '"' }); });
+  if (done) acts += bt('Mark done', 'cmt-done', { id: id, cls: 'sm', attrs: ' aria-label="Mark done: ' + esc(clip(title, 60)) + '"' });
+  return '<div class="row chg" data-k="ack-' + id + '"><div class="lead"><span class="pip" aria-hidden="true"></span></div><div class="body">' +
+    (x.id ? '' : '<div class="meta">' + esc(KIND_WORD[kindOf(id)] || '') + '</div>') +
+    '<button type="button" class="t" data-act="open" data-id="' + id + '">' + esc(title) + '</button>' +
+    cs.map(function (c) {
+      return '<div class="cmt"><div class="cmt-h"><span>' + esc(whenOf(c)) + ' · ' + esc(authorOf(c)) + '</span></div>' + vCmtText(c) +
+        (fieldChange(c) && fromCalendar(x, c) ? '<div class="hint">Change it in your calendar.</div>' : '') + '</div>';
+    }).join('') +
+    '</div><div class="right">' + bt('Acknowledged', 'cmt-ack', { id: id, cls: 'primary sm', attrs: ' aria-label="Acknowledged: ' + esc(clip(title, 60)) + '"' }) + acts + '<span class="id">' + id + '</span></div></div>';
 }
 function changeByLine(line) { return inboxChanges().filter(function (c) { return c.line === line; })[0] || null; }
 // the line Yes writes to RELATIONSHIPS.md, with its ends in the order it stores them
@@ -2549,6 +2628,12 @@ function vChange(c) {
       (items.length ? '<div class="pills">' + items.map(function (x) { return '<button type="button" class="chipbtn" data-act="open" data-id="' + x + '"><span class="id">' + x + '</span> ' + esc(clip(labelOf(x), 60)) + '</button>'; }).join('') + '</div>' : '') + vWhy(c) +
       '<label class="hint intro" for="' + cid + '"><input type="checkbox" id="' + cid + '" data-ch="intro" data-v="' + esc(key) + '"' + (S.introOn[key] ? ' checked' : '') + '>Add a Task to set up an introduction meeting</label>';
     acts = bt('Add', 'person-add', { v: c.line, cls: 'primary sm' }) + bt('Add as Priority person', 'person-prio', { v: c.line, cls: 'sm' }) + bt('No', 'chg-no', { v: c.line, cls: 'sm' });
+  } else if (c.type === 'priority') {
+    var pp = personById(c.id);
+    body = '<div class="q">Make ' + (pp ? '<button type="button" class="t inl" data-act="open" data-id="' + c.id + '">' + esc(pp.name) + '</button>' : esc(c.name)) + ' a Priority person?</div>' +
+      '<div class="meta">' + esc(pp ? [pp.meta.title, pp.meta.co].filter(Boolean).join(', ') : c.id + ' is not in People') + '</div>' +
+      '<div class="meta">' + esc(vSeen(c)) + '</div>' + vWhy(c);
+    acts = (pp ? bt('Yes', 'prio-yes', { v: c.line, cls: 'primary sm' }) : '') + bt('No', 'chg-no', v);
   } else {
     var p = personById(c.id);
     body = '<div class="q">New email for ' + (p ? '<button type="button" class="t inl" data-act="open" data-id="' + c.id + '">' + esc(p.name) + '</button>' : esc(c.name)) + '</div>' +
@@ -2571,7 +2656,7 @@ function viewInbox() {
   var l = inboxList(), cs = changeCards(), ak = ackItems(), r = lastRefresh();
   var body = vSec('triage', 'To clarify', rowsOf(l), { hint: 'oldest first', empty: cs.length || ak.length ? 'No new items to clarify.' : 'Inbox zero. Nothing is waiting to be clarified.' });
   if (ak.length) body += vSec('acks', 'New comments', ak.map(vAckEntry), { hint: 'news on items you track' });
-  if (cs.length) body += vSec('changes', 'Changes', cs.map(vChange), { hint: 'relationships and people' });
+  if (cs.length) body += vSec('changes', 'Changes', cs.map(vChange), { hint: 'relationships, people and Priority people' });
   return {
     title: 'Inbox', sub: plural(l.length + cs.length, 'proposal') + (ak.length ? ' · ' + plural(ak.length, 'item') + ' with new comments' : '') + (r ? ' · last run ' + r : ''),
     body: '<div class="list">' + body + '</div>'
@@ -3053,6 +3138,15 @@ var AUTHOR_WORD = { user: 'You', agent: 'Agent' };
 // who wrote a Comment: You, Agent, or the Skill's word with a capital (Email, Calendar)
 function authorOf(c) { var a = c.f.author || ''; return AUTHOR_WORD[a] || (a ? a.charAt(0).toUpperCase() + a.slice(1) : 'Unknown'); }
 function whenOf(c) { var at = c.f['added-datetime']; return at ? fmtDT(at) : 'Earlier'; }
+// a Comment's text, under the field change it made, if it made one: "Due date: 30 Oct → 6 Nov"
+var CHANGE_WORD = { due: 'Due date', st: 'Status', who: 'Person', title: 'Job title', co: 'Company', dept: 'Department', mgr: 'Reports to' };
+function changeVal(field, v) {
+  if (!v) return field === 'st' ? 'To do' : 'none';
+  if (field !== 'due' || !isDay(v)) return v;
+  var d = pd(v); return d.getDate() + ' ' + MON[d.getMonth()] + yearTail(d) + (timeOf(v) ? ' ' + timeOf(v) : '');
+}
+function changeText(g) { return (CHANGE_WORD[g.field] || g.field) + ': ' + changeVal(g.field, g.from) + ' → ' + changeVal(g.field, g.to); }
+function vCmtText(c) { var g = fieldChange(c); return (g ? '<div class="cmt-chg">' + esc(changeText(g)) + '</div>' : '') + '<div class="cmt-t">' + esc(c.v) + '</div>'; }
 // the Description on a Project's, System's or Person's page, a paragraph to each block of lines
 function vDescText(x) { return descOf(x).split(/\n\s*\n/).filter(function (p) { return p.trim(); }).map(function (p) { return '<div class="ent-note pre">' + esc(p) + '</div>'; }).join(''); }
 // the Details tab's Description box and Comments, oldest first, the undated ones shown as Earlier. Edit on the User's own, Delete on any.
@@ -3064,7 +3158,7 @@ function vDescComments(id, x, hint) {
     var head = '<div class="cmt-h"><span>' + esc(whenOf(c)) + ' · ' + esc(authorOf(c)) + '</span>' + (toAck(c) ? badge('New', 'info') : '') +
       (editing ? '' : '<span class="cmt-a">' + (c.f.author === 'user' ? lk('Edit', 'cmt-edit', { id: id, v: k }) : '') + lk('Delete', 'cmt-del', { id: id, v: k, attrs: ' aria-label="Delete the comment from ' + esc(whenOf(c)) + '"' }) + '</span>') + '</div>';
     var body = editing ? '<label class="sr" for="cmt-edit">Edit your comment</label><textarea id="cmt-edit" class="in" rows="3" data-in="cmtEditText" data-kd="cmt-edit" data-id="' + id + '" style="width:100%">' + esc(S.cmtEditText) + '</textarea>' +
-      '<div class="reasons">' + bt('Save', 'cmt-save', { id: id, v: k, cls: 'primary sm' }) + lk('Cancel', 'cmt-cancel') + '</div>' : '<div class="cmt-t">' + esc(c.v) + '</div>';
+      '<div class="reasons">' + bt('Save', 'cmt-save', { id: id, v: k, cls: 'primary sm' }) + lk('Cancel', 'cmt-cancel') + '</div>' : vCmtText(c);
     return '<div class="cmt" data-k="cmt-' + k + '-' + esc(c.f['added-datetime'] || '') + '">' + head + body + '</div>';
   }).join('');
   var add = '<label class="sr" for="f-cmt">Add a comment</label><textarea id="f-cmt" class="in" rows="2" data-in="cmtDraft" data-kd="cmt" data-id="' + id + '" placeholder="Add a comment" style="width:100%">' + esc(S.cmtDraft) + '</textarea>' +
@@ -3666,13 +3760,35 @@ function relYes(line) {
 function changeNo(line) {
   var c = changeByLine(line);
   if (!c) return;
-  var what = c.type === 'relationship' ? c.a + ' and ' + c.b + ' won’t be proposed as related again.' : c.email + ' won’t be proposed again.';
+  var what = c.type === 'relationship' ? c.a + ' and ' + c.b + ' won’t be proposed as related again.' : c.type === 'priority' ? c.name + ' won’t be proposed as a Priority person for ' + PRIORITY_PAUSE + ' days.' : c.email + ' won’t be proposed again.';
   commit(OPS.changeNo(c), { toast: 'No: ' + what, undo: OPS.changeUnno(c, noLine(c)) });
 }
 function emailYes(line) {
   var c = changeByLine(line), st = {};
   if (!c || c.type !== 'email' || !personById(c.id)) return;
   commit(OPS.emailYes(c, todayStr(), st), { toast: 'Added ' + c.email + ' to ' + c.name + '.', undo: OPS.emailUnyes(c, st, todayStr()) });
+}
+function prioYes(line) {
+  var c = changeByLine(line), st = {};
+  if (!c || c.type !== 'priority' || !personById(c.id)) return;
+  commit(OPS.prioYes(c, st), { toast: c.name + ' is a Priority person now.', undo: OPS.prioUnyes(c, st) });
+}
+// Undo on a Skill's latest change to a field puts back the value from before its first unacknowledged change, and acknowledges them all
+function undoChange(id, field) {
+  var x = recOf(id), u = x ? undosOf(x).filter(function (y) { return y.field === field; })[0] : null;
+  if (!u) return;
+  var st = {}, word = CHANGE_WORD[field] || field;
+  commit(OPS.fieldUndo(id, field, u.value, u.which, todayStr(), st), { toast: word + ' on ' + id + ' is ' + changeVal(field, u.value) + ' again.', undo: OPS.fieldRedo(id, field, u.which, st) });
+}
+// Mark done on news that an Item is finished: it is completed as Done does, and its Comments to acknowledge are acknowledged
+function markDoneAck(id) {
+  var i = item(id), w = whereOf(id);
+  if (!i || (w !== 'open' && w !== 'inbox')) return;
+  var list = commentsOf(i), which = list.filter(toAck).map(function (c) { return [list.indexOf(c), c.v]; }), keys = ['tasks', 'inbox', 'done', 'rels'];
+  var steps = (w === 'inbox' ? [OPS.accept(id, [])] : []).concat([OPS.complete(id, todayStr()), OPS.ack(id, which, false)]);
+  var back = [OPS.ack(id, which, true), OPS.reopen(id, i.meta.st || '')].concat(w === 'inbox' ? [OPS.unaccept(id, [])] : []);
+  commit(op('Mark done ' + id, keys, function (M) { steps.forEach(function (s) { s.fn(M); }); }),
+    { toast: 'Done: ' + clip(i.title, 60), undo: op('Undo done ' + id, keys, function (M) { back.forEach(function (s) { s.fn(M); }); }) });
 }
 function personAdd(line, priority) {
   var c = changeByLine(line), st = {};
@@ -3877,6 +3993,9 @@ var ACT = {
   'email-yes': function (el) { emailYes(dvv(el)); },
   'person-add': function (el) { personAdd(dvv(el), false); },
   'person-prio': function (el) { personAdd(dvv(el), true); },
+  'prio-yes': function (el) { prioYes(dvv(el)); },
+  'chg-undo': function (el) { undoChange(did(el), dvv(el)); },
+  'cmt-done': function (el) { markDoneAck(did(el)); },
   chase: function (el) { chase(did(el)); },
   gotit: function (el) { gotIt(did(el)); },
   ack: function (el) { acknowledge(did(el)); },

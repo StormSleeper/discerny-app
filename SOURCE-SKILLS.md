@@ -1,6 +1,6 @@
 # Source skills: the shared protocol
 
-A source skill reads one source (a mailbox, Teams chat, a calendar, an export) and puts proposals to the user: new items into `INBOX.md`, with Relationships, new people and new email addresses under its `## Changes` heading, and changes to existing items and settings in its run report. The one exception is a horizon source's Meetings, which go straight into `TASKS.md` (see "Meetings from a horizon source"). One source skill reading its source once is a run; running every source skill in turn is a refresh. Every `discern-<source>` skill follows this file and adds only what is specific to its connector. `AGENTS.md` comes first; it is normally in context already.
+A source skill reads one source (a mailbox, Teams chat, a calendar, an export) and puts proposals to the user: new items into `INBOX.md`, with Relationships, new people, new email addresses and Priority people under its `## Changes` heading. News that changes a field of an item or person it applies itself, with a Comment for the user to acknowledge (see "Field changes"). The one exception is a horizon source's Meetings, which go straight into `TASKS.md` (see "Meetings from a horizon source"). One source skill reading its source once is a run; running every source skill in turn is a refresh. Every `discern-<source>` skill follows this file and adds only what is specific to its connector. `AGENTS.md` comes first; it is normally in context already.
 
 ## Ground rules
 
@@ -23,7 +23,7 @@ A source skill reads one source (a mailbox, Teams chat, a calendar, an export) a
 3. **Filter.** Drop what the block's exclude rules and the skill's filters catch, and the user's own messages outside ask and commitment passes. These aren't logged. Done when only unfiltered candidates remain. Everything left is a candidate: something the skill has found and is still assessing.
 4. **Match.** Pipe the candidates to `discern match`, which compares their source keys with what is already tracked. Each result has an `outcome` and an `action`; follow the action as worded. `drop` means no item, no proposal and no report line. `comment: …` gives the `discern comment` command to run, with the text in angle brackets filled in from the message; nothing else is proposed for that candidate. `report: …` is a line for the report, word for word. Done when every candidate has one.
 5. **Assess.** Decide what the action leaves open, by the policy below: already tracked, noise to ignore, or worth a proposal, and how to word it. Body and event reads count against the skill's read budget: every full text you look at is a read, whether it comes from the connector or a fixture file that holds them all. Once it is spent, capture the remaining inbound candidates from their summaries (unsure means capture) and count them under "Not yet checked"; in an ask pass, leave them uncaptured behind the ask cursor and count them the same way. Done when every candidate has a decision.
-6. **Write.** `discern meetings` for a horizon source's Meetings, `discern add <source> --dry-run` first, then `discern add <source>` for new items, then `discern propose <source>` for Relationships and people, so a new item's ID is known, `discern comment` for news on items already tracked, `discern ignore` for noise, `discern ref` where an action asks for a source key, then `discern check`. Done when the check passes.
+6. **Write.** `discern meetings` for a horizon source's Meetings, `discern add <source> --dry-run` first, then `discern add <source>` for new items, then `discern propose <source>` for Relationships, people and Priority people, so a new item's ID is known, `discern change` for news that changes a field and `discern comment` for other news on items already tracked, `discern ignore` for noise, `discern ref` where an action asks for a source key, then `discern check`. Done when the check passes.
 7. **Commit.** Every Run commits, even one that found nothing new or ran at the same time as the last. `discern commit <source>` with `last_run=` the `run_start` and `last_result=` the report's first line. A stream source also sends `watermark=` the end of the last window every pass finished (the watermark it has, when none was), `waiting_checked_through=` the ask cursor (the end of the last ask window the pass finished, as `discern state` gave it; only when an ask was left unclassified does it go back, to one second before the oldest such ask), and `split=` when step 2 found a day too big; a horizon source sends nothing else. The helper refuses a watermark that isn't the end of one of the Run's windows, since it could skip days not yet read: exit 1, so send the one the message points to. A failed pass commits nothing; a finished backfill sends `gap=`. Each commit also removes the `DISMISSED.md` lines whose source can no longer read the message again, and counts them as `forgotten`. For a stream source the output's `behind.report` says whether the source is caught up or has days still to read. Done when `SOURCES.md` shows this run.
 8. **Report.** The template below, ending, for a stream source, with `behind.report` from the commit; when `log_runs` is true, also pipe it to `discern log`. Done when every proposal names its item ID.
 
@@ -41,12 +41,12 @@ A source key in `IGNORED.md` makes a candidate `ignored`, and one in `DISMISSED.
 
 ## Meetings from a horizon source
 
-A horizon source, such as a calendar, puts every Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item, without a proposal: the user already accepted the invitation, so a proposal would only ask them again. `discern meetings` does it, matching on the `cal` and `calid` source keys so a re-run, or a Meeting another source already tracks, adds nothing. On each run a moved Meeting takes its new Due date and title, with a Comment to acknowledge saying where it moved from and to, and a cancelled or declined one stays open, retitled "Cancelled: …", with a Comment to acknowledge, "Found cancelled.". Both Comments are by `calendar`. No run marks a Meeting done; only the user does. Everything else a horizon source finds, including the Tasks about a Meeting, is a proposal.
+A horizon source, such as a calendar, puts every Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item, without a proposal: the user already accepted the invitation, so a proposal would only ask them again. `discern meetings` does it, matching on the `cal` and `calid` source keys so a re-run, or a Meeting another source already tracks, adds nothing. On each run a moved Meeting takes its new Due date and title, with a field change Comment to acknowledge (`changed: due`, from the old time to the new), and a cancelled or declined one stays open, retitled "Cancelled: …", with a Comment to acknowledge, "Found cancelled.". Both Comments are by `calendar`. No run marks a Meeting done; only the user does. Everything else a horizon source finds, including the Tasks about a Meeting, is a proposal.
 
 A Meeting item records when and where a Meeting happens and who attends; the work it needs is a Task of its own. So in any source, on a Meeting's thread:
 
 - An ask, a commitment or a material change, such as a new agenda or a pre-read to go through, is a new Task proposed as related to the Meeting, due before the Meeting starts.
-- A new place or a change to who attends is an update proposed to the Meeting item.
+- A new place is a Comment to acknowledge on the Meeting item. A new attendee is an `involves` Relationship proposed with it, or a new person.
 - A new time or a cancellation is never proposed: the calendar keeps the Meeting in step.
 
 `match`'s action says which applies when it hits a Meeting.
@@ -75,19 +75,31 @@ A Meeting item records when and where a Meeting happens and who attends; the wor
 - `"change": "relationship"`: `ids`, its two ends, and optionally `kind`, which the helper checks against the kinds the ends allow. Both must exist, so propose a new item's Relationships after `discern add` has given it its ID.
 - `"change": "person"`: `name`, `email`, and optionally `company`, `title` and `items` (the open or inbox items they are on, whose `who` an Add fills in).
 - `"change": "email"`: `email` and `person`, the P-id of someone in `PEOPLE.md`.
+- `"change": "priority"`: `person`, the P-id of someone to add to `priority_people`. Propose only additions, never removals.
 
-It checks every Proposal before writing any. One already made (related already, or the address already someone's), already waiting in the inbox, or one the user said No to is skipped, not written, and listed in `skipped` with why; a No is for good. `--dry-run` shows the lines without writing them.
+It checks every Proposal before writing any. One already made (related already, the address already someone's, or the person a Priority person already), already waiting in the inbox, or one the user said No to is skipped, not written, and listed in `skipped` with why. A No is for good, except to a Priority person, which pauses that person for 28 days. `--dry-run` shows the lines without writing them.
+
+## Field changes
+
+News on an item or person already tracked that changes one of its fields is applied, not proposed: `discern change <id> --author <word> --field <field> --to <value> "<why>"`. It sets the field, adds a Comment to acknowledge naming the field, its old value and its new one, with the why as its text, and on a person a `hist:` line. The user sees it in the Inbox and can Undo it there.
+
+- On an item: `due` (a new date, or date and time), `st` (`Waiting`, `In progress`, or `""` to clear it) and `who` (a name in `PEOPLE.md`, for an item handed to someone else). A Meeting's new place is a plain Comment to acknowledge, and a new attendee a Proposal.
+- On a person: `title`, `company`, `department` and `manager` (`co`, `dept`, `mgr`).
+- Never `urg`, `p`, `prj`, `tg`, `dep` or `ty`, which are the user's own judgement and organising, and never closing an item: news that one is finished is `discern comment <id> --author <word> --to-acknowledge --suggests done "<the news>"`, which the user can Mark done. The helper refuses all of these.
+
+The newest evidence wins, even over a value the user set by hand. A change the item or person already has a Comment for, to the same value, is skipped, so a message read again in the overlap, or after the user's Undo, changes nothing.
 
 | File | A source skill writes | Command |
 |---|---|---|
-| `INBOX.md` | New items; under `## Changes`, Relationships, new people and new email addresses | `discern add`, `propose` |
+| `INBOX.md` | New items; under `## Changes`, Relationships, new people, new email addresses and Priority people | `discern add`, `propose` |
 | `IGNORED.md` | Noise; a whole out-of-scope chat with `"container": true` | `discern ignore` |
-| `TASKS.md` | The counter; hidden `ref:` lines (source keys); Comments; a horizon source's Meetings | `discern add`, `ref`, `comment`, `meetings` |
+| `TASKS.md` | The counter; hidden `ref:` lines (source keys); Comments; field changes; a horizon source's Meetings | `discern add`, `ref`, `comment`, `change`, `meetings` |
+| `PEOPLE.md` | Field changes, with their `hist:` lines; Comments | `discern change`, `comment` |
 | `SOURCES.md` | Its own block's state | `discern commit` |
 | `DISMISSED.md` | Nothing; the UI writes it and a commit removes lines its sources have moved past | `discern commit` |
 | `REFRESH-LOG.md` | The report | `discern log` |
 
-Everything else (changes to items other than a horizon source's Meetings, such as a new Due date or status, and settings such as `priority_people` or an exclude rule) is a proposal in the run report, and appears only there: the UI does not show these proposals. A proposal costs the user one read where an unwanted edit costs a search.
+A setting other than `priority_people`, such as an exclude rule, is a proposal in the run report, and appears only there.
 
 ## Comments
 
@@ -99,9 +111,10 @@ News on an item already tracked that changes none of its fields goes on the item
 | The user replied | "You replied on 21 Oct." | no |
 | The user chased | "Chased Meera on 20 Oct." | no |
 | A Meeting cancelled (`discern meetings`) | "Found cancelled." | yes |
-| A Meeting moved (`discern meetings`) | "Moved from 14:00 to 15:30." | yes |
+| A Meeting moved (`discern meetings`) | "Moved in the calendar.", `changed: due` | yes |
+| News that changes a field, such as a new Due date (`discern change`) | "Jo says the 8D report slips a week.", `changed: due` | yes |
+| News that an item is finished | "Kwame says the team is trained.", `suggests: done` | yes |
 | Other news that changes no field | "Lena says the clamp is on its way back." | yes |
-| News that changes a field, such as a new Due date | none: a proposal in the report | |
 
 Write a Comment in a sentence or two, in your own words. Like everything else from a source, it never quotes a message at length.
 
@@ -120,12 +133,12 @@ Every new field is named this way. Older fields keep their short codes (`ty`, `p
 ```
 <source> · fetched n · filtered n · out of scope n · duplicates n · answered n · meetings +n · inbox +n (waiting +n, commitments +n, derived +n) · ignored +n
 New: T-#### <title> (<who>, <urg>) · …
-Updates proposed: T-#### <what changed> (from <who>, <date>)
+Fields changed: T-#### due 2026-10-30 → 2026-11-06 · P-#### title <old> → <new>
 Comments: T-####, T-####
 Meetings: added T-#### <title> (<d Mon HH:MM>) · T-#### moved to <d Mon HH:MM> · T-#### cancelled · overlap: <meeting> and <meeting>
 Relationships proposed in the inbox: T-#### ~ T-#### · T-#### concerns SYS-####
 People proposed in the inbox: <name> (<address>) as a new person · <address> for <name>
-Settings proposed: add <name> to priority_people · <a setting to change, and why>
+Settings proposed: <name> as a Priority person, in the inbox · <another setting to change, and why>
 Not yet checked: n items, oldest <date>
 <source>: caught up | <source>: n days still to read, run again
 ```

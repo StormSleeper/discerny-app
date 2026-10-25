@@ -10,6 +10,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - The Example now has a reply waiting to be acknowledged, so you can try New comments in the Inbox straight away.
 - The Discerny logo in the sidebar and on the folder screen is larger and easier to see.
 - You can merge a duplicate item into the item it duplicates, and dismissing an inbox proposal as Duplicate now merges it too, so nothing it carried is lost.
+- When a refresh finds a new Due date, status or job title, it now makes the change and shows it under New comments in the Inbox, where you can undo it, mark finished work done, and answer Yes or No to making someone a Priority person.
 
 ## 0.2.0.1 (2026-10-23)
 

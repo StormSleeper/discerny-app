@@ -13,7 +13,7 @@ function loadCore() {
   const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
   const names = ['parse', 'serialize', 'pParse', 'changesOf', 'changeKey', 'setPriority', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue', 'REL_HEAD', 'ASK_HEAD',
     'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK',
-    'serItem', 'canMerge', 'mergeItem', 'mergeRefs'];
+    'serItem', 'canMerge', 'mergeItem', 'mergeRefs', 'fieldChange', 'changeUndo', 'priorityPaused'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -497,4 +497,36 @@ test('mergeRefs moves agent requests, the log and Noes to Relationships, and lea
     'rel|T-0001|T-0002 | 2026-10-01 | the user said no',
     'rel|T-0002|T-0007 | 2026-10-01 | the user said no'], 'T-0002', 'T-0001').lines,
     ['mail|T-0002 thread | 2026-09-10 | newsletter', 'rel|T-0009|T-0001 | 2026-10-01 | the user said no', 'rel|T-0001|T-0007 | 2026-10-01 | the user said no']);
+});
+
+const changed = (at, from, to, ack = true) => `  - comment: {added-datetime: ${at}; author: email${ack ? '; acknowledged: no' : ''}; changed: due; from: ${from}; to: ${to}}\n    moved`;
+
+test('a field change Comment keeps an empty from or to as it is written, and reads back as the change', () => {
+  const it = items('- [ ] T-0001 A {due:2026-11-06}\n' + changed('2026-10-25 09:14', '', '2026-11-06'))[0];
+  const c = C.commentsOf(it)[0];
+  assert.deepEqual(C.fieldChange(c), { field: 'due', from: '', to: '2026-11-06' });
+  assert.equal(C.serItem(it).split('\n')[1], '  - comment: {added-datetime: 2026-10-25 09:14; author: email; acknowledged: no; changed: due; from: ; to: 2026-11-06}');
+  assert.equal(C.fieldChange(C.commentsOf(items('- [ ] T-0001 A\n  - comment: {added-datetime: 2026-10-25 09:14; author: email}\n    x')[0])[0]), null);
+});
+
+test('Undo is on the latest unacknowledged change to a field only, back to the value from before the first, acknowledging them all', () => {
+  const it = items(['- [ ] T-0001 A {due:2026-11-20}',
+    changed('2026-10-20 09:00', '2026-10-01', '2026-10-30', false),
+    changed('2026-10-25 09:00', '2026-11-06', '2026-11-20'),
+    changed('2026-10-22 09:00', '2026-10-30', '2026-11-06'),
+  ].join('\n'))[0];
+  const [old, last, first] = C.commentsOf(it);
+  assert.equal(C.changeUndo(it, old), null, 'an acknowledged change has none');
+  assert.equal(C.changeUndo(it, first), null, 'an earlier change has none');
+  assert.deepEqual(C.changeUndo(it, last), { field: 'due', value: '2026-10-30', which: [[2, 'moved'], [1, 'moved']] });
+});
+
+test('a Priority person Proposal parses with its P-id, and a No to one pauses them for 28 days from its date', () => {
+  const [c] = C.changesOf(['## Changes', '- Make Jo Bloggs (P-0012) a Priority person {source: teams; received-datetime: 2026-10-22 09:14}', '  - why: Sent four actionable messages this week.']);
+  assert.deepEqual([c.type, c.name, c.id, c.why], ['priority', 'Jo Bloggs', 'P-0012', 'Sent four actionable messages this week.']);
+  assert.equal(C.changeKey(c), 'priority|P-0012');
+  const ign = 'mail|x | 2026-10-01 | newsletter\npriority|P-0012 | 2026-10-01 | the user said no\n';
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-28'), true);
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-29'), false);
+  assert.equal(C.priorityPaused(ign, 'P-0013', '2026-10-02'), false);
 });

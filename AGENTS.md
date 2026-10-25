@@ -112,9 +112,17 @@ Every item and record has at most one Description and any number of Comments.
   - `added-datetime`: when it was added, local time in `timezone`. Comments the Migration made from old notes have none: they come first, as older than any dated one.
   - `author`: `user` for the user; the skill's word for a source skill (`email`, `calendar`, `teams`); `agent` for you, working an agent request or something the user asked you in a conversation.
   - `acknowledged: no`, only on a **Comment to acknowledge** (below).
+  - `changed`, `from` and `to`, only on a **field change** (below): the field as this file names it, its value before and its value after. `from` is empty when the field had no value, and `to` when it was cleared.
+  - `suggests: done`, only on a Comment to acknowledge saying an item is finished.
 
   New Comments go after the others, so they stay oldest first. Add one without asking whenever new information turns up, with `discern comment <id> --author <word> "<text>"` (`node tools/discern.mjs` from the app folder), which stamps the time and puts it in place. Never change or delete a Comment, the user's or anyone else's: the user can edit their own and delete any, in the UI.
 - **A Comment to acknowledge** brings news from someone else that the user should see: a reply received, a Meeting moved or cancelled, new information about an item. `discern comment` with `--to-acknowledge` writes `acknowledged: no`, and the UI's Inbox shows the Comment until the user acknowledges it, which deletes the field. A Comment recording something the user did, such as a reply they sent, needs no acknowledging.
+- **A field change** is news that changes a field: a new Due date or status, an item handed to someone else, a person's new job title. A source skill makes the change itself and tells the user with a Comment to acknowledge, through `discern change <id> --author <word> --field <field> --to <value> "<why>"`, which also adds a person's `hist:` line. It changes only an item's `due`, `st` (`Waiting`, `In progress`, or cleared) and `who`, and a person's `title`, `co`, `dept` and `mgr`. The rest (`urg`, `p`, `prj`, `tg`, `dep`, `ty`) are the user's own judgement, and closing an item is always the user's: news that one is finished is `discern comment <id> --to-acknowledge --suggests done "<text>"`. The newest news wins, even over a value the user set, and the same change is applied once. In the Inbox the user can Undo the latest change to a field, which puts back the value from before its first unacknowledged change, or Mark done an item that suggests it. A Meeting the calendar mirrors has no Undo: the calendar is its record.
+
+  ```
+    - comment: {added-datetime: 2026-10-25 09:14; author: email; acknowledged: no; changed: due; from: 2026-10-30; to: 2026-11-06}
+      Jo says the 8D report slips a week.
+  ```
 
 ## Projects and systems (PROJECTS.md, SYSTEMS.md)
 
@@ -178,6 +186,8 @@ Below the new items, `INBOX.md` may hold a `## Changes` heading: proposed change
   - why: Signs the mail as buyer at Acme.
 - Add email jo.b@acme.com to Jo Bloggs (P-0012) {source: outlook-mail; received-datetime: 2026-10-22 09:14}
   - why: Writes from a second address.
+- Make Jo Bloggs (P-0012) a Priority person {source: teams; received-datetime: 2026-10-22 09:14}
+  - why: Sent four actionable messages this week.
 ```
 
 The user answers each in the UI, Yes or No, and the UI removes the line:
@@ -185,7 +195,8 @@ The user answers each in the UI, Yes or No, and the UI removes the line:
 - **Relationship**: Yes writes the line to `RELATIONSHIPS.md`, with the kind its two ends allow. While either end is a new item still in the inbox, the question is asked on that item, and dismissing the item drops it.
 - **New person**: Add makes the record (a new `P-####`, `em:`, `co:` and `title:` as proposed) and sets `who` on the listed items that have none; Add as Priority person also adds the ID to `priority_people`. Either can also add an open Task to set up an introduction meeting, related to those items.
 - **New email**: Yes adds the address to the person's `em:`, with a `hist:` line.
-- **No** logs the change in `IGNORED.md` for good (see below), and the helper never proposes it again.
+- **Priority person**: Yes adds the ID to `priority_people` in `SOURCES.md`. Only additions are proposed, never removals, and never someone who is one already.
+- **No** logs the change in `IGNORED.md` (see below), and the helper never proposes it again; a No to a Priority person only pauses them, for 28 days from the date it logs.
 
 Source skills write these lines only through `discern propose`; never edit them by hand.
 
@@ -227,9 +238,9 @@ Line breaks inside a request are written as ` ⏎ `. The ID is the item or recor
 A source is anything outside Discerny that a source skill reads: a mailbox, Teams chat, a calendar, an export. A run is one source skill reading its source once; a refresh is running every source skill in turn (`discern-refresh`). Discerny itself never talks to an outside system, so any connector the agent has can be used. Before running or writing a source skill, read `SOURCE-SKILLS.md`: it holds the loop every source skill follows, and how to use the helper, `tools/discern.mjs`, which does the deterministic parts. In short:
 
 1. A `discern-<source>` skill reads the shared `## defaults` block and its own `## <source-name>` block in `SOURCES.md`. For a stream source, such as a mailbox or Teams chat, it asks its connector only for messages after its cursor (`watermark` less `overlap`), in day-long windows. A horizon source, such as a calendar, re-reads a window ahead of now on every run instead.
-2. Each thing it finds is a candidate, which the skill assesses. A candidate whose source key already appears in `TASKS.md`, `INBOX.md`, `DONE.md`, `IGNORED.md` or `DISMISSED.md` is already tracked: it is skipped, becomes a Comment on the existing item when it brings news that changes no field, or becomes a proposed change to the item, which appears only in the run report.
-3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `src:`, `ref:`, `asg:` and `source:`, the name of the source's block in `SOURCES.md`. Relationships, new people and new email addresses the run found go under `## Changes` in `INBOX.md` too (see "Changes in the inbox"). Then the cursor moves past the last window fully processed. A run reads at most `page_cap` pages a pass, so after a gap a stream source takes several runs to catch up: its report ends by saying whether it is caught up, and a refresh runs it again while it isn't. Meetings come from the calendar: a horizon source writes each Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item and keeps it in step with the calendar, but never marks one done; the mail skill leaves invitations to it.
-4. The user clarifies each proposal in the UI's inbox. Accept moves the item to `TASKS.md`. Already handled accepts it and marks it done at once, so it goes to `DONE.md`. Dismiss, as Not actionable or Not mine, remembers only that message, in `DISMISSED.md`: later messages on the same thread can be proposed again. Dismiss as Duplicate merges the proposal into the item it duplicates (see "Item format"), which takes its source keys. `discern commit` removes the line once the source can no longer read the message again. A change is answered Yes, which makes it, or No, which is for good.
+2. Each thing it finds is a candidate, which the skill assesses. A candidate whose source key already appears in `TASKS.md`, `INBOX.md`, `DONE.md`, `IGNORED.md` or `DISMISSED.md` is already tracked: it is skipped, becomes a Comment on the existing item when it brings news that changes no field, or becomes a field change the skill makes itself, with a Comment for the user to acknowledge (see "Descriptions and Comments").
+3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `src:`, `ref:`, `asg:` and `source:`, the name of the source's block in `SOURCES.md`. Relationships, new people, new email addresses and Priority people the run found go under `## Changes` in `INBOX.md` too (see "Changes in the inbox"). Then the cursor moves past the last window fully processed. A run reads at most `page_cap` pages a pass, so after a gap a stream source takes several runs to catch up: its report ends by saying whether it is caught up, and a refresh runs it again while it isn't. Meetings come from the calendar: a horizon source writes each Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item and keeps it in step with the calendar, but never marks one done; the mail skill leaves invitations to it.
+4. The user clarifies each proposal in the UI's inbox. Accept moves the item to `TASKS.md`. Already handled accepts it and marks it done at once, so it goes to `DONE.md`. Dismiss, as Not actionable or Not mine, remembers only that message, in `DISMISSED.md`: later messages on the same thread can be proposed again. Dismiss as Duplicate merges the proposal into the item it duplicates (see "Item format"), which takes its source keys. `discern commit` removes the line once the source can no longer read the message again. A change is answered Yes, which makes it, or No, which is for good, except for a Priority person. A field change waits under New comments until the user acknowledges it or undoes it.
 
 `SOURCES.md` starts with `## defaults`, then one block per source; each skill adds keys of its own:
 
@@ -252,7 +263,7 @@ A source is anything outside Discerny that a source skill reads: a mailbox, Team
 - last_result: fetched 11 · filtered 7 · duplicates 1 · inbox +3
 ```
 
-`IGNORED.md` lines are `ref | YYYY-MM-DD | reason`. Parse them from the right, because a source key may contain ` | `. A No to a proposed change is kept as `rel|<id>|<id>` for a Relationship, matching the pair in either order and whatever its kind, or `person|<address>` for a new person or email address.
+`IGNORED.md` lines are `ref | YYYY-MM-DD | reason`. Parse them from the right, because a source key may contain ` | `. A No to a proposed change is kept as `rel|<id>|<id>` for a Relationship, matching the pair in either order and whatever its kind, `person|<address>` for a new person or email address, or `priority|<P-id>` for a Priority person, which pauses that person for 28 days from its date.
 
 `DISMISSED.md` lines follow the field names in `SOURCE-SKILLS.md`, with the source key as the line's text and the braces parsed from the final ` {`:
 
