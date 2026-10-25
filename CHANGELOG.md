@@ -2,16 +2,43 @@
 
 What's changed in Discerny, newest first. Each line is one build. A dated section is a release, which you get by pulling `main`. The Unreleased section holds builds on `dev` that haven't been released yet. See the Version section of the README for what the numbers mean.
 
-## Unreleased
+## 0.3.0.8 (2026-10-25)
 
-- Dismissing a Proposal now forgets only that message, so a later email on the same thread that needs action is proposed again, and "Already handled" marks the Proposal done instead of dismissing it.
-- The Inbox now asks about relationships, new people and new email addresses your source skills found, so you can add them with one click or say no for good.
-- Each item, project, system and person now has a Description and a list of Comments with their time and author, in place of notes, and news your source skills find on an item waits in the Inbox under "New comments" until you acknowledge it.
-- The Example now has a reply waiting to be acknowledged, so you can try New comments in the Inbox straight away.
+### What's new
+
+**Comments and Descriptions**
+- **Each item, project, system and person now has a Description and a list of Comments**, each with its time and author. These replace notes.
+- **News waits for you in the Inbox.** When your source skills find news on an item, it appears under **New comments** until you acknowledge it.
+- **Changes come with an undo.** When a refresh finds a new Due date, status or job title, it makes the change and shows it under New comments, where you can undo it. News that work is finished lets you mark the item done.
+
+**The Inbox**
+- **The Inbox asks about what your source skills found:** relationships, new people, new email addresses, and whether to make someone a Priority person. Add each with one click, or say no for good.
+- **Dismissing a Proposal now forgets only that message**, so a later email on the same thread that needs action is proposed again.
+- **"Already handled" marks the Proposal done** instead of dismissing it.
+
+**Duplicates**
+- **You can merge a duplicate item into the item it duplicates**, from the item's page. Dismissing a Proposal as Duplicate now merges it too, so nothing it carried is lost.
+
+**Data files and look**
+- **Your data files use readable field names**, such as `status`, `urgency` and `due-date` in place of short codes.
 - The Discerny logo in the sidebar and on the folder screen is larger and easier to see.
-- You can merge a duplicate item into the item it duplicates, and dismissing an inbox proposal as Duplicate now merges it too, so nothing it carried is lost.
-- When a refresh finds a new Due date, status or job title, it now makes the change and shows it under New comments in the Inbox, where you can undo it, mark finished work done, and answer Yes or No to making someone a Priority person.
-- Your data files now use readable field names, such as `status`, `urgency` and `due-date` in place of short codes, and an Upgrade rewrites your existing folder to match.
+- The Example has sample Comments, field changes and Inbox questions to try straight away.
+
+### Upgrading
+
+This Release changes how Data folders are written, so **each Data folder needs the Upgrade** before this version will open it.
+
+- `node tools/discern.mjs upgrade` lists what will change, without touching anything.
+- `node tools/discern.mjs upgrade --write` backs the folder up first and then applies the changes.
+- The **discern-upgrade** Skill runs the steps that need an Agent. Ask your agent to "upgrade my Discerny folder".
+
+What this Upgrade changes:
+
+- **0.3.0.1:** Dismissed Proposals are no longer kept in `IGNORED.md`. A new `DISMISSED.md` remembers each dismissed message until its source has moved past it.
+- **0.3.0.2:** `INBOX.md` and `IGNORED.md` are reworded to hold proposed changes and your No to them. No data changes.
+- **0.3.0.3:** Notes become Descriptions and Comments, and you become person P-0001. Your agent checks that P-0001 is really you and fixes it if not.
+- **0.3.0.7:** `INBOX.md` and `IGNORED.md` are reworded for Priority person questions. No data changes.
+- **0.3.0.8:** Every field gets its readable name and layout, across all data files and `SOURCES.md`. Free text stays as written.
 
 ## 0.2.0.1 (2026-10-23)
 
