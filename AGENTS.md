@@ -33,10 +33,10 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | File | Holds | Agent reads |
 |---|---|---|
 | `TASKS.md` | Open items, flat list in ID order | by default |
-| `DONE.md` | Completed items | `ref:` lines (source keys), by source skills; otherwise only when asked |
+| `DONE.md` | Completed items | `source-key:` lines, by source skills; otherwise only when asked |
 | `INBOX.md` | Proposals from source skills, waiting for the user to clarify them: new items, then changes under `## Changes` | during a run, and when the user asks about the inbox |
 | `PEOPLE.md` | One record per person: company, department, title, manager, Description, Comments, change history | when a person is involved |
-| `PROJECTS.md` | One record per project, workstream or pod (`PRJ-####`) | when an item has `prj:` or a project is named |
+| `PROJECTS.md` | One record per project, workstream or pod (`PRJ-####`) | when an item has `projects` or a project is named |
 | `SYSTEMS.md` | One record per system or platform (`SYS-####`) | when a system is involved |
 | `RELATIONSHIPS.md` | One line per relationship between items and records | search by ID |
 | `REFERENCE.md` | Web addresses, people's details and other things to look up, not act on | on demand |
@@ -77,31 +77,31 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 ## Item format (TASKS.md, INBOX.md, DONE.md)
 
 ```
-- [ ] T-0012 Title text {ty:Task; who:Person Name; prj:PRJ-0001; tg:Tag1,Tag2; urg:today|week|soon|later|fyi; p:1-3; due:YYYY-MM-DD[ HH:MM]; st:Waiting|In progress; dep:T-0003; asg:YYYY-MM-DD HH:MM}
-  - src: where it came from
+- [ ] T-0012 Title text {type: task; who: Person Name; projects: PRJ-0001; tags: tag one, tag two; urgency: today|this week|soon|later|fyi; priority: high|medium|low; due-date: YYYY-MM-DD; due-time: HH:MM; status: waiting|in progress; dependencies: T-0003; received-datetime: YYYY-MM-DD HH:MM}
+  - origin: where it came from
   - description: what the item is
     further lines of it, indented 4 spaces
   - link: [label](https://…)
-  - ref: scheme|key   for example mail|normalised subject, teams|chat|messageId, cal|date|subject
+  - source-key: scheme|key   for example mail|normalised subject, teams|chat|messageId, cal|date|subject
   - comment: {added-datetime: YYYY-MM-DD HH:MM; author: email; acknowledged: no}
     the Comment's text, indented 4 spaces
   - [ ] sub-task
 ```
 
-- The sub-lines come in that order: `src`, the description, `link`, `ref`, the Comments oldest first, then sub-tasks.
-- `ty`: Task, Meeting, Process, Document or FYI.
+- The sub-lines come in that order: `origin`, the description, `link`, `source-key`, the Comments oldest first, then sub-tasks.
+- `type`: task, meeting, process, document or fyi.
 - `who`: the person the item is with or waiting on. Must match a name in `PEOPLE.md` exactly; if no record matches, leave `who` out and name the person in the description.
-- `urg`: today, week, soon, later or fyi. `p`: 1 high, 2 medium, 3 low.
-- `due`: `YYYY-MM-DD`, or `YYYY-MM-DD HH:MM` when a time is known. Every `ty:Meeting` with a known date and time must carry the time.
-- `st`: optional. `Waiting` means the user is waiting on someone else; `In progress` means started.
-- `dep`: optional, comma-separated IDs of this item's **dependencies**: the items that must be done before this one can start. The reverse, the items that depend on this one, is worked out by the UI and never stored. A dependency that is done or gone counts as resolved; leave the tag in place unless asked.
-- `prj`: optional, comma-separated `PRJ-####` IDs. `tg`: optional, comma-separated free-text tags; the tag list is whatever the data uses.
-- `asg`: when the item reached the user (message timestamp; `12:00` if only the date is known). For an item a skill derives rather than receives, such as a prep item for a meeting, the time it was derived. Set it on every item a source skill creates.
-- `ref`: the item's **source key**, a hidden key that ties it to the source thread, message or event it came from, so the same thing is never proposed twice: a scheme, then keys joined by `|`. The UI never shows or edits it, and renaming the item does not affect it. An item may carry several; a meeting with a date also carries a `cal|date|subject` source key so every source recognises it. A source key ending in `|*` stands for a whole chat or thread: on an item it means "related", never "already seen" (the older bare form `teams|chat-prefix` means the same). `SOURCE-SKILLS.md` lists the schemes and how they match.
+- `urgency`: today, this week, soon, later or fyi. `priority`: high, medium or low.
+- `due-date`: `YYYY-MM-DD`. `due-time`: `HH:MM`, beside a `due-date`, when a time is known. Every `type: meeting` with a known date and time must carry the time.
+- `status`: optional. `waiting` means the user is waiting on someone else; `in progress` means started. No status means to do.
+- `dependencies`: optional, comma-separated IDs of this item's **dependencies**: the items that must be done before this one can start. The reverse, the items that depend on this one, is worked out by the UI and never stored. A dependency that is done or gone counts as resolved; leave the field in place unless asked.
+- `projects`: optional, comma-separated `PRJ-####` IDs. `tags`: optional, comma-separated free-text tags; the tag list is whatever the data uses.
+- `received-datetime`: when the item reached the user (message timestamp; `received-date: YYYY-MM-DD` in its place if only the date is known). For an item a skill derives rather than receives, such as a prep item for a meeting, the time it was derived. Set it on every item a source skill creates.
+- `source-key`: the item's **source key**, a hidden key that ties it to the source thread, message or event it came from, so the same thing is never proposed twice: a scheme, then keys joined by `|`. The UI never shows or edits it, and renaming the item does not affect it. An item may carry several; a meeting with a date also carries a `cal|date|subject` source key so every source recognises it. A source key ending in `|*` stands for a whole chat or thread: on an item it means "related", never "already seen" (the older bare form `teams|chat-prefix` means the same). `SOURCE-SKILLS.md` lists the schemes and how they match.
 - `note:` and `my:` lines are retired: the Description and Comments replaced them. Never write one; `discern check` warns about any left.
-- `top:` is retired. The UI still reads it on old items; never write it.
-- The user can merge a duplicate item into the item it duplicates, in the UI. Meetings never merge. The survivor keeps its ID and gains the duplicate's fields, Description, Comments, source keys and the rest; every reference to the duplicate (`RELATIONSHIPS.md`, `dep:`, the agent queue and its log, `rel|` lines in `IGNORED.md`) is made to the survivor, and the duplicate's ID is never used again. The survivor gets a Comment from `user`, "Merged T-#### into this.", so an ID you can't find may turn up by searching for it.
-- Completing an item means moving it to `DONE.md` as `[x]` with `done:YYYY-MM-DD`. The UI does this itself; do it only when asked.
+- Field names are whole words. The short codes of older Formats (`ty`, `urg`, `st` and the rest) are not read: an Upgrade renames them, and `discern check` reports any left as an error. Never write one.
+- The user can merge a duplicate item into the item it duplicates, in the UI. Meetings never merge. The survivor keeps its ID and gains the duplicate's fields, Description, Comments, source keys and the rest; every reference to the duplicate (`RELATIONSHIPS.md`, `dependencies`, the agent queue and its log, `rel|` lines in `IGNORED.md`) is made to the survivor, and the duplicate's ID is never used again. The survivor gets a Comment from `user`, "Merged T-#### into this.", so an ID you can't find may turn up by searching for it.
+- Completing an item means moving it to `DONE.md` as `[x]` with `done-date: YYYY-MM-DD`. The UI does this itself; do it only when asked.
 
 ## Descriptions and Comments
 
@@ -117,22 +117,22 @@ Every item and record has at most one Description and any number of Comments.
 
   New Comments go after the others, so they stay oldest first. Add one without asking whenever new information turns up, with `discern comment <id> --author <word> "<text>"` (`node tools/discern.mjs` from the app folder), which stamps the time and puts it in place. Never change or delete a Comment, the user's or anyone else's: the user can edit their own and delete any, in the UI.
 - **A Comment to acknowledge** brings news from someone else that the user should see: a reply received, a Meeting moved or cancelled, new information about an item. `discern comment` with `--to-acknowledge` writes `acknowledged: no`, and the UI's Inbox shows the Comment until the user acknowledges it, which deletes the field. A Comment recording something the user did, such as a reply they sent, needs no acknowledging.
-- **A field change** is news that changes a field: a new Due date or status, an item handed to someone else, a person's new job title. A source skill makes the change itself and tells the user with a Comment to acknowledge, through `discern change <id> --author <word> --field <field> --to <value> "<why>"`, which also adds a person's `hist:` line. It changes only an item's `due`, `st` (`Waiting`, `In progress`, or cleared) and `who`, and a person's `title`, `co`, `dept` and `mgr`. The rest (`urg`, `p`, `prj`, `tg`, `dep`, `ty`) are the user's own judgement, and closing an item is always the user's: news that one is finished is `discern comment <id> --to-acknowledge --suggests done "<text>"`. The newest news wins, even over a value the user set, and the same change is applied once. In the Inbox the user can Undo the latest change to a field, which puts back the value from before its first unacknowledged change, or Mark done an item that suggests it. A Meeting the calendar mirrors has no Undo: the calendar is its record.
+- **A field change** is news that changes a field: a new Due date or status, an item handed to someone else, a person's new job title. A source skill makes the change itself and tells the user with a Comment to acknowledge, through `discern change <id> --author <word> --field <field> --to <value> "<why>"`, which also adds a person's `history` line. It changes only an item's `due-date`, `due-time`, `status` (`waiting`, `in progress`, or cleared) and `who`, and a person's `title`, `company`, `department` and `manager`. The rest (`urgency`, `priority`, `projects`, `tags`, `dependencies`, `type`) are the user's own judgement, and closing an item is always the user's: news that one is finished is `discern comment <id> --to-acknowledge --suggests done "<text>"`. The newest news wins, even over a value the user set, and the same change is applied once. In the Inbox the user can Undo the latest change to a field, which puts back the value from before its first unacknowledged change, or Mark done an item that suggests it. A Meeting the calendar mirrors has no Undo: the calendar is its record.
 
   ```
-    - comment: {added-datetime: 2026-10-25 09:14; author: email; acknowledged: no; changed: due; from: 2026-10-30; to: 2026-11-06}
+    - comment: {added-datetime: 2026-10-25 09:14; author: email; acknowledged: no; changed: due-date; from: 2026-10-30; to: 2026-11-06}
       Jo says the 8D report slips a week.
   ```
 
 ## Projects and systems (PROJECTS.md, SYSTEMS.md)
 
 ```
-- Title {id:PRJ-0001; type:Project|Workstream|Pod; parent:PRJ-0000; st:Active|On hold|Done}
+- Title {id: PRJ-0001; type: project|workstream|pod; parent: PRJ-0000; status: active|on hold|done}
   - description: what the project is
   - link: [label](https://…)
   - comment: {added-datetime: YYYY-MM-DD HH:MM; author: agent}
     the Comment's text
-- Name {id:SYS-0001; type:Platform|Application|Instrument|…; owner:Person Name; st:Live; part-of:SYS-0000}
+- Name {id: SYS-0001; type: platform|pipeline|registry|application|instrument|other; owner: Person Name; part-of: SYS-0000; status: live|in build|delayed|retired}
   - description: what the system is
   - link: [label](https://…)
 ```
@@ -145,34 +145,35 @@ Every item and record has at most one Description and any number of Comments.
 
 ```
 ## Group heading
-- Full Name {id:P-0001; co:Company or business unit; dept:Department; title:Job title; mgr:Manager Name; ext:Y; st:Left; chk:YYYY-MM-DD; em:name@example.com; handle:staff-id}
+- Full Name {id: P-0001; company: Company or business unit; department: Department; title: Job title; manager: Manager Name; external: yes; status: left; checked-date: YYYY-MM-DD; emails: name@example.com; handles: staff-id}
   - description: who they are
-  - hist: 2026-10-06 | Job title: old → new
+  - history: {changed-date: 2026-10-06; changed: title}
+    old → new
   - comment: {added-datetime: YYYY-MM-DD HH:MM; author: agent}
     the Comment's text
 ```
 
 - `P-0001` is the user. Never give it to anyone else, and never add a record for the user under another ID.
-- The name must match `who:` on items, `owner:` on systems and `mgr:` on people. The UI never renames people; if you rename someone, update every one of those references in the same piece of work.
+- The name must match `who` on items, `owner` on systems and `manager` on people. The UI never renames people; if you rename someone, update every one of those references in the same piece of work.
 - `id` (`P-####`) never changes, even when the name is corrected. Use it when referring to a person in chat.
-- Blank `co`, `dept`, `title` or `mgr` counts as missing and shows on the UI's People page. `chk` is the date the record was last checked; set it when you change a field.
-- `ext:Y` marks a person outside the user's organisation. `st:Left` hides someone who has left.
-- `em:` lists the person's email addresses, comma-separated; `handle:` lists other names or IDs they are addressed or mentioned by. Source skills use them to recognise senders, and the user's own record to recognise the user.
-- When a field changes, add a `hist:` line: `- hist: YYYY-MM-DD | Field: old → new`. `hist:` lines are the record's change history, kept apart from its Comments.
+- Blank `company`, `department`, `title` or `manager` counts as missing and shows on the UI's People page. `checked-date` is the date the record was last checked; set it when you change a field.
+- `external: yes` marks a person outside the user's organisation. `status: left` hides someone who has left.
+- `emails` lists the person's email addresses, comma-separated; `handles` lists other names or IDs they are addressed or mentioned by. Source skills use them to recognise senders, and the user's own record to recognise the user.
+- When a field changes, add a `history` line, laid out like a Comment: `changed-date` and `changed` (the field as this file names it, or `group` for a move to another `## Group` heading) in braces, then `old → new` on the line below, indented 4 spaces. `history` lines are the record's change history, kept apart from its Comments.
 
 ## Relationships (RELATIONSHIPS.md)
 
 A relationship is a stored connection between two items or records, of one kind: related, concerns, involves, owns or uses. One line per relationship, stored once and shown on both:
 
 ```
-- T-0007 ~ T-0032 | related
-- T-#### -> SYS-#### | concerns
-- T-#### -> P-#### | involves
-- P-#### -> SYS-#### | owns
-- PRJ-#### -> SYS-#### | uses
+- T-0007 ~ T-0032 {kind: related}
+- T-#### -> SYS-#### {kind: concerns}
+- T-#### -> P-#### {kind: involves}
+- P-#### -> SYS-#### {kind: owns}
+- PRJ-#### -> SYS-#### {kind: uses}
 ```
 
-Both IDs must exist; no duplicates; nothing related to itself. `dep:` stays on the item and is not a relationship. A `link:` line on an item or record holds a URL, not a relationship.
+Both IDs must exist; no duplicates; nothing related to itself. `dependencies` stays on the item and is not a relationship. A `link:` line on an item or record holds a URL, not a relationship.
 
 ## Changes in the inbox (INBOX.md)
 
@@ -193,22 +194,24 @@ Below the new items, `INBOX.md` may hold a `## Changes` heading: proposed change
 The user answers each in the UI, Yes or No, and the UI removes the line:
 
 - **Relationship**: Yes writes the line to `RELATIONSHIPS.md`, with the kind its two ends allow. While either end is a new item still in the inbox, the question is asked on that item, and dismissing the item drops it.
-- **New person**: Add makes the record (a new `P-####`, `em:`, `co:` and `title:` as proposed) and sets `who` on the listed items that have none; Add as Priority person also adds the ID to `priority_people`. Either can also add an open Task to set up an introduction meeting, related to those items.
-- **New email**: Yes adds the address to the person's `em:`, with a `hist:` line.
-- **Priority person**: Yes adds the ID to `priority_people` in `SOURCES.md`. Only additions are proposed, never removals, and never someone who is one already.
+- **New person**: Add makes the record (a new `P-####`, `emails`, `company` and `title` as proposed) and sets `who` on the listed items that have none; Add as Priority person also adds the ID to `priority-people`. Either can also add an open Task to set up an introduction meeting, related to those items.
+- **New email**: Yes adds the address to the person's `emails`, with a `history` line.
+- **Priority person**: Yes adds the ID to `priority-people` in `SOURCES.md`. Only additions are proposed, never removals, and never someone who is one already.
 - **No** logs the change in `IGNORED.md` (see below), and the helper never proposes it again; a No to a Priority person only pauses them, for 28 days from the date it logs.
 
 Source skills write these lines only through `discern propose`; never edit them by hand.
 
 ## Agent queue (ASK-AGENT.md)
 
-The user leaves agent requests for you from the UI ("Ask agent"). They wait in the agent queue, one line each:
+The user leaves agent requests for you from the UI ("Ask agent"). They wait in the agent queue, each a line with its ID and when it was requested, then the request on lines indented 4 spaces, as in a Description:
 
 ```
-- T-0025 | 2026-10-08 18:02 | the request
+- T-0025 {requested-datetime: 2026-10-08 18:02}
+    the request
+    further lines of it
 ```
 
-Line breaks inside a request are written as ` ⏎ `. The ID is the item or record the request is about. To work through the queue (this is what `discern-ask-agent` does):
+The ID is the item or record the request is about. A request with only a date has `requested-date: YYYY-MM-DD` in place of `requested-datetime`. To work through the queue (this is what `discern-ask-agent` does):
 
 1. Read `ASK-AGENT.md`. Take the requests oldest first.
 2. For each request, find the item or record by its ID and do what it asks, within the data folder: update a record, add sub-tasks, add a URL or a relationship, answer a question as a Comment (`discern comment <id> --author agent "<answer>"`), or write a draft. Change a Description only when the request asks for that.
@@ -229,8 +232,14 @@ Line breaks inside a request are written as ` ⏎ `. The ID is the item or recor
    body
    ```
 
-5. When a request is done, remove its line from `ASK-AGENT.md` and append one line to `ASK-AGENT-LOG.md`:
-   `- YYYY-MM-DD HH:MM | ID | queued YYYY-MM-DD HH:MM | the request | what you did`
+5. When a request is done, remove its lines from `ASK-AGENT.md` and append an entry to `ASK-AGENT-LOG.md`, the request and what you did each continuing on lines indented 4 spaces:
+
+   ```
+   - T-0025 {requested-datetime: 2026-10-08 18:02; actioned-datetime: 2026-10-09 09:30}
+     - request: the request
+       further lines of it
+     - result: what you did
+   ```
 6. Finish with a short summary: what you did for each request, and which requests are still waiting and why.
 
 ## Sources, runs and refresh
@@ -239,7 +248,7 @@ A source is anything outside Discerny that a source skill reads: a mailbox, Team
 
 1. A `discern-<source>` skill reads the shared `## defaults` block and its own `## <source-name>` block in `SOURCES.md`. For a stream source, such as a mailbox or Teams chat, it asks its connector only for messages after its cursor (`watermark` less `overlap`), in day-long windows. A horizon source, such as a calendar, re-reads a window ahead of now on every run instead.
 2. Each thing it finds is a candidate, which the skill assesses. A candidate whose source key already appears in `TASKS.md`, `INBOX.md`, `DONE.md`, `IGNORED.md` or `DISMISSED.md` is already tracked: it is skipped, becomes a Comment on the existing item when it brings news that changes no field, or becomes a field change the skill makes itself, with a Comment for the user to acknowledge (see "Descriptions and Comments").
-3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `src:`, `ref:`, `asg:` and `source:`, the name of the source's block in `SOURCES.md`. Relationships, new people, new email addresses and Priority people the run found go under `## Changes` in `INBOX.md` too (see "Changes in the inbox"). Then the cursor moves past the last window fully processed. A run reads at most `page_cap` pages a pass, so after a gap a stream source takes several runs to catch up: its report ends by saying whether it is caught up, and a refresh runs it again while it isn't. Meetings come from the calendar: a horizon source writes each Meeting in its window straight into `TASKS.md` as an open `ty:Meeting` item and keeps it in step with the calendar, but never marks one done; the mail skill leaves invitations to it.
+3. The rest are ignored as noise, or written to `INBOX.md` as proposals for new items, with new IDs (shared counter), `origin`, `source-key`, `received-datetime` and `source`, the name of the source's block in `SOURCES.md`. Relationships, new people, new email addresses and Priority people the run found go under `## Changes` in `INBOX.md` too (see "Changes in the inbox"). Then the cursor moves past the last window fully processed. A run reads at most `page-cap` pages a pass, so after a gap a stream source takes several runs to catch up: its report ends by saying whether it is caught up, and a refresh runs it again while it isn't. Meetings come from the calendar: a horizon source writes each Meeting in its window straight into `TASKS.md` as an open `type: meeting` item and keeps it in step with the calendar, but never marks one done; the mail skill leaves invitations to it.
 4. The user clarifies each proposal in the UI's inbox. Accept moves the item to `TASKS.md`. Already handled accepts it and marks it done at once, so it goes to `DONE.md`. Dismiss, as Not actionable or Not mine, remembers only that message, in `DISMISSED.md`: later messages on the same thread can be proposed again. Dismiss as Duplicate merges the proposal into the item it duplicates (see "Item format"), which takes its source keys. `discern commit` removes the line once the source can no longer read the message again. A change is answered Yes, which makes it, or No, which is for good, except for a Priority person. A field change waits under New comments until the user acknowledges it or undoes it.
 
 `SOURCES.md` starts with `## defaults`, then one block per source; each skill adds keys of its own:
@@ -247,23 +256,31 @@ A source is anything outside Discerny that a source skill reads: a mailbox, Team
 ```
 ## defaults
 - timezone: Europe/London
-- priority_people: P-0002, P-0007
-- personal_domains: gmail.com, outlook.com
-- page_cap: 10
-- log_runs: true
+- priority-people: P-0002, P-0007
+- personal-domains: gmail.com, outlook.com
+- page-cap: 10
+- log-runs: true
 
 ## outlook-mail
 - watermark: 2026-10-08T15:05:41Z
 - overlap: PT2H
-- exclude_subject:
+- exclude-subject:
   - (?i)newsletter
-- exclude_sender:
+- exclude-sender:
   - no-reply@
-- last_run: 2026-10-08T21:14:03Z
-- last_result: fetched 11 · filtered 7 · duplicates 1 · inbox +3
+- last-run: 2026-10-08T21:14:03Z
+- last-result: fetched 11 · filtered 7 · duplicates 1 · inbox +3
 ```
 
-`IGNORED.md` lines are `ref | YYYY-MM-DD | reason`. Parse them from the right, because a source key may contain ` | `. A No to a proposed change is kept as `rel|<id>|<id>` for a Relationship, matching the pair in either order and whatever its kind, `person|<address>` for a new person or email address, or `priority|<P-id>` for a Priority person, which pauses that person for 28 days from its date.
+Keys are written with hyphens. Times in `SOURCES.md` are UTC ISO 8601 and their keys take no `-date` or `-datetime` suffix (`watermark`, `last-run`, `gap`, `split`).
+
+`IGNORED.md` lines, like `DISMISSED.md`'s, have the source key as the line's text and the braces parsed from the final ` {`:
+
+```
+- mail|Toy fair preview {ignored-date: 2026-10-25; reason: not actionable}
+```
+
+A No to a proposed change is kept as `rel|<id>|<id>` for a Relationship, matching the pair in either order and whatever its kind, `person|<address>` for a new person or email address, or `priority|<P-id>` for a Priority person, which pauses that person for 28 days from its `ignored-date`.
 
 `DISMISSED.md` lines follow the field names in `SOURCE-SKILLS.md`, with the source key as the line's text and the braces parsed from the final ` {`:
 
@@ -308,4 +325,4 @@ Every `discern-*` skill, whoever writes it, must:
 - Follow "Rules for every edit" above.
 - Be read-only towards outside systems. Anything that would act outside the data folder becomes a draft in `drafts/`.
 - If it is a source skill: follow `SOURCE-SKILLS.md`. New items go only to `INBOX.md`, never straight to `TASKS.md`, except a horizon source's Meetings, which `discern meetings` writes there; its other writes are the bookkeeping that file lists, made through `tools/discern.mjs`.
-- End with a one-line result in the style of `last_result` (what was read, skipped and proposed), and record it in `SOURCES.md` if it is a source skill.
+- End with a one-line result in the style of `last-result` (what was read, skipped and proposed), and record it in `SOURCES.md` if it is a source skill.

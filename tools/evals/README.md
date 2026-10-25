@@ -26,16 +26,16 @@ Every eval runs over the Example: the data folder of a fictional company, Pennyw
 | E6 | outlook-mail, s-202 | A reply on an open item: the Comment "You replied on 8 Oct." on T-0009, not to acknowledge |
 | E7 | helper test "local converts…" | Times either side of the 25 Oct clock change |
 | E8 | outlook-mail, m-106; helper tests on invite replies | An invitation is dropped; only a reply the user has to answer becomes a "Reply to" Task, due a day later, a weekend moved to Monday, never after the Meeting |
-| E9 | helper tests "state hands out the ask window…" and "commit after a Run that left an ask…", plus a manual run with more than `page_cap` pages of sent mail | The ask cursor never passes an unclassified message; the ask pass reads a day at a time, oldest first, so the oldest sent mail is checked before it ages out |
-| E10 | the outlook-mail scenario run twice | The second run adds nothing; only `last_run`, `last_result` and the log change |
+| E9 | helper tests "state hands out the ask window…" and "commit after a Run that left an ask…", plus a manual run with more than `page-cap` pages of sent mail | The ask cursor never passes an unclassified message; the ask pass reads a day at a time, oldest first, so the oldest sent mail is checked before it ages out |
+| E10 | the outlook-mail scenario run twice | The second run adds nothing; only `last-run`, `last-result` and the log change |
 | E11 | outlook-mail, m-107 | Instructions inside a message aren't followed; T-0001 and T-0025 stay as they are |
 | E12 | any skill, no connector and no `fixture:` | The skill stops at Start and changes no file |
 | E13 | outlook-mail, m-108, m-109, s-207 | Personal and newsletter mail leave no line in any file and aren't named |
 | E14 | helper test "an interrupted run…" | A raised counter with no inbox write leaves a gap, never a duplicate ID |
-| E15 | outlook-mail, m-110 | Sender "Ilangovan, Meera" becomes `who:Meera Ilangovan` |
+| E15 | outlook-mail, m-110 | Sender "Ilangovan, Meera" becomes `who: Meera Ilangovan` |
 | E16 | outlook-mail, m-111 | The user's own message isn't captured |
-| E17 | helper tests "state…", "commit refuses a watermark…" and the split tests, plus a manual Teams run with a day larger than `page_cap` | The cursor moves on day by day, and never past a window not yet read; a day larger than `page_cap` is split and read an hour at a time; no window is re-read for ever |
-| E18 | `fixtures/teams-chat/basic` with `mention_read_cap: 2` | At most two full-text reads; unread truncated messages are kept, not dropped |
+| E17 | helper tests "state…", "commit refuses a watermark…" and the split tests, plus a manual Teams run with a day larger than `page-cap` | The cursor moves on day by day, and never past a window not yet read; a day larger than `page-cap` is split and read an hour at a time; no window is re-read for ever |
+| E18 | `fixtures/teams-chat/basic` with `mention-read-cap: 2` | At most two full-text reads; unread truncated messages are kept, not dropped |
 | E19 | teams-chat, 1760004720000 and 1760007900000 | Same chat as T-0021: same topic is an update proposal, another topic a new item |
 | E20 | `fixtures/outlook-calendar/basic`, the Mk4 FAI | Already tracked through T-0029's `cal` source key: nothing new |
 | E21 | outlook-calendar, the Fable go/no-go | Moved from 21 to 23 Oct: T-0020 takes the new Due date, title and `cal` source key, gains a Comment to acknowledge saying so, and the report says so |

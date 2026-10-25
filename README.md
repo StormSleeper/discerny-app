@@ -182,8 +182,8 @@ Read AGENTS.md in my Discerny app folder, especially "Rules for every edit" and
 "Writing a skill for Discerny".
 
 Then write a skill called discern-<name> that <what it does, for example
-"finds every item with st:Waiting that is more than 7 days old and writes a
-polite chaser for each one in drafts/">.
+"finds every item with status: waiting that is more than 7 days old and
+writes a polite chaser for each one in drafts/">.
 
 It should change only <which files>, and never send anything. Keep the skill
 short: it should read AGENTS.md each time it runs rather than copying the

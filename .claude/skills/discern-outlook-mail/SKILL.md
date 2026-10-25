@@ -22,14 +22,14 @@ Microsoft 365 connector: `outlook_email_search` for message metadata, and the ho
 
 ## Block
 
-`## outlook-mail`, a stream source: `watermark`, `overlap`, `exclude_subject` (regular expressions), `exclude_sender` (address fragments), `scan_sent_asks`, `waiting_min_age`, `waiting_max_age`, `waiting_checked_through`, `waiting_check_cap` (the read budget for sent mail), `last_run`, `last_result`; optional `invite_count_cap` (the calendar reads for invited counts, default 5), `page_cap`, `split`, `gap` and `fixture`.
+`## outlook-mail`, a stream source: `watermark`, `overlap`, `exclude-subject` (regular expressions), `exclude-sender` (address fragments), `scan-sent-asks`, `waiting-min-age`, `waiting-max-age`, `waiting-checked-through`, `waiting-check-cap` (the read budget for sent mail), `last-run`, `last-result`; optional `invite-check-cap` (the calendar reads for invited counts, default 5), `page-cap`, `split`, `gap` and `fixture`.
 
-An `exclude_subject` rule that drops Accepted or Tentative replies, such as `^(Accepted|Tentative):`, stops them reaching `match`, so a tentative proposing a new time, or an Accepted reply that asks something, never becomes a Task. When the block has one, propose taking it out under "Settings proposed".
+An `exclude-subject` rule that drops Accepted or Tentative replies, such as `^(Accepted|Tentative):`, stops them reaching `match`, so a tentative proposing a new time, or an Accepted reply that asks something, never becomes a Task. When the block has one, propose taking it out under "Settings proposed".
 
 ## Passes
 
 1. **Inbound**, for each of `windows`: `outlook_email_search(afterDateTime, beforeDateTime, limit: 25, offset)`.
-2. **Sent**, when `scan_sent_asks` is true and `ask_window` exists, for each of `ask_windows`, oldest first: `outlook_email_search(folderName: "Sent Items", afterDateTime, beforeDateTime, limit: 25, offset)`. Results come newest first, so finish each day before starting the next; that way the oldest sent mail is classified before it ages out at `waiting_max_age`. Drop what Filters lists for sent mail, send the rest to `discern match` with `pass: "ask"`, and follow each action. Classify what is left oldest first, reading a body when the summary can't decide, up to `waiting_check_cap` reads:
+2. **Sent**, when `scan-sent-asks` is true and `ask_window` exists, for each of `ask_windows`, oldest first: `outlook_email_search(folderName: "Sent Items", afterDateTime, beforeDateTime, limit: 25, offset)`. Results come newest first, so finish each day before starting the next; that way the oldest sent mail is classified before it ages out at `waiting-max-age`. Drop what Filters lists for sent mail, send the rest to `discern match` with `pass: "ask"`, and follow each action. Classify what is left oldest first, reading a body when the summary can't decide, up to `waiting-check-cap` reads:
    - an **ask**: the user asked someone to do, send, decide or answer something;
    - a **commitment**: the user promised something ("I'll send", "I will", "by Friday"). A reply doesn't fulfil it, so it needs no reply check;
    - neither: drop it.
@@ -38,33 +38,33 @@ An `exclude_subject` rule that drops Accepted or Tentative replies, such as `^(A
 
 ## Filters
 
-- Inbound: the block's exclude rules; anything `match` marks `from_user`; senders such as `no-reply@`; mail from `personal_domains` (out of scope). Other notices that ask nothing of the user are noise: `discern ignore` their `mail` source key with a reason, so they are logged and skipped on later runs.
-- Sent: invitations the user sent (the summary is only a Teams join block), forwards with no comment, mail only to the user, the exclude rules, and mail only to `personal_domains` (out of scope).
+- Inbound: the block's exclude rules; anything `match` marks `from_user`; senders such as `no-reply@`; mail from `personal-domains` (out of scope). Other notices that ask nothing of the user are noise: `discern ignore` their `mail` source key with a reason, so they are logged and skipped on later runs.
+- Sent: invitations the user sent (the summary is only a Teams join block), forwards with no comment, mail only to the user, the exclude rules, and mail only to `personal-domains` (out of scope).
 - Invitations: the calendar Source skill tracks Meetings, so mail leaves them alone, whether or not `SOURCES.md` has an `outlook-calendar` block. Send every invitation, and every Accepted, Tentative, Updated, Declined or Cancelled reply, to `match` with its `invite` facts (Source keys); it drops all but the replies the user has to answer. A dropped invitation isn't logged in `IGNORED.md`, since a later mail with the same subject may still need capturing.
 
 ## Source keys
 
-`mail` scheme. Each `discern match` candidate: `{"key": <id>, "scheme": "mail", "pass": "inbound" or "ask", "subject": ..., "sender": <from address>, "sender_name": <from name>, "when": <receivedDateTime or sentDateTime>}`; on the ask pass add `"recipient": <the first address in recipients>`. For an invitation or a reply to one, add `"invite"`: `request` for the invitation itself, `accepted`, `tentative`, `declined`, `cancelled` or `updated` (the subject prefix gives these, so they may be left out), or `reply` for a plain reply to an invite. On a reply, also add `"asks": true` when it asks a time-sensitive question or makes a request; on a tentative, `"new_time": true` when it proposes a new time; on a decline, `"invited"`: how many people the Meeting invited, counting the user, from the event through the calendar connector. Each count is one calendar read, at most `invite_count_cap` a Run; leave `invited` out when the event can't be found or the budget is spent, so `match` treats the decline as one to answer. Add `"meeting_start"` (the event's start pair) whenever the event was found.
+`mail` scheme. Each `discern match` candidate: `{"key": <id>, "scheme": "mail", "pass": "inbound" or "ask", "subject": ..., "sender": <from address>, "sender-name": <from name>, "when": <receivedDateTime or sentDateTime>}`; on the ask pass add `"recipient": <the first address in recipients>`. For an invitation or a reply to one, add `"invite"`: `request` for the invitation itself, `accepted`, `tentative`, `declined`, `cancelled` or `updated` (the subject prefix gives these, so they may be left out), or `reply` for a plain reply to an invite. On a reply, also add `"asks": true` when it asks a time-sensitive question or makes a request; on a tentative, `"new-time": true` when it proposes a new time; on a decline, `"invited"`: how many people the Meeting invited, counting the user, from the event through the calendar connector. Each count is one calendar read, at most `invite-check-cap` a Run; leave `invited` out when the event can't be found or the budget is spent, so `match` treats the decline as one to answer. Add `"meeting-start"` (the event's start pair) whenever the event was found.
 
 ## Assess cues
 
 - `importance: high` is always captured.
 - The user only on Cc: FYI. Use the recipients when the result has them; otherwise read the body only if it decides.
-- A `reply` outcome is a Task to answer the sender: take its `title`, `who` and `due` from `match` as they are.
+- A `reply` outcome is a Task to answer the sender: take its `title`, `who`, `due-date` and `due-time` from `match` as they are.
 - Read a body only when the summary can't decide, once per message.
 
 ## Item specifics
 
-- `src`: `Email "<subject>" from <sender name> (<d Mon>)`; for sent mail, `Email "<subject>" sent to <recipient addresses> (<d Mon>)`.
-- `received`: `receivedDateTime`, or `sentDateTime` for sent mail.
+- `origin`: `Email "<subject>" from <sender name> (<d Mon>)`; for sent mail, `Email "<subject>" sent to <recipient addresses> (<d Mon>)`.
+- `received-datetime`: `receivedDateTime`, or `sentDateTime` for sent mail.
 - `who` on sent-mail items: the main recipient, which `match` returns from `recipient`.
 - `links`: only a URL in the mail the user needs, such as a document or form.
-- **Reply to an invite:** `ty:Task`, `p:2`, urgency by the shared policy from its `due`; the description says what the reply asks or proposes.
+- **Reply to an invite:** `type: task`, `priority: medium`, urgency by the shared policy from its `due-date`; the description says what the reply asks or proposes.
 - **Comments** are by `email`: `discern comment <id> --author email`, as `match`'s actions give them.
 
 ## Known limits
 
-Sent mail older than `waiting_max_age` is never checked for replies. Two threads with the same short subject share a source key; `match` reports the longer collisions as ambiguous.
+Sent mail older than `waiting-max-age` is never checked for replies. Two threads with the same short subject share a source key; `match` reports the longer collisions as ambiguous.
 
 ## Fixtures
 

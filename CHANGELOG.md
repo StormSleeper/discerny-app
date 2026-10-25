@@ -11,6 +11,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - The Discerny logo in the sidebar and on the folder screen is larger and easier to see.
 - You can merge a duplicate item into the item it duplicates, and dismissing an inbox proposal as Duplicate now merges it too, so nothing it carried is lost.
 - When a refresh finds a new Due date, status or job title, it now makes the change and shows it under New comments in the Inbox, where you can undo it, mark finished work done, and answer Yes or No to making someone a Priority person.
+- Your data files now use readable field names, such as `status`, `urgency` and `due-date` in place of short codes, and an Upgrade rewrites your existing folder to match.
 
 ## 0.2.0.1 (2026-10-23)
 

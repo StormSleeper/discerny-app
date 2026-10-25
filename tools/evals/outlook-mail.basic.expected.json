@@ -14,7 +14,7 @@
     {
       "eval": "E2",
       "message": "m-102",
-      "result": "New inbox item (add the complaints trend chart) whose description names T-0013 and T-0030; p:1, from the manager."
+      "result": "New inbox item (add the complaints trend chart) whose description names T-0013 and T-0030; priority: high, from the manager."
     },
     {
       "eval": "E3",
@@ -54,7 +54,7 @@
     {
       "eval": "E15",
       "message": "m-110",
-      "result": "New item with who:Meera Ilangovan (her display name is \"Ilangovan, Meera\")."
+      "result": "New item with who: Meera Ilangovan (her display name is \"Ilangovan, Meera\")."
     },
     {
       "eval": "E16",
@@ -74,7 +74,7 @@
     {
       "eval": "-",
       "message": "m-114",
-      "result": "New FYI item (copied only), who:Callum Fraser."
+      "result": "New FYI item (copied only), who: Callum Fraser."
     },
     {
       "eval": "-",
@@ -84,12 +84,12 @@
     {
       "eval": "-",
       "message": "s-203",
-      "result": "New waiting-for item on Ravi Chandrasekar (no reply), st:Waiting, urg:soon."
+      "result": "New waiting-for item on Ravi Chandrasekar (no reply), status: waiting, urgency: soon."
     },
     {
       "eval": "-",
       "message": "s-204",
-      "result": "New commitment item to circulate the KPI pack, due:2026-10-19, who:Oliver Pemberton."
+      "result": "New commitment item to circulate the KPI pack, due-date: 2026-10-19, who: Oliver Pemberton."
     },
     {
       "eval": "-",
@@ -109,7 +109,7 @@
     {
       "eval": "-",
       "message": "state",
-      "result": "watermark 2026-10-12T16:00:00Z, waiting_checked_through 2026-10-11T16:00:00Z, last_run 2026-10-12T16:00:00Z; discern check passes."
+      "result": "watermark 2026-10-12T16:00:00Z, waiting-checked-through 2026-10-11T16:00:00Z, last-run 2026-10-12T16:00:00Z; discern check passes."
     }
   ]
 }

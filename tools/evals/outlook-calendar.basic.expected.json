@@ -14,12 +14,12 @@
     {
       "eval": "E21",
       "event": "AAMkAGI-fable-gonogo-1021",
-      "result": "T-0020 in TASKS.md now has due:2026-10-23 14:00, the title \"Fable Range 2027 – go/no-go\" and the source key cal|2026-10-23|fable range 2027 – go/no-go, and a Comment by calendar to acknowledge, \"Moved in the calendar.\", with changed: due; from: 2026-10-21 14:00; to: 2026-10-23 14:00; the report's Meetings line says it moved; no proposal and no new item."
+      "result": "T-0020 in TASKS.md now has due-date: 2026-10-23 and due-time: 14:00, the title \"Fable Range 2027 – go/no-go\" and the source key cal|2026-10-23|fable range 2027 – go/no-go, and a Comment by calendar to acknowledge, \"Moved in the calendar.\", with changed: due-date; from: 2026-10-21; to: 2026-10-23 (the time of day is unchanged, so no due-time change); the report's Meetings line says it moved; no proposal and no new item."
     },
     {
       "eval": "E22",
       "event": "AAMkAGI-calderbrook-1026, AAMkAGI-open-day-1024",
-      "result": "Meeting items T-0036 (due:2026-10-26 09:00, no who: the user organises) and T-0035 (due:2026-10-24 09:00) in TASKS.md; prep Task proposals with the same due times (user organises, needs an agenda; please bring), each proposed as related to its Meeting."
+      "result": "Meeting items T-0036 (due-date: 2026-10-26 and due-time: 09:00, no who: the user organises) and T-0035 (due-date: 2026-10-24 and due-time: 09:00) in TASKS.md; prep Task proposals with the same due times (user organises, needs an agenda; please bring), each proposed as related to its Meeting."
     },
     {
       "eval": "E23",
@@ -29,17 +29,17 @@
     {
       "eval": "E24",
       "event": "the whole scenario run twice",
-      "result": "The second run adds no Meeting and changes no Meeting item: discern meetings reports every Meeting unchanged; only last_run, last_result and the log change."
+      "result": "The second run adds no Meeting and changes no Meeting item: discern meetings reports every Meeting unchanged; only last-run, last-result and the log change."
     },
     {
       "eval": "-",
       "event": "AAMkAGI-feltcraft-call-1014",
-      "result": "Meeting item T-0034 in TASKS.md, who:Tomasz Kowalczyk, due:2026-10-14 11:30."
+      "result": "Meeting item T-0034 in TASKS.md, who: Tomasz Kowalczyk, due-date: 2026-10-14 and due-time: 11:30."
     },
     {
       "eval": "-",
       "event": "AAMkAGI-owl-redesign-1014",
-      "result": "Meeting item T-0033 in TASKS.md; one prep Task proposal (priority organiser, pre-read), due:2026-10-14 11:00, whose description also says no response recorded; no separate invite item."
+      "result": "Meeting item T-0033 in TASKS.md; one prep Task proposal (priority organiser, pre-read), due-date: 2026-10-14 and due-time: 11:00, whose description also says no response recorded; no separate invite item."
     },
     {
       "eval": "-",
@@ -59,7 +59,7 @@
     {
       "eval": "-",
       "event": "AAMkAGI-stageworks-standup-1013",
-      "result": "Meeting item T-0032 in TASKS.md, who:Declan Moss, due:2026-10-13 08:30; no prep signal and the invite was accepted, so no proposal."
+      "result": "Meeting item T-0032 in TASKS.md, who: Declan Moss, due-date: 2026-10-13 and due-time: 08:30; no prep signal and the invite was accepted, so no proposal."
     },
     {
       "eval": "-",
@@ -69,12 +69,12 @@
     {
       "eval": "-",
       "event": "reads",
-      "result": "At most 6 event and transcript reads (invite_check_cap)."
+      "result": "At most 6 event and transcript reads (invite-check-cap)."
     },
     {
       "eval": "-",
       "event": "state",
-      "result": "last_run 2026-10-12T16:00:00Z and a last_result line with meetings +5; no watermark; discern check passes."
+      "result": "last-run 2026-10-12T16:00:00Z and a last-result line with meetings +5; no watermark; discern check passes."
     }
   ]
 }

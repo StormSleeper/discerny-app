@@ -429,21 +429,30 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.0.7'; // the app's version; tools/discern.mjs reads it from here
-var FORMAT='0.3.0.7'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
-var URG={today:'Today',week:'This week',soon:'Soon',later:'Later',fyi:'FYI'};
-var URG_ORDER=['today','week','soon','later','fyi'];
-var TYPES=['Task','Meeting','Process','Document','FYI'];
-var TYPE_LABEL={Task:'Tasks',Meeting:'Meetings',Process:'Processes & SOPs',Document:'Documents to read',FYI:'FYI'};
-var STATUS=['To do','In progress','Waiting'];
+var VERSION='0.3.0.8'; // the app's version; tools/discern.mjs reads it from here
+var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
+// An Item's field values as the files write them, and the words the page shows for them
+var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
+var URG_ORDER=['today','this week','soon','later','fyi'];
+var TYPES=['task','meeting','process','document','fyi'];
+var TYPE_NAME={task:'Task',meeting:'Meeting',process:'Process',document:'Document',fyi:'FYI'};
+var TYPE_LABEL={task:'Tasks',meeting:'Meetings',process:'Processes & SOPs',document:'Documents to read',fyi:'FYI'};
+// no status is to do
+var STATUS=['','in progress','waiting'];
+var STATUS_LABEL={'':'To do','in progress':'In progress',waiting:'Waiting'};
+var PRIORITIES=['high','medium','low'];
+var PRIORITY_LABEL={high:'High',medium:'Medium',low:'Low'};
+// high first; none counts as medium
+function prioRank(v){var n=PRIORITIES.indexOf(v);return n<0?1:n;}
 var ITEM_RE=/^- \[( |x)\] (T-\d+) (.*)$/;
 function parseMeta(s){var m={};s.split(';').forEach(function(p){var i=p.indexOf(':');if(i>0)m[p.slice(0,i).trim()]=p.slice(i+1).trim();else if(p.trim())(m[' bare']=m[' bare']||[]).push(p.trim());});return m;}
 // one physical line: line separators typed or pasted into a field must never split an item
 function ol(s){return String(s).replace(/[\r\n\u2028\u2029\u0085]+/g,' ');}
 // every kind of line break written as one newline
 function nl(s){return String(s==null?'':s).replace(/\r\n?|[\u2028\u2029\u0085]/g,'\n');}
-function metaParts(meta,order){var parts=[];order.forEach(function(k){if(meta[k]!==undefined&&meta[k]!=='')parts.push(k+':'+ol(meta[k]).replace(/;/g,','));});
-  Object.keys(meta).forEach(function(k){if(order.indexOf(k)<0&&k.charAt(0)!==' '&&meta[k]!=='')parts.push(k+':'+ol(meta[k]).replace(/;/g,','));});
+// braces are written {key: value; key: value}; a meta key the order doesn't name is kept, after the others
+function metaParts(meta,order){var parts=[];order.forEach(function(k){if(meta[k]!==undefined&&meta[k]!=='')parts.push(k+': '+ol(meta[k]).replace(/;/g,','));});
+  Object.keys(meta).forEach(function(k){if(order.indexOf(k)<0&&k.charAt(0)!==' '&&meta[k]!=='')parts.push(k+': '+ol(meta[k]).replace(/;/g,','));});
   (meta[' bare']||[]).forEach(function(b){parts.push(ol(b).replace(/;/g,','));});return parts;}
 // INBOX.md holds new Items, then the change Proposals under CHANGES_HEAD. parse keeps those lines, from the heading on, in post.
 var CHANGES_HEAD='## Changes';
@@ -461,7 +470,7 @@ function parse(text){
       if(bi>-1&&rest.charAt(rest.length-1)==='}'){meta=parseMeta(rest.slice(bi+2,-1));rest=rest.slice(0,bi);}
       cur={id:m[2],done:m[1]==='x',title:rest,meta:meta,subs:[]};items.push(cur);return;}
     if(!cur){pre.push(ln);return;}
-    var s=/^  - (src|description|link|ref|comment): ?(.*)$/.exec(ln);
+    var s=/^  - (origin|description|link|source-key|comment): ?(.*)$/.exec(ln);
     if(s){cur.subs.push(textSub(s[1],s[2]));return;}
     var c=/^  - \[( |x)\] (.*)$/.exec(ln);
     if(c){cur.subs.push({k:'sub',v:c[2],x:c[1]==='x'});return;}
@@ -470,9 +479,11 @@ function parse(text){
   return {pre:pre,items:items,post:post||[]};}
 // A Description or a Comment carries on over the lines below it indented 4 spaces, a blank line in it being an indented
 // empty one; a Comment's own line holds only its fields: "  - comment: {added-datetime: YYYY-MM-DD HH:MM; author: user}".
-// -> {k:'description', v} or {k:'comment', f:{fields}, v}, v holding the text with \n between its lines
+// A Person's history line is laid out the same way: "  - history: {changed-date: YYYY-MM-DD; changed: title}", then "old → new".
+// -> {k:'description', v} or {k:'comment'|'history', f:{fields}, v}, v holding the text with \n between its lines
+function fielded(k){return k==='comment'||k==='history';}
 function textSub(k,rest){
-  if(k==='comment'){var t=String(rest).trim(),f={};if(t.charAt(0)==='{'&&t.charAt(t.length-1)==='}'){f=fieldsOf(t.slice(1,-1));t='';}return {k:k,f:f,v:t,n:t?1:0};}
+  if(fielded(k)){var t=String(rest).trim(),f={};if(t.charAt(0)==='{'&&t.charAt(t.length-1)==='}'){f=fieldsOf(t.slice(1,-1));t='';}return {k:k,f:f,v:t,n:t?1:0};}
   return {k:k,v:rest,n:rest?1:0};}
 // wraps a parser's line handler so the lines that carry on a Description or Comment join its text. A truly empty line
 // between them counts as a blank one; any other empty line goes back to the parser through blank once the text is over.
@@ -485,30 +496,37 @@ function textLines(each,curOf,blank){var tx=null,gap=0;
       end();}
     each(ln);
     var cur=curOf(),last=cur&&cur.subs[cur.subs.length-1];
-    tx=last&&(last.k==='description'||last.k==='comment')&&last.n!==undefined?last:null;
+    tx=last&&(last.k==='description'||fielded(last.k))&&last.n!==undefined?last:null;
     if(i===all.length-1)end();};}
-var COMMENT_ORDER=['added-datetime','author','acknowledged','changed','from','to','suggests'];
-// one sub-line of an Item or Record as written: several physical lines for a Description or Comment
+var COMMENT_ORDER=['added-datetime','author','acknowledged','changed','from','to','suggests'],HISTORY_ORDER=['changed-date','changed'];
+// one sub-line of an Item or Record as written: several physical lines for a Description, Comment or history line
 function serSub(b){
   if(b.k==='raw')return b.v;
   if(b.k==='sub')return '  - ['+(b.x?'x':' ')+'] '+ol(b.v);
-  if(b.k!=='description'&&b.k!=='comment')return '  - '+b.k+': '+ol(b.v);
-  var ls=nl(b.v).split('\n'),f=b.f||{},parts=[];
+  if(b.k!=='description'&&!fielded(b.k))return '  - '+b.k+': '+ol(b.v);
+  var ls=nl(b.v).split('\n'),f=b.f||{},parts=[],order=b.k==='comment'?COMMENT_ORDER:HISTORY_ORDER;
   var head='  - '+b.k+':';
-  if(b.k==='comment'){COMMENT_ORDER.concat(Object.keys(f).filter(function(k){return COMMENT_ORDER.indexOf(k)<0;})).forEach(function(k){
+  if(fielded(b.k)){order.concat(Object.keys(f).filter(function(k){return order.indexOf(k)<0;})).forEach(function(k){
       // a field change keeps an empty from or to: the field had no value, or was cleared
-      if(f[k]!==undefined&&(f[k]!==''||(f.changed&&(k==='from'||k==='to'))))parts.push(k+': '+ol(f[k]).replace(/[;{}]/g,','));});
+      if(f[k]!==undefined&&(f[k]!==''||(b.k==='comment'&&f.changed&&(k==='from'||k==='to'))))parts.push(k+': '+ol(f[k]).replace(/[;{}]/g,','));});
     head+=' {'+parts.join('; ')+'}';}
   else head+=ls[0]?' '+ls[0]:'';
-  return head+(b.k==='comment'?ls:ls.slice(1)).map(function(l){return '\n    '+l;}).join('');}
-var META_ORDER=['ty','who','prj','tg','top','urg','p','due','st','dep','done','asg'];
+  return head+(fielded(b.k)?(b.k==='history'&&b.v===''?[]:ls):ls.slice(1)).map(function(l){return '\n    '+l;}).join('');}
+// An Item's fields: due-time goes only beside a due-date, and received-date stands in for received-datetime when only the day is known
+var META_ORDER=['type','who','projects','tags','urgency','priority','due-date','due-time','status','dependencies','done-date','received-datetime','received-date'];
+// due as one value, "YYYY-MM-DD" or "YYYY-MM-DD HH:MM" ('' for none), and setting it from one: an empty one removes both fields
+function dueOf(meta){var d=meta['due-date']||'';return d&&meta['due-time']?d+' '+meta['due-time']:d;}
+function setDue(meta,v){var m=/^(\S+)(?: (\d{2}:\d{2}))?/.exec(String(v||'').trim());delete meta['due-date'];delete meta['due-time'];
+  if(m){meta['due-date']=m[1];if(m[2])meta['due-time']=m[2];}}
+// when an Item reached the User: received-datetime, or received-date when only the day is known ('' for neither)
+function receivedOf(meta){return meta['received-datetime']||meta['received-date']||'';}
 function serItem(it){
   var parts=metaParts(it.meta,META_ORDER);
   var s='- ['+(it.done?'x':' ')+'] '+it.id+' '+ol(it.title)+(parts.length?' {'+parts.join('; ')+'}':'');
   it.subs.forEach(function(b){s+='\n'+serSub(b);});
   return s;}
 // where each kind of sub-line goes on an Item, a Person and a Project or System: a new one goes after the last of its rank or lower
-var ITEM_RANK={src:0,description:1,link:2,ref:3,comment:4,sub:5},PERSON_RANK={description:0,hist:1,comment:2},ENT_RANK={description:0,link:1,comment:2};
+var ITEM_RANK={origin:0,description:1,link:2,'source-key':3,comment:4,sub:5},PERSON_RANK={description:0,history:1,comment:2},ENT_RANK={description:0,link:1,comment:2};
 function placeSub(x,b,rank){var at=-1,r=rank[b.k];x.subs.forEach(function(s,k){if(rank[s.k]!==undefined&&rank[s.k]<=r)at=k;});x.subs.splice(at+1,0,b);return b;}
 // the Description's text ('' for none), and setting it: an empty one removes the line
 function descOf(x){var d=x.subs.filter(function(b){return b.k==='description';})[0];return d?d.v:'';}
@@ -528,7 +546,7 @@ function addComment(x,c,rank){var f={};f['added-datetime']=c.at;f.author=c.autho
   return placeSub(x,{k:'comment',f:f,v:cleanText(c.text)},rank);}
 // A Skill changes only these fields, with a Comment to acknowledge naming the field and its old and new value (discern change).
 // Closing an Item stays the User's: news that it is finished is a Comment that suggests: done.
-var CHANGE_FIELDS={T:['due','st','who'],P:['title','co','dept','mgr']};
+var CHANGE_FIELDS={T:['due-date','due-time','status','who'],P:['title','company','department','manager']};
 // a Comment's field change -> {field, from, to}, from '' when the field had no value and to '' when it was cleared; null for none
 function fieldChange(c){var f=(c&&c.f)||{};return f.changed?{field:f.changed,from:f.from||'',to:f.to||''}:null;}
 // Undo shows only on the latest unacknowledged change to a field, and goes back to the value from before the first of them,
@@ -559,18 +577,28 @@ function changesOf(post){var out=[],cur=null;
 function changeKey(c){return c.type==='relationship'?'rel|'+c.a+'|'+c.b:c.type==='priority'?'priority|'+c.id:'person|'+String(c.email||'').toLowerCase();}
 // A No to a Priority person is not for good: it pauses them for PRIORITY_PAUSE days from the date on its IGNORED.md line
 var PRIORITY_PAUSE=28;
-function priorityPaused(ignored,id,today){return String(ignored||'').replace(/\r/g,'').split('\n').some(function(l){
-  var m=/^(?:- )?priority\|(P-\d+) \| (\d{4}-\d{2}-\d{2}) \|/.exec(l);return !!m&&m[1]===id&&daysBetween(m[2],today)<PRIORITY_PAUSE;});}
+function priorityPaused(ignored,id,today){return ignoredOf(ignored).some(function(g){
+  var d=g.fields['ignored-date']||'';return g.key==='priority|'+id&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&daysBetween(d,today)<PRIORITY_PAUSE;});}
+// IGNORED.md: "- <source key> {ignored-date: YYYY-MM-DD; reason: not actionable}", the braces parsed from the final " {"
+// -> [{key, fields, line, at}], at the line's index
+function ignoredOf(text){var out=[];String(text||'').replace(/\r/g,'').split('\n').forEach(function(ln,at){
+    var m=/^- (.*)$/.exec(ln);if(!m)return;var t=m[1],f={},bi=t.lastIndexOf(' {');
+    if(bi>-1&&t.charAt(t.length-1)==='}'){f=fieldsOf(t.slice(bi+2,-1));t=t.slice(0,bi);}
+    t=t.trim();if(/^[a-z][a-z0-9-]*\|/i.test(t))out.push({key:t,fields:f,line:ln,at:at});});
+  return out;}
+function ignoredLine(key,date,reason){var r=ol(reason||'').replace(/[;{}]/g,',').trim();
+  return '- '+ol(key).trim()+' {ignored-date: '+date+(r?'; reason: '+r:'')+'}';}
 function nextId(model){var n=0;model.pre.forEach(function(l){var m=/next-id:\s*(\d+)/.exec(l);if(m)n=parseInt(m[1],10);});
   model.items.forEach(function(i){var k=parseInt(i.id.slice(2),10);if(k>=n)n=k+1;});return n;}
 function setNextId(model,n){var f=false;model.pre=model.pre.map(function(l){if(/next-id:/.test(l)){f=true;return '<!-- next-id: '+n+' -->';}return l;});
   if(!f)model.pre.push('<!-- next-id: '+n+' -->');}
 function fmtId(n){return 'T-'+('0000'+n).slice(-4);}
 function getSub(it,k){return it.subs.filter(function(b){return b.k===k;});}
-// ---- people (PEOPLE.md): "## Group" headings, "- Name {co:; dept:; title:; mgr:; st:Left; chk:date}" + description, hist: and comment lines
-var PFIELDS=['co','dept','title','mgr'];
-var PLABEL={co:'Company',dept:'Department',title:'Job title',mgr:'Reports to',grp:'Group'};
-var PMETA_ORDER=['id','co','dept','title','mgr','ext','st','chk'];
+// ---- people (PEOPLE.md): "## Group" headings, "- Name {id: P-0002; company: …; department: …; title: …; manager: …; external: yes;
+// status: left; checked-date: YYYY-MM-DD; emails: a, b; handles: a, b}" + description, history and comment lines
+var PFIELDS=['company','department','title','manager'];
+var PLABEL={company:'Company',department:'Department',title:'Job title',manager:'Reports to',group:'Group',emails:'Email',status:'Status'};
+var PMETA_ORDER=['id','company','department','title','manager','external','status','checked-date','emails','handles'];
 // P-0001 is always the User, and never anyone else
 var USER_ID='P-0001';
 function pParse(text){
@@ -585,8 +613,8 @@ function pParse(text){
     if(!started){pre.push(ln);return;}
     if(ln.trim()==='')return;
     if(!cur){(gtext[grp]=gtext[grp]||[]).push(ln);return;}
-    var s=/^  - (description|hist|comment): ?(.*)$/.exec(ln);
-    if(s){cur.subs.push(s[1]==='hist'?{k:s[1],v:s[2]}:textSub(s[1],s[2]));return;}
+    var s=/^  - (description|history|comment): ?(.*)$/.exec(ln);
+    if(s){cur.subs.push(textSub(s[1],s[2]));return;}
     cur.subs.push({k:'raw',v:ln});},function(){return cur;}));
   while(pre.length&&pre[pre.length-1].trim()==='')pre.pop();
   return {pre:pre,people:people,gtext:gtext,gorder:gorder};}
@@ -601,6 +629,9 @@ function pSerialize(model){
   order.forEach(function(g){out.push('');out.push('## '+g);(gt[g]||[]).forEach(function(l){out.push(l);});model.people.forEach(function(p){if((p.grp||'Other')===g)out.push(pSerItem(p));});});
   return out.join('\n')+'\n';}
 function pMissing(p){return PFIELDS.filter(function(k){return !p.meta[k];});}
+// A change to a Person's field, kept as a history line: the field as PEOPLE.md names it (group for a move to another heading)
+function histSub(date,field,from,to){var f={'changed-date':date};if(field)f.changed=field;return {k:'history',f:f,v:(from||'(none)')+' → '+(to||'(none)')};}
+function addHistory(p,date,field,from,to){return placeSub(p,histSub(date,field,from,to),PERSON_RANK);}
 // person IDs (P-####, permanent, never reused; counter lives in a next-id comment in PEOPLE.md)
 function fmtPId(n){return 'P-'+('0000'+n).slice(-4);}
 function pNextId(model){var n=0;model.pre.forEach(function(l){var m=/next-id:\s*(\d+)/.exec(l);if(m)n=parseInt(m[1],10);});
@@ -610,20 +641,45 @@ function pSetNextId(model,n){var f=false;model.pre=model.pre.map(function(l){if(
 function ensurePIds(model){var n=pNextId(model),c=0;
   model.people.forEach(function(p){if(!/^P-\d+$/.test(p.meta.id||'')){p.meta.id=fmtPId(n++);c++;}});
   if(c||!model.pre.some(function(l){return /next-id:/.test(l);}))pSetNextId(model,n);return c;}
-// task dependencies: dep:T-0012,T-0015 means "blocked by"
-function depList(i){return String(i.meta.dep||'').split(/[ ,]+/).filter(Boolean);}
-// ask-agent queue (ASK-AGENT.md): one line per note "- T-0012 | 2026-10-06 14:32 | text" (newlines stored as " ⏎ ")
-var NOTE_RE=/^- ((?:T|P|PRJ|SYS)-\d+) \| (\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2})?) \| (.*)$/;
-function aParse(text){var lines=String(text||'').replace(/\r/g,'').split('\n');if(lines.length&&lines[lines.length-1]==='')lines.pop();
-  var notes=[];lines.forEach(function(ln){var m=NOTE_RE.exec(ln);if(m)notes.push({id:m[1],ts:m[2],text:m[3].split(' ⏎ ').join('\n'),raw:ln});});
+// task dependencies: dependencies: T-0012, T-0015 means "blocked by"
+function depList(i){return String(i.meta.dependencies||'').split(/[ ,]+/).filter(Boolean);}
+// ask-agent queue (ASK-AGENT.md): "- T-0012 {requested-datetime: 2026-10-06 14:32}" ("requested-date: YYYY-MM-DD" when only the
+// day is known), then the request on the lines below it, indented 4 spaces
+var NOTE_RE=/^- ((?:T|P|PRJ|SYS)-\d+) \{([^{}\n]*)\}(?=\n|$)/;
+// -> {lines, notes: [{id, ts, text, raw}]}: an entry and its request's lines are one element of lines, and raw is that element
+function aParse(text){var lines=[];
+  String(text||'').replace(/\r/g,'').split('\n').forEach(function(ln){var k=lines.length-1;
+    if(k>=0&&/^ {4}/.test(ln)&&NOTE_RE.test(lines[k]))lines[k]+='\n'+ln;else lines.push(ln);});
+  if(lines.length&&lines[lines.length-1]==='')lines.pop();
+  var notes=[];lines.forEach(function(ln){var m=NOTE_RE.exec(ln);if(!m)return;var f=fieldsOf(m[2]);
+    notes.push({id:m[1],ts:f['requested-datetime']||f['requested-date']||'',text:ln.split('\n').slice(1).map(function(l){return l.slice(4);}).join('\n'),raw:ln});});
   return {lines:lines,notes:notes};}
-function aLine(id,ts,text){return '- '+id+' | '+ts+' | '+String(text).replace(/\r/g,'').split(/[\n\u2028\u2029\u0085]/).map(function(s){return s.trim();}).filter(Boolean).join(' ⏎ ');}
+// an entry as aParse keeps it: its line, then the request's lines
+function aLine(id,ts,text){var t=cleanText(text);
+  return '- '+id+' {'+(/ \d{2}:\d{2}$/.test(ts)?'requested-datetime: ':'requested-date: ')+ts+'}'+(t?t.split('\n').map(function(l){return '\n    '+l;}).join(''):'');}
+// ask-agent log (ASK-AGENT-LOG.md): "- T-0012 {requested-datetime: …; actioned-datetime: …}", then "  - request: …" and
+// "  - result: …", each going on over lines indented 4 spaces
+var LOG_RE=/^- ((?:T|P|PRJ|SYS)-\d+) \{([^{}]*)\}$/;
+// -> [{id, at, queued, note, did, raw}]: at when it was actioned, queued when it was requested, note the request, did the result
+function logParse(text){var out=[],cur=null,sub=null;
+  String(text||'').replace(/\r/g,'').split('\n').forEach(function(ln){
+    var m=LOG_RE.exec(ln);
+    if(m){var f=fieldsOf(m[2]);sub=null;
+      cur={id:m[1],at:f['actioned-datetime']||f['actioned-date']||'',queued:f['requested-datetime']||f['requested-date']||'',note:'',did:'',raw:ln};out.push(cur);return;}
+    if(!cur)return;
+    var c=sub&&/^ {4}(.*)$/.exec(ln);
+    if(c){cur[sub]+='\n'+c[1];cur.raw+='\n'+ln;return;}
+    var s=/^  - (request|result): ?(.*)$/.exec(ln);
+    if(s){sub=s[1]==='request'?'note':'did';cur[sub]=s[2];cur.raw+='\n'+ln;return;}
+    if(/^  \S/.test(ln)){sub=null;cur.raw+='\n'+ln;return;}
+    cur=sub=null;});
+  return out;}
 // ---- tags / projects / systems / relationships (PROJECTS.md, SYSTEMS.md, RELATIONSHIPS.md)
 function csv(s){return String(s||'').split(',').map(function(x){return x.trim();}).filter(Boolean);}
-function tagsOf(i){var t=csv(i.meta.tg);if(!t.length&&!i.meta.prj&&i.meta.top)t=[i.meta.top];return t;}
-function prjOf(i){return csv(i.meta.prj);}
+function tagsOf(i){return csv(i.meta.tags);}
+function prjOf(i){return csv(i.meta.projects);}
 function cleanTag(s){return String(s||'').replace(/[;,{}]/g,' ').replace(/\s+/g,' ').trim();}
-var EMETA_ORDER=['id','type','owner','parent','part-of','st'];
+var EMETA_ORDER=['id','type','owner','parent','part-of','status'];
 function eParse(text){
   var lines=String(text||'').replace(/\r/g,'').split('\n');var pre=[],ents=[],cur=null,grp='',started=false,gtext={},gorder=[];
   lines.forEach(textLines(function(ln){
@@ -661,8 +717,8 @@ function eSetNextId(model,n){var f=false;model.pre=model.pre.map(function(l){if(
 function ensureEIds(model,kind){var n=eNextId(model,kind),c=0,re=new RegExp('^'+kind+'-\\d+$');
   model.ents.forEach(function(e){if(!re.test(e.meta.id||'')){e.meta.id=fmtEId(kind,n++);c++;}});
   if(c||!model.pre.some(function(l){return /next-id:/.test(l);}))eSetNextId(model,n);return c;}
-// relationships: "- T-0007 ~ T-0032 | related" (symmetric, stored once) or "- T-0014 -> SYS-0002 | concerns"
-var REL_RE=/^- ((?:T|P|PRJ|SYS)-\d+) (~|->) ((?:T|P|PRJ|SYS)-\d+) \| (.+)$/;
+// relationships: "- T-0007 ~ T-0032 {kind: related}" (symmetric, stored once) or "- T-0014 -> SYS-0002 {kind: concerns}"; the kind is m[4]
+var REL_RE=/^- ((?:T|P|PRJ|SYS)-\d+) (~|->) ((?:T|P|PRJ|SYS)-\d+) \{(?:[^{}]*?;\s*)?kind:\s*([^;{}]*?)\s*(?:;[^{}]*)?\}$/;
 function rParse(text){var lines=String(text||'').replace(/\r/g,'').split('\n');if(lines.length&&lines[lines.length-1]==='')lines.pop();
   var rels=[];lines.forEach(function(ln){var m=REL_RE.exec(ln);if(m)rels.push({a:m[1],op:m[2],b:m[3],type:m[4].trim(),raw:ln});});
   return {lines:lines,rels:rels};}
@@ -671,31 +727,31 @@ var REL_PAIRS={'T|SYS':'concerns','T|P':'involves','P|SYS':'owns','PRJ|SYS':'use
 function relLine(a,b){
   if(a===b)return {err:'Nothing can be related to itself.'};
   var ka=kindOf(a),kb=kindOf(b);
-  if(ka===kb&&ka!=='PRJ'){var s=[a,b].sort();return {line:'- '+s[0]+' ~ '+s[1]+' | related'};}
+  if(ka===kb&&ka!=='PRJ'){var s=[a,b].sort();return {line:'- '+s[0]+' ~ '+s[1]+' {kind: related}'};}
   var k1=ka+'|'+kb,k2=kb+'|'+ka;
-  if(REL_PAIRS[k1])return {line:'- '+a+' -> '+b+' | '+REL_PAIRS[k1]};
-  if(REL_PAIRS[k2])return {line:'- '+b+' -> '+a+' | '+REL_PAIRS[k2]};
+  if(REL_PAIRS[k1])return {line:'- '+a+' -> '+b+' {kind: '+REL_PAIRS[k1]+'}'};
+  if(REL_PAIRS[k2])return {line:'- '+b+' -> '+a+' {kind: '+REL_PAIRS[k2]+'}'};
   return {err:'Cannot relate '+ka+' to '+kb+' (an item joins a project through its Project field).'};}
-// SOURCES.md: a Person's ID added to priority_people in "## defaults" (on), or taken out of it, every other line kept as it was
+// SOURCES.md: a Person's ID added to priority-people in "## defaults" (on), or taken out of it, every other line kept as it was
 function setPriority(text,id,on){
   var t=String(text||''),eol=/\r\n/.test(t)?'\r\n':'\n',ls=t.split(/\r?\n/),d=-1,end=-1,at=-1,i;
   for(i=0;i<ls.length;i++){
     if(/^## /.test(ls[i])){if(d>=0)break;if(/^## defaults\s*$/.test(ls[i]))d=end=i;continue;}
     if(d<0)continue;
     if(/^ *- /.test(ls[i]))end=i;
-    if(/^- priority_people:/.test(ls[i]))at=i;}
+    if(/^- priority-people:/.test(ls[i]))at=i;}
   if(at<0){
     if(!on)return t;
-    if(d<0){var f=ls.findIndex(function(l){return /^## /.test(l);});if(f<0)f=ls.length&&ls[ls.length-1]===''?ls.length-1:ls.length;ls.splice(f,0,'## defaults','- priority_people: '+id,'');}
-    else ls.splice(end+1,0,'- priority_people: '+id);
+    if(d<0){var f=ls.findIndex(function(l){return /^## /.test(l);});if(f<0)f=ls.length&&ls[ls.length-1]===''?ls.length-1:ls.length;ls.splice(f,0,'## defaults','- priority-people: '+id,'');}
+    else ls.splice(end+1,0,'- priority-people: '+id);
     return ls.join(eol);}
-  var v=ls[at].replace(/^- priority_people:\s*/,''),sub=[];
+  var v=ls[at].replace(/^- priority-people:\s*/,''),sub=[];
   for(i=at+1;i<ls.length&&/^ {2,}- /.test(ls[i]);i++)sub.push(i);
   if(!v.trim()&&sub.length){
     var has=sub.filter(function(k){return ls[k].replace(/^ {2,}- /,'').trim()===id;});
     if(on&&!has.length)ls.splice(sub[sub.length-1]+1,0,'  - '+id);
     if(!on)has.reverse().forEach(function(k){ls.splice(k,1);});}
-  else{var ids=csv(v);if(on&&ids.indexOf(id)<0)ids.push(id);if(!on)ids=ids.filter(function(x){return x!==id;});ls[at]='- priority_people:'+(ids.length?' '+ids.join(', '):'');}
+  else{var ids=csv(v);if(on&&ids.indexOf(id)<0)ids.push(id);if(!on)ids=ids.filter(function(x){return x!==id;});ls[at]='- priority-people:'+(ids.length?' '+ids.join(', '):'');}
   return ls.join(eol);}
 // versions compare part by part, a missing part counting as 0; 'next' (an unlanded Migration) is newer than any
 function versionCmp(a,b){if(a===b)return 0;if(a==='next')return 1;if(b==='next')return -1;
@@ -708,9 +764,9 @@ function formatIs(v){var c=versionCmp(v,FORMAT);return c?(c<0?'older':'newer'):'
 // the all-items workbench: items grouped and sorted as the User chooses -> [{key, label, items}]
 function workbench(items,o){
   var by=o.group,groups={},keys=[];
-  function keysOf(i){if(by==='tag')return tagsOf(i).length?tagsOf(i):[''];if(by==='type')return [i.meta.ty||'Task'];
+  function keysOf(i){if(by==='tag')return tagsOf(i).length?tagsOf(i):[''];if(by==='type')return [i.meta.type||'task'];
     if(by==='project')return prjOf(i).length?prjOf(i):[''];
-    if(by==='person'){var w=i.meta.who||'';return [w==='Unassigned'?'':w];}return [i.meta.urg||'later'];}
+    if(by==='person'){var w=i.meta.who||'';return [w==='Unassigned'?'':w];}return [i.meta.urgency||'later'];}
   if(o.tag)items=items.filter(function(i){return tagsOf(i).indexOf(o.tag)>=0;});
   if(o.q)items=items.filter(function(i){return itemMatch(i,o.q,o.prjName)!==null;});
   items.forEach(function(i){keysOf(i).forEach(function(k){if(!groups[k]){groups[k]=[];keys.push(k);}groups[k].push(i);});});
@@ -721,13 +777,13 @@ function workbench(items,o){
   if(fixed)keys.sort(function(a,b){return rank(a)-rank(b)||a.localeCompare(b);});
   else if(by==='project')keys.sort(function(a,b){return (a==='')-(b==='')||label(a).localeCompare(label(b));});
   else keys.sort(function(a,b){return (a==='')-(b==='')||groups[b].length-groups[a].length||a.localeCompare(b);});
-  function urgRank(i){var n=URG_ORDER.indexOf(i.meta.urg||'later');return n<0?URG_ORDER.indexOf('later'):n;}
+  function urgRank(i){var n=URG_ORDER.indexOf(i.meta.urgency||'later');return n<0?URG_ORDER.indexOf('later'):n;}
   function byUrg(a,b){return urgRank(a)-urgRank(b);}
-  function byDue(a,b){return String(a.meta.due||'9999').localeCompare(String(b.meta.due||'9999'));}
+  function byDue(a,b){return String(dueOf(a.meta)||'9999').localeCompare(String(dueOf(b.meta)||'9999'));}
   function first(x,y){return function(a,b){return x(a,b)||y(a,b);};}
-  function byAsg(dir){return function(a,b){var x=String(a.meta.asg||''),y=String(b.meta.asg||'');return (!x)-(!y)||dir*x.localeCompare(y);};}
-  var lead=o.sort==='due'?first(byDue,byUrg):o.sort==='new'?byAsg(-1):o.sort==='old'?byAsg(1):first(byUrg,byDue);
-  function cmp(a,b){return lead(a,b)||((+a.meta.p||2)-(+b.meta.p||2))||(a.id<b.id?-1:a.id>b.id?1:0);}
+  function byReceived(dir){return function(a,b){var x=receivedOf(a.meta),y=receivedOf(b.meta);return (!x)-(!y)||dir*x.localeCompare(y);};}
+  var lead=o.sort==='due'?first(byDue,byUrg):o.sort==='new'?byReceived(-1):o.sort==='old'?byReceived(1):first(byUrg,byDue);
+  function cmp(a,b){return lead(a,b)||(prioRank(a.meta.priority)-prioRank(b.meta.priority))||(a.id<b.id?-1:a.id>b.id?1:0);}
   return keys.map(function(k){return {key:k,label:label(k),items:groups[k].slice().sort(cmp)};});}
 // search: every word of the query must start a word in the item. Returns where it matched ('' for the ID, title, person
 // or tags) or null. Where is the first place holding every word, else the first holding a word the title line lacks.
@@ -737,7 +793,7 @@ function itemMatch(i,q,prjName){
   function sv(k){return getSub(i,k).map(function(b){return b.v;}).join(' ');}
   var places=[['',i.id+' '+i.title+' '+(i.meta.who||'')+' '+tagsOf(i).join(' ')],
     ['project',prjOf(i).map(function(p){return (prjName&&prjName(p))||p;}).join(' ')],
-    ['the description',descOf(i)],['comments',sv('comment')],['sub-tasks',sv('sub')],['the source',sv('src')]]
+    ['the description',descOf(i)],['comments',sv('comment')],['sub-tasks',sv('sub')],['the source',sv('origin')]]
     .map(function(p){return {where:p[0],toks:tokensOf(p[1])};});
   function has(p,w){return p.toks.some(function(t){return t.indexOf(w)===0;});}
   if(!words.every(function(w){return places.some(function(p){return has(p,w);});}))return null;
@@ -747,24 +803,26 @@ function itemMatch(i,q,prjName){
   return places.filter(function(p){return rest.some(function(w){return has(p,w);});})[0].where;}
 // quick add: parseQuick's result plus what the User chose -> {title, meta, description} for the new item
 function daysBetween(a,b){function t(s){var p=String(s).slice(0,10).split('-').map(Number);return Date.UTC(p[0],p[1]-1,p[2]);}return Math.round((t(b)-t(a))/86400000);}
-function urgForDue(due,today){var n=daysBetween(today,due);return n<=0?'today':(n<=7?'week':(n<=14?'soon':'later'));}
+function urgForDue(due,today){var n=daysBetween(today,due);return n<=0?'today':(n<=7?'this week':(n<=14?'soon':'later'));}
 // overdue: open and due on a day before today. A Meeting is overdue from the day after it takes place, not from its start time
-function isOverdue(i,today){return !i.done&&/^\d{4}-\d{2}-\d{2}/.test(String(i.meta.due||''))&&daysBetween(today,i.meta.due)<0;}
-// Snooze: the new due date is today plus the step in days, a Saturday or Sunday moved to the Monday, keeping the old due date's time of day
+function isOverdue(i,today){var d=String(i.meta['due-date']||'');return !i.done&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&daysBetween(today,d)<0;}
+// Snooze: the new due date is today plus the step in days, a Saturday or Sunday moved to the Monday, keeping the old due date's
+// time of day. due and the result are one value, as dueOf gives it and setDue takes it.
 function snooze(due,days,today){var p=String(today).slice(0,10).split('-').map(Number),d=new Date(Date.UTC(p[0],p[1]-1,p[2]+days));
   var w=d.getUTCDay();if(w===6||w===0)d.setUTCDate(d.getUTCDate()+(w===6?2:1));
   var t=/^\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/.exec(String(due||''));
   return d.toISOString().slice(0,10)+(t?' '+t[1]:'');}
+// q.ty is a type as TYPES or TYPE_NAME has it, and q.p a priority as PRIORITIES has it, or 1, 2 or 3 for high, medium or low
 function quickItem(q,o){
-  var due=q.date?q.date+(q.time?' '+q.time:''):'';
-  var meta={ty:q.ty};
+  var due=q.date?q.date+(q.time?' '+q.time:''):'',type=String(q.ty||'task').toLowerCase();
+  var meta={type:TYPES.indexOf(type)>=0?type:'task'};
   if(q.who)meta.who=q.who;
-  if(q.prj.length)meta.prj=q.prj.join(',');
-  if(q.tags.length)meta.tg=q.tags.join(',');
-  meta.urg=o.urg||(q.ty==='FYI'?'fyi':(due?urgForDue(due,o.today):'week'));
-  meta.p=q.p||'2';
-  if(due)meta.due=due;
-  meta.asg=o.now;
+  if(q.prj.length)meta.projects=q.prj.join(', ');
+  if(q.tags.length)meta.tags=q.tags.join(', ');
+  meta.urgency=o.urg||(meta.type==='fyi'?'fyi':(due?urgForDue(due,o.today):'this week'));
+  meta.priority=PRIORITIES.indexOf(q.p)>=0?q.p:PRIORITIES[+q.p-1]||'medium';
+  if(due)setDue(meta,due);
+  meta['received-datetime']=o.now;
   var description=cleanText(o.description);
   return {title:q.title,meta:meta,description:description};}
 // the timezone setting in SOURCES.md's "## defaults" block ('' when it has none)
@@ -779,7 +837,7 @@ function stampIn(tz,ms){try{var o={};new Intl.DateTimeFormat('en-GB',{timeZone:t
 function byTime(list){return list.map(function(c,k){return {c:c,k:k,t:String((c.f||{})['added-datetime']||'')};})
   .sort(function(a,b){return a.t<b.t?-1:a.t>b.t?1:a.k-b.k;}).map(function(x){return x.c;});}
 // ---- Merge: a duplicate Item d folded into the Item s it duplicates, which keeps its ID. Meetings never merge.
-function canMerge(s,d){return !!s&&!!d&&s.id!==d.id&&s.meta.ty!=='Meeting'&&d.meta.ty!=='Meeting';}
+function canMerge(s,d){return !!s&&!!d&&s.id!==d.id&&s.meta.type!=='meeting'&&d.meta.type!=='meeting';}
 // due a before due b: the earlier day, and on the same day a time before none or a later one
 function dueBefore(a,b){var x=String(a).slice(0,10),y=String(b).slice(0,10);if(x!==y)return x<y;
   var ta=String(a).slice(11),tb=String(b).slice(11);return !!ta&&(!tb||ta<tb);}
@@ -791,20 +849,20 @@ function mergeItem(s,d,at){
   var sm=s.meta,dm=d.meta;
   function urgRank(u){var n=URG_ORDER.indexOf(u);return n<0?URG_ORDER.indexOf('later'):n;}
   function real(w){return w&&w!=='Unassigned';}
-  if(dm.p&&(!sm.p||+dm.p<+sm.p))sm.p=dm.p;
-  if(dm.urg&&(!sm.urg||urgRank(dm.urg)<urgRank(sm.urg)))sm.urg=dm.urg;
-  if(dm.due&&(!sm.due||dueBefore(dm.due,sm.due)))sm.due=dm.due;
+  if(dm.priority&&(!sm.priority||prioRank(dm.priority)<prioRank(sm.priority)))sm.priority=dm.priority;
+  if(dm.urgency&&(!sm.urgency||urgRank(dm.urgency)<urgRank(sm.urgency)))sm.urgency=dm.urgency;
+  if(dueOf(dm)&&(!dueOf(sm)||dueBefore(dueOf(dm),dueOf(sm))))setDue(sm,dueOf(dm));
   if(!real(sm.who)&&real(dm.who))sm.who=dm.who;
-  if(!sm.asg&&dm.asg)sm.asg=dm.asg;
-  var prj=union(prjOf(s),prjOf(d));if(prj.length)sm.prj=prj.join(',');
-  var tg=union(tagsOf(s),tagsOf(d));if(tg.length){sm.tg=tg.join(',');delete sm.top;}
-  var dep=union(depList(s),depList(d)).filter(function(x){return x!==s.id&&x!==d.id;});if(dep.length)sm.dep=dep.join(',');else delete sm.dep;
-  if(s.done!==d.done){s.done=false;delete sm.done;sm.st='In progress';}
-  else if(!s.done&&!sm.st&&dm.st)sm.st=dm.st;
-  if(s.done&&!sm.done&&dm.done)sm.done=dm.done;
+  if(!receivedOf(sm)&&receivedOf(dm)){if(dm['received-datetime'])sm['received-datetime']=dm['received-datetime'];else sm['received-date']=dm['received-date'];}
+  var prj=union(prjOf(s),prjOf(d));if(prj.length)sm.projects=prj.join(', ');
+  var tg=union(tagsOf(s),tagsOf(d));if(tg.length)sm.tags=tg.join(', ');
+  var dep=union(depList(s),depList(d)).filter(function(x){return x!==s.id&&x!==d.id;});if(dep.length)sm.dependencies=dep.join(', ');else delete sm.dependencies;
+  if(s.done!==d.done){s.done=false;delete sm['done-date'];sm.status='in progress';}
+  else if(!s.done&&!sm.status&&dm.status)sm.status=dm.status;
+  if(s.done&&!sm['done-date']&&dm['done-date'])sm['done-date']=dm['done-date'];
   var dd=descOf(d);if(dd.trim()){var sd=descOf(s);setDesc(s,(sd?sd+'\n\n':'')+'From '+d.id+':\n'+dd,ITEM_RANK);}
   d.subs.forEach(function(b){
-    if(b.k==='src'||b.k==='link'||b.k==='ref'){if(!s.subs.some(function(x){return x.k===b.k&&x.v.trim()===b.v.trim();}))placeSub(s,{k:b.k,v:b.v},ITEM_RANK);}
+    if(b.k==='origin'||b.k==='link'||b.k==='source-key'){if(!s.subs.some(function(x){return x.k===b.k&&x.v.trim()===b.v.trim();}))placeSub(s,{k:b.k,v:b.v},ITEM_RANK);}
     else if(b.k==='sub'){var have=s.subs.filter(function(x){return x.k==='sub'&&x.v===b.v;})[0];if(have)have.x=have.x||b.x;else placeSub(s,{k:'sub',v:b.v,x:b.x},ITEM_RANK);}
     else if(b.k==='raw'&&b.v.trim())s.subs.push({k:'raw',v:b.v});});
   var cs=byTime(commentsOf(s).concat(commentsOf(d)));
@@ -812,18 +870,17 @@ function mergeItem(s,d,at){
   cs.forEach(function(c){placeSub(s,{k:'comment',f:Object.assign({},c.f),v:c.v},ITEM_RANK);});
   addComment(s,{at:at,author:'user',text:'Merged '+d.id+' into this.'},ITEM_RANK);
   return s;}
-// the lines of RELATIONSHIPS.md ('rels'), ASK-AGENT.md ('asks'), ASK-AGENT-LOG.md ('log') or IGNORED.md ('ignored') that name d, made
-// to name s. A Relationship or a No to one that would then repeat another, or join s to itself, goes.
-// -> {lines, swaps: [[the old line, the new one or null, where the old one was]]}
-var LOG_ID_RE=/^(- (?:actioned )?\d{4}-\d{2}-\d{2} \d{2}:\d{2} \| )((?:T|P|PRJ|SYS)-\d+)( \| .*)$/;
-var IGN_REL_RE=/^((?:- )?rel\|)((?:T|P|PRJ|SYS)-\d+)\|((?:T|P|PRJ|SYS)-\d+)( \| .*)$/;
+// the lines of RELATIONSHIPS.md ('rels'), ASK-AGENT.md ('asks', the entries as aParse keeps them), ASK-AGENT-LOG.md ('log') or
+// IGNORED.md ('ignored') that name d, made to name s. A Relationship or a No to one that would then repeat another, or join s to
+// itself, goes. -> {lines, swaps: [[the old line, the new one or null, where the old one was]]}
+var IGN_REL_RE=/^(- rel\|)((?:T|P|PRJ|SYS)-\d+)\|((?:T|P|PRJ|SYS)-\d+)( \{[^{}]*\})$/;
 function mergeRefs(kind,lines,d,s){
   function to(x){return x===d?s:x;}
   function moved(ln){var m;
     if(kind==='rels'&&(m=REL_RE.exec(ln))&&(m[1]===d||m[3]===d)){var a=to(m[1]),b=to(m[3]);if(a===b)return null;
-      if(m[2]==='~'&&b<a){var t=a;a=b;b=t;}return '- '+a+' '+m[2]+' '+b+' | '+m[4];}
+      if(m[2]==='~'&&b<a){var t=a;a=b;b=t;}return '- '+a+' '+m[2]+' '+b+ln.slice(ln.lastIndexOf(' {'));}
     if(kind==='asks'&&(m=NOTE_RE.exec(ln))&&m[1]===d)return '- '+s+ln.slice(2+d.length);
-    if(kind==='log'&&(m=LOG_ID_RE.exec(ln))&&m[2]===d)return m[1]+s+m[3];
+    if(kind==='log'&&(m=LOG_RE.exec(ln))&&m[1]===d)return '- '+s+ln.slice(2+d.length);
     if(kind==='ignored'&&(m=IGN_REL_RE.exec(ln))&&(m[2]===d||m[3]===d)){if(to(m[2])===to(m[3]))return null;return m[1]+to(m[2])+'|'+to(m[3])+m[4];}
     return undefined;}
   function key(ln){var m;
@@ -841,17 +898,32 @@ function mergeRefs(kind,lines,d,s){
 // The data folder files the page reads and writes; `discern serve` serves these and no others.
 var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', asklog: 'ASK-AGENT-LOG.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md', settings: 'SOURCES.md' };
 var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
-// The header the page writes when it creates a missing RELATIONSHIPS.md or ASK-AGENT.md: the starter file's, word for word.
-var REL_HEAD = ['# Relationships', '<!-- One line per relationship, stored once (shown on both): `- A ~ B | related` (symmetric) or `- A -> B | type` (involves, concerns, owns, uses). Validate: both IDs exist, no duplicates, nothing related to itself. `dep:` on items is separate. -->', ''];
-var DIS_HEAD = ['# Dismissed', '<!-- One line per source key of a Proposal the user dismissed, kept until its source can no longer read the message again: `- <source key> {source: <source name>; received-datetime: YYYY-MM-DD HH:MM; dismissed-date: YYYY-MM-DD; reason: not actionable}`, local time in `timezone`. A line from a horizon source has `event-date: YYYY-MM-DD` in place of `received-datetime`. Parse the braces from the final " {". tools/discern.mjs removes a line on commit once its source has moved past it. -->', ''];
-var ASK_HEAD = ['# Ask agent queue', '<!-- The agent queue. One line per agent request: - ID | YYYY-MM-DD HH:MM | text. Written by discerny.html. The agent removes a line once it is actioned (skill: discern-ask-agent) and records it in ASK-AGENT-LOG.md. -->', ''];
+// The header the page writes when it creates a missing RELATIONSHIPS.md, DISMISSED.md or ASK-AGENT.md: the starter file's, word for word.
+var REL_HEAD = ['# Relationships',
+  '<!-- One line per Relationship, stored once (shown on both):',
+  '     `- A ~ B {kind: related}` (symmetric) or `- A -> B {kind: <kind>}` (involves, concerns, owns, uses).',
+  '     Validate: both IDs exist, no duplicates, nothing related to itself.',
+  '     `dependencies` on Items are separate. -->', ''];
+var DIS_HEAD = ['# Dismissed',
+  '<!-- One line per source key of a Proposal the user dismissed, kept until its source can no longer read',
+  '     the message again: `- <source key> {source: <source name>; received-datetime: YYYY-MM-DD HH:MM;',
+  '     dismissed-date: YYYY-MM-DD; reason: not actionable}`, local time in `timezone`.',
+  '     A line from a horizon source has `event-date: YYYY-MM-DD` in place of `received-datetime`.',
+  '     Parse the braces from the final " {".',
+  '     tools/discern.mjs removes a line on commit once its source has moved past it. -->', ''];
+var ASK_HEAD = ['# Ask agent queue',
+  '<!-- The agent queue, written by discerny.html. One entry per agent request:',
+  '     `- <ID> {requested-datetime: YYYY-MM-DD HH:MM}`, then the request on the lines below it, indented 4 spaces.',
+  '     The agent removes an entry once it is actioned (skill: discern-ask-agent) and records it in ASK-AGENT-LOG.md. -->', ''];
 //</core>
 
 /* ===================== constants ===================== */
 var EDEF = {
-  PRJ: { file: 'PROJECTS.md', key: 'projects', word: 'project', Word: 'Project', types: ['Project', 'Workstream', 'Pod'], sts: ['Active', 'On hold', 'Done'], pk: 'parent' },
-  SYS: { file: 'SYSTEMS.md', key: 'systems', word: 'system', Word: 'System', types: ['Platform', 'Pipeline', 'Registry', 'Application', 'Instrument', 'Other'], sts: ['Live', 'In build', 'Delayed', 'Retired'], pk: 'part-of' }
+  PRJ: { file: 'PROJECTS.md', key: 'projects', word: 'project', Word: 'Project', types: ['project', 'workstream', 'pod'], sts: ['active', 'on hold', 'done'], pk: 'parent' },
+  SYS: { file: 'SYSTEMS.md', key: 'systems', word: 'system', Word: 'System', types: ['platform', 'pipeline', 'registry', 'application', 'instrument', 'other'], sts: ['live', 'in build', 'delayed', 'retired'], pk: 'part-of' }
 };
+// a Record's type or status as the page shows it: the file's lowercase value with a capital first letter
+function cap(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
 var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, asklog: function (t) { return { text: String(t || '') }; }, ignored: function (t) { return { text: String(t || '') }; }, dismissed: function (t) { return { text: String(t || '') }; }, settings: function (t) { return { text: String(t || '') }; } };
 function serKey(k, m) {
   if (k === 'tasks' || k === 'inbox' || k === 'done') return serialize(m);
@@ -980,23 +1052,12 @@ async function readDrafts() {
   out.sort(function (a, b) { return a.name < b.name ? -1 : 1; });
   return out;
 }
-function parseLog(text) {
-  var out = [];
-  String(text || '').replace(/\r/g, '').split('\n').forEach(function (ln) {
-    var m = /^- (?:actioned )?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) \| (.*)$/.exec(ln);
-    if (!m) return;
-    var p = m[2].split(' | ');
-    if (p.length < 4) return;
-    out.push({ at: m[1], id: p[0], queued: p[1].replace(/^queued /, ''), note: p[2], did: p.slice(3).join(' | '), raw: ln });
-  });
-  return out;
-}
 function parseSources(text) {
   var out = [], cur = null;
   String(text || '').replace(/\r/g, '').split('\n').forEach(function (ln) {
     var h = /^## (.+)$/.exec(ln);
     if (h) { cur = { name: h[1].trim(), lastRun: '' }; out.push(cur); return; }
-    var m = /^- last_run:\s*(\S+)/.exec(ln);
+    var m = /^- last-run:\s*(\S+)/.exec(ln);
     if (m && cur) cur.lastRun = m[1];
   });
   return out;
@@ -1041,7 +1102,7 @@ async function loadAll() {
     tasks: parse(t['TASKS.md']), inbox: parse(t['INBOX.md']), done: parse(t['DONE.md']),
     people: pParse(t['PEOPLE.md']), projects: eParse(t['PROJECTS.md']), systems: eParse(t['SYSTEMS.md']),
     rels: rParse(t['RELATIONSHIPS.md']), asks: aParse(t['ASK-AGENT.md']),
-    log: parseLog(t['ASK-AGENT-LOG.md']), sources: parseSources(t['SOURCES.md']),
+    log: logParse(t['ASK-AGENT-LOG.md']), sources: parseSources(t['SOURCES.md']),
     drafts: await readDrafts(), asklog: { text: t['ASK-AGENT-LOG.md'] }, ignored: { text: '' }, dismissed: { text: '' }, settings: { text: t['SOURCES.md'] }
   };
   keys.forEach(function (k) { BASE[k] = countOf(k, out[k]); });
@@ -1088,7 +1149,7 @@ function dismissLine(it, ref, why) {
   var ev = /^cal\|(\d{4}-\d{2}-\d{2})\|/i.exec(ref), f = [];
   if (it.meta.source) f.push('source: ' + it.meta.source);
   if (ev) f.push('event-date: ' + ev[1]);
-  else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(it.meta.asg || '')) f.push('received-datetime: ' + it.meta.asg);
+  else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(it.meta['received-datetime'] || '')) f.push('received-datetime: ' + it.meta['received-datetime']);
   f.push('dismissed-date: ' + todayStr(), 'reason: ' + why);
   return '- ' + ref + ' {' + f.join('; ') + '}';
 }
@@ -1110,12 +1171,14 @@ function putChange(m, lines) {
 }
 // The Relationship Proposals with an end on this Item, which go when the Item is dismissed.
 function changesOn(m, id) { return changesOf(m.post).filter(function (c) { return c.type === 'relationship' && (c.a === id || c.b === id); }); }
-function noLine(c) { return changeKey(c) + ' | ' + todayStr() + ' | the user said no'; }
+function noLine(c) { return ignoredLine(changeKey(c), todayStr(), 'the user said no'); }
+// the same history line: its date, field and old → new
+function sameHist(b, h) { var f = b.f || {}; return b.k === 'history' && b.v === h.v && f['changed-date'] === h.f['changed-date'] && (f.changed || '') === (h.f.changed || ''); }
 function withEmail(p, addr, on) {
-  var ems = csv(p.meta.em), l = addr.toLowerCase(), has = ems.some(function (e) { return e.toLowerCase() === l; });
+  var ems = csv(p.meta.emails), l = addr.toLowerCase(), has = ems.some(function (e) { return e.toLowerCase() === l; });
   if (on && !has) ems.push(addr);
   if (!on) ems = ems.filter(function (e) { return e.toLowerCase() !== l; });
-  if (ems.length) p.meta.em = ems.join(', '); else delete p.meta.em;
+  if (ems.length) p.meta.emails = ems.join(', '); else delete p.meta.emails;
 }
 function findSub(it, idx, text) {
   var subs = getSub(it, 'sub');
@@ -1159,7 +1222,7 @@ function ensureProject(m, name, wants) {
   var n = eNextId(m, 'PRJ'), id;
   if (want && idNum(want) >= n && !m.ents.some(function (x) { return x.meta.id === want; })) id = want;
   else { id = fmtEId('PRJ', n); if (want) noteAlias(want, id); else wants[key] = id; }
-  m.ents.push({ name: name, grp: lastGroup(m), meta: { id: id, type: 'Project', st: 'Active' }, subs: [] });
+  m.ents.push({ name: name, grp: lastGroup(m), meta: { id: id, type: 'project', status: 'active' }, subs: [] });
   eSetNextId(m, Math.max(n, idNum(id) + 1));
   return id;
 }
@@ -1215,18 +1278,18 @@ var OPS = {
     });
   },
   // Undo of a Skill's field change: the field back to value, and the change Comments it names ([idx, text] each) acknowledged.
-  // A Person's change gets a hist: line, as any change to their fields does. st keeps what it replaced, for the redo.
+  // A Person's change gets a history line, as any change to their fields does. st keeps what it replaced, for the redo.
   fieldUndo: function (id, field, value, which, date, st) {
     return op('Undo the change to ' + field + ' on ' + id, recKeys(id), function (M) {
       var r = recIn(M, id);
       if (!r) return;
       var x = r.x, was = x.meta[field] || '';
-      if (st.was === undefined) { st.was = was; st.chk = x.meta.chk; }
+      if (st.was === undefined) { st.was = was; st.chk = x.meta['checked-date']; }
       if (value) x.meta[field] = value; else delete x.meta[field];
       if (kindOf(id) === 'P' && st.was !== value) {
-        st.hist = st.hist || date + ' | ' + PLABEL[field] + ': ' + (st.was || '(none)') + ' → ' + (value || '(none)');
-        if (!x.subs.some(function (b) { return b.k === 'hist' && b.v === st.hist; })) placeSub(x, { k: 'hist', v: st.hist }, r.rank);
-        x.meta.chk = date;
+        st.hist = st.hist || histSub(date, field, st.was, value);
+        if (!x.subs.some(function (b) { return sameHist(b, st.hist); })) addHistory(x, date, field, st.was, value);
+        x.meta['checked-date'] = date;
       }
       which.forEach(function (w) { var c = findComment(x, w[0], w[1]); if (c) delete c.f.acknowledged; });
     });
@@ -1237,11 +1300,11 @@ var OPS = {
       if (!r || st.was === undefined) return;
       var x = r.x;
       if (st.was) x.meta[field] = st.was; else delete x.meta[field];
-      if (st.hist) { x.subs = x.subs.filter(function (b) { return !(b.k === 'hist' && b.v === st.hist); }); if (st.chk) x.meta.chk = st.chk; else delete x.meta.chk; }
+      if (st.hist) { x.subs = x.subs.filter(function (b) { return !sameHist(b, st.hist); }); if (st.chk) x.meta['checked-date'] = st.chk; else delete x.meta['checked-date']; }
       which.forEach(function (w) { var c = findComment(x, w[0], w[1]); if (c) c.f.acknowledged = 'no'; });
     });
   },
-  // Yes to a Priority person: their ID added to priority_people; st.had says it was there already, for the undo
+  // Yes to a Priority person: their ID added to priority-people; st.had says it was there already, for the undo
   prioYes: function (c, st) {
     return op('Make ' + c.name + ' a Priority person', ['inbox', 'settings'], function (M) {
       if (!dropChange(M.inbox, c.line)) return;
@@ -1285,15 +1348,14 @@ var OPS = {
     });
   },
   addTag: function (id, t) {
-    return op('Tag ' + id, ANY, function (M) { var f = fItem(M, id); if (!f) return; var tags = tagsOf(f.it); if (tags.indexOf(t) < 0) tags.push(t); f.it.meta.tg = tags.join(','); delete f.it.meta.top; });
+    return op('Tag ' + id, ANY, function (M) { var f = fItem(M, id); if (!f) return; var tags = tagsOf(f.it); if (tags.indexOf(t) < 0) tags.push(t); f.it.meta.tags = tags.join(', '); });
   },
   removeTag: function (id, t) {
     return op('Untag ' + id, ANY, function (M) {
       var f = fItem(M, id);
       if (!f) return;
       var tags = tagsOf(f.it).filter(function (x) { return x !== t; });
-      if (tags.length) f.it.meta.tg = tags.join(','); else delete f.it.meta.tg;
-      delete f.it.meta.top;
+      if (tags.length) f.it.meta.tags = tags.join(', '); else delete f.it.meta.tags;
     });
   },
   setPrj: function (id, p, on) {
@@ -1303,18 +1365,18 @@ var OPS = {
       var ps = prjOf(f.it).map(rid), k = ps.indexOf(q);
       if (on && k < 0) ps.push(q);
       if (!on && k >= 0) ps.splice(k, 1);
-      if (ps.length) f.it.meta.prj = ps.join(','); else delete f.it.meta.prj;
+      if (ps.length) f.it.meta.projects = ps.join(', '); else delete f.it.meta.projects;
     });
   },
   addDep: function (id, d) {
-    return op('Dependency on ' + id, ANY, function (M) { var f = fItem(M, id), q = rid(d); if (!f) return; var ds = depList(f.it); if (ds.indexOf(q) < 0) ds.push(q); f.it.meta.dep = ds.join(','); });
+    return op('Dependency on ' + id, ANY, function (M) { var f = fItem(M, id), q = rid(d); if (!f) return; var ds = depList(f.it); if (ds.indexOf(q) < 0) ds.push(q); f.it.meta.dependencies = ds.join(', '); });
   },
   removeDep: function (id, d) {
     return op('Dependency on ' + id, ANY, function (M) {
       var f = fItem(M, id), q = rid(d);
       if (!f) return;
       var ds = depList(f.it).filter(function (x) { return x !== q && x !== d; });
-      if (ds.length) f.it.meta.dep = ds.join(','); else delete f.it.meta.dep;
+      if (ds.length) f.it.meta.dependencies = ds.join(', '); else delete f.it.meta.dependencies;
     });
   },
   complete: function (id, date) {
@@ -1324,7 +1386,7 @@ var OPS = {
       var it = M.tasks.items[k], dup = M.done.items.filter(function (i) { return i.id === x; })[0];
       if (dup && dup.title !== it.title) throw clash(x, dup.title, it.title);
       M.tasks.items.splice(k, 1);
-      it.done = true; it.meta.done = date; delete it.meta.st;
+      it.done = true; it.meta['done-date'] = date; delete it.meta.status;
       M.done.items = M.done.items.filter(function (i) { return i.id !== x; });
       M.done.items.push(it);
     });
@@ -1336,8 +1398,8 @@ var OPS = {
       var it = M.done.items[k], dup = M.tasks.items.filter(function (i) { return i.id === x; })[0];
       if (dup && dup.title !== it.title) throw clash(x, dup.title, it.title);
       M.done.items.splice(k, 1);
-      it.done = false; delete it.meta.done;
-      if (st) it.meta.st = st;
+      it.done = false; delete it.meta['done-date'];
+      if (st) it.meta.status = st;
       M.tasks.items = M.tasks.items.filter(function (i) { return i.id !== x; });
       insertById(M.tasks.items, it);
     });
@@ -1419,11 +1481,11 @@ var OPS = {
     return op('Add ' + c.email + ' to ' + c.name, ['inbox', 'people'], function (M) {
       var p = M.people.people.filter(function (x) { return x.meta.id === rid(c.id); })[0];
       if (!p || !dropChange(M.inbox, c.line)) return;
-      var old = { em: p.meta.em || '', chk: p.meta.chk || '' };
+      var old = { em: p.meta.emails || '', chk: p.meta['checked-date'] || '' };
       if (!st.old) st.old = old;
       withEmail(p, c.email, true);
-      if (p.meta.em !== old.em) p.subs.push({ k: 'hist', v: date + ' | Email: ' + (old.em || '(none)') + ' → ' + p.meta.em });
-      p.meta.chk = date;
+      if (p.meta.emails !== old.em) addHistory(p, date, 'emails', old.em, p.meta.emails);
+      p.meta['checked-date'] = date;
     });
   },
   emailUnyes: function (c, st, date) {
@@ -1432,14 +1494,14 @@ var OPS = {
       var p = M.people.people.filter(function (x) { return x.meta.id === rid(c.id); })[0];
       if (!p || !st.old) return;
       withEmail(p, c.email, false);
-      p.subs = p.subs.filter(function (s) { return !(s.k === 'hist' && s.v.indexOf(date + ' | Email: ') === 0 && s.v.slice(-c.email.length) === c.email); });
-      if (st.old.chk) p.meta.chk = st.old.chk; else delete p.meta.chk;
+      p.subs = p.subs.filter(function (s) { var f = s.f || {}; return !(s.k === 'history' && f.changed === 'emails' && f['changed-date'] === date && s.v.slice(-c.email.length) === c.email); });
+      if (st.old.chk) p.meta['checked-date'] = st.old.chk; else delete p.meta['checked-date'];
     });
   },
   // Add, or Add as Priority person: a new Person record, who on the Items that named them only in their Description, and an introduction Task if asked
   personAdd: function (c, o, st) {
     var ap = OPS.addPerson(c.name, 'Other'), spec = null, task = {};
-    if (o.intro) spec = { title: 'Set up an introduction meeting with ' + c.name, meta: { ty: 'Task', who: c.name, urg: 'week', p: '2', asg: o.now }, description: '', newProjects: [], date: o.date };
+    if (o.intro) spec = { title: 'Set up an introduction meeting with ' + c.name, meta: { type: 'task', who: c.name, urgency: 'this week', priority: 'medium', 'received-datetime': o.now }, description: '', newProjects: [], date: o.date };
     var at = spec ? OPS.addTask(spec, task) : null, items = csv(c.fields.items);
     st.whos = []; st.rels = [];
     var keys = ['inbox', 'people', 'tasks', 'done', 'rels'].concat(o.priority ? ['settings'] : []);
@@ -1452,9 +1514,9 @@ var OPS = {
       if (!had) st.created = true;
       st.pid = p.meta.id;
       withEmail(p, c.email, true);
-      if (c.fields.company && !p.meta.co) p.meta.co = cleanName(c.fields.company);
+      if (c.fields.company && !p.meta.company) p.meta.company = cleanName(c.fields.company);
       if (c.fields.title && !p.meta.title) p.meta.title = cleanName(c.fields.title);
-      p.meta.chk = o.date;
+      p.meta['checked-date'] = o.date;
       items.forEach(function (x) { var f = fItem(M, x); if (f && f.k !== 'done' && !realWho(f.it)) { f.it.meta.who = p.name; if (st.whos.indexOf(f.it.id) < 0) st.whos.push(f.it.id); } });
       if (o.priority) M.settings.text = setPriority(M.settings.text, p.meta.id, true);
       if (!at) return;
@@ -1477,7 +1539,7 @@ var OPS = {
       } else if (p) withEmail(p, c.email, false);
       st.whos.forEach(function (x) { var f = fItem(M, x); if (f && p && f.it.meta.who === p.name) delete f.it.meta.who; });
       if (o.priority && pid) M.settings.text = setPriority(M.settings.text, pid, false);
-      if (st.task) { var t = rid(st.task); M.tasks.items = M.tasks.items.filter(function (i) { return !(i.id === t && getSub(i, 'src').some(function (b) { return /^Added /.test(b.v); })); }); }
+      if (st.task) { var t = rid(st.task); M.tasks.items = M.tasks.items.filter(function (i) { return !(i.id === t && getSub(i, 'origin').some(function (b) { return /^Added /.test(b.v); })); }); }
       var R = M.rels, n = R.lines.length, drop = st.rels.map(remapLine);
       R.lines = R.lines.filter(function (l) { return drop.indexOf(l) < 0; });
       if (R.lines.length !== n) relRefresh(R);
@@ -1518,9 +1580,9 @@ var OPS = {
         M[k].items.forEach(function (i) {
           var ds = depList(i);
           if (ds.indexOf(dx) < 0) return;
-          var was = i.meta.dep, now = union(ds.map(function (x) { return x === dx ? sx : x; }), []).filter(function (x) { return x !== i.id; });
-          if (now.length) i.meta.dep = now.join(','); else delete i.meta.dep;
-          st.deps.push([i.id, was, i.meta.dep || '']);
+          var was = i.meta.dependencies, now = union(ds.map(function (x) { return x === dx ? sx : x; }), []).filter(function (x) { return x !== i.id; });
+          if (now.length) i.meta.dependencies = now.join(', '); else delete i.meta.dependencies;
+          st.deps.push([i.id, was, i.meta.dependencies || '']);
         });
       });
       [['rels', 'rels'], ['asks', 'asks']].forEach(function (p) {
@@ -1533,7 +1595,7 @@ var OPS = {
         var T = M[p[0]];
         if (!T) return;
         var r = mergeRefs(p[1], String(T.text || '').split('\n'), dx, sx);
-        if (r.swaps.length) { T.text = r.lines.join('\n'); st.swaps[p[0]] = r.swaps; if (p[0] === 'asklog' && M.log) M.log = parseLog(T.text); }
+        if (r.swaps.length) { T.text = r.lines.join('\n'); st.swaps[p[0]] = r.swaps; if (p[0] === 'asklog' && M.log) M.log = logParse(T.text); }
       });
       // change Proposals in the Inbox naming did: a Relationship to sid itself goes
       changesOf(M.inbox.post).forEach(function (c) {
@@ -1553,7 +1615,7 @@ var OPS = {
       if (s) M[s.k].items.splice(M[s.k].items.indexOf(s.it), 1);
       insertById(M[st.s.k].items, was);
       if (!fItem(M, dup.id)) insertById(M[st.d.k].items, dup);
-      st.deps.forEach(function (x) { var f = fItem(M, x[0]); if (f && (f.it.meta.dep || '') === x[2]) { if (x[1]) f.it.meta.dep = x[1]; else delete f.it.meta.dep; } });
+      st.deps.forEach(function (x) { var f = fItem(M, x[0]); if (f && (f.it.meta.dependencies || '') === x[2]) { if (x[1]) f.it.meta.dependencies = x[1]; else delete f.it.meta.dependencies; } });
       function back(lines, swaps) {
         swaps.forEach(function (w) {
           var k = w[1] === null ? -1 : lines.indexOf(w[1]);
@@ -1565,7 +1627,7 @@ var OPS = {
       if (st.swaps.rels) { M.rels.lines = back(M.rels.lines, st.swaps.rels); relRefresh(M.rels); }
       if (st.swaps.asks) { M.asks.lines = back(M.asks.lines, st.swaps.asks); askRefresh(M.asks); }
       ['asklog', 'ignored'].forEach(function (k) { if (st.swaps[k] && M[k]) M[k].text = back(String(M[k].text || '').split('\n'), st.swaps[k]).join('\n'); });
-      if (st.swaps.asklog && M.log) M.log = parseLog(M.asklog.text);
+      if (st.swaps.asklog && M.log) M.log = logParse(M.asklog.text);
       st.post.forEach(function (w) { var p = M.inbox.post || [], k = w[1] === null ? -1 : p.indexOf(w[1]); if (k >= 0) p[k] = w[0][0]; else putChange(M.inbox, w[0]); });
     });
   },
@@ -1573,7 +1635,7 @@ var OPS = {
     var keys = spec.newProjects.length ? ['projects', 'tasks', 'inbox', 'done'] : ['tasks', 'inbox', 'done'];
     spec.prjWant = spec.prjWant || {};
     return op('Add task', keys, function (M) {
-      var prj = csv(spec.meta.prj).map(rid);
+      var prj = csv(spec.meta.projects).map(rid);
       spec.newProjects.forEach(function (name) { var pid = ensureProject(M.projects, name, spec.prjWant); if (prj.indexOf(pid) < 0) prj.push(pid); });
       var want = spec.want ? rid(spec.want) : null, f = want ? fItem(M, want) : null;
       if (f && f.it.title === spec.title) { if (out) out.id = want; return; }
@@ -1581,8 +1643,8 @@ var OPS = {
       if (want && !f && idNum(want) >= n) id = want;
       else { id = fmtId(n); if (want) noteAlias(want, id); else spec.want = id; }
       var meta = Object.assign({}, spec.meta);
-      if (prj.length) meta.prj = prj.join(','); else delete meta.prj;
-      var it = { id: id, done: false, title: spec.title, meta: meta, subs: [{ k: 'src', v: 'Added ' + spec.date }] };
+      if (prj.length) meta.projects = prj.join(', '); else delete meta.projects;
+      var it = { id: id, done: false, title: spec.title, meta: meta, subs: [{ k: 'origin', v: 'Added ' + spec.date }] };
       if (spec.description) setDesc(it, spec.description, ITEM_RANK);
       M.tasks.items.push(it);
       setNextId(M.tasks, Math.max(n, idNum(id) + 1));
@@ -1592,7 +1654,7 @@ var OPS = {
   removeAdded: function (id) {
     return op('Undo add', ['tasks'], function (M) {
       var x = rid(id);
-      M.tasks.items = M.tasks.items.filter(function (i) { return !(i.id === x && getSub(i, 'src').some(function (b) { return /^Added /.test(b.v); })); });
+      M.tasks.items = M.tasks.items.filter(function (i) { return !(i.id === x && getSub(i, 'origin').some(function (b) { return /^Added /.test(b.v); })); });
     });
   },
   addRel: function (line) {
@@ -1618,13 +1680,13 @@ var OPS = {
       var touched = false;
       Object.keys(patch).forEach(function (k) {
         var nv = patch[k] == null ? '' : String(patch[k]).replace(/[;{}]/g, ' ').trim();
-        if (k === 'grp') { p.grp = nv || 'Other'; return; }
+        if (k === 'group') { p.grp = nv || 'Other'; return; }
         var old = p.meta[k] || '';
         if (nv === old) return;
         if (nv === '') delete p.meta[k]; else p.meta[k] = nv;
-        if (PFIELDS.indexOf(k) >= 0) { touched = true; if (old && nv) p.subs.push({ k: 'hist', v: date + ' | ' + PLABEL[k] + ': ' + old + ' → ' + nv }); }
+        if (PFIELDS.indexOf(k) >= 0) { touched = true; if (old && nv) addHistory(p, date, k, old, nv); }
       });
-      if (touched && patch.chk === undefined) p.meta.chk = date;
+      if (touched && patch['checked-date'] === undefined) p.meta['checked-date'] = date;
     });
   },
   addPerson: function (name, grp) {
@@ -1702,7 +1764,7 @@ var OPS = {
       R.lines = R.lines.filter(function (ln) { var r = REL_RE.exec(ln); return !(r && (r[1] === x || r[3] === x)); });
       if (R.lines.length !== n) relRefresh(R);
       if (kind === 'PRJ') ANY.forEach(function (k) {
-        M[k].items.forEach(function (i) { var all = prjOf(i), p = all.filter(function (y) { return y !== x; }); if (p.length !== all.length) { if (p.length) i.meta.prj = p.join(','); else delete i.meta.prj; } });
+        M[k].items.forEach(function (i) { var all = prjOf(i), p = all.filter(function (y) { return y !== x; }); if (p.length !== all.length) { if (p.length) i.meta.projects = p.join(', '); else delete i.meta.projects; } });
       });
     });
   },
@@ -1992,18 +2054,18 @@ function subVals(x, k) { return getSub(x, k).map(function (b) { return b.v; }); 
 // the Description's first line, which list rows show, and the text search reads: the Description and the Comments
 function firstLine(x) { return descOf(x).split('\n').filter(function (l) { return l.trim(); })[0] || ''; }
 function wordsOf(x) { return [descOf(x)].concat(subVals(x, 'comment')).join(' '); }
-function srcOf(x) { return subVals(x, 'src'); }
+function srcOf(x) { return subVals(x, 'origin'); }
 function subsOf(x) { return getSub(x, 'sub'); }
 function parseLink(v) { var m = /\[(.*?)\]\((.*?)\)/.exec(String(v || '')); return m ? { label: m[1] || m[2], url: m[2], raw: v } : { label: String(v || ''), url: '', raw: v }; }
 function linksOf(x) { return getSub(x, 'link').map(function (b) { return parseLink(b.v); }); }
 function safeUrl(u) { u = String(u || '').trim(); return /^(https?:|mailto:|file:)/i.test(u) ? u : ''; }
 function allItems() { return S.m.tasks.items.concat(S.m.inbox.items, S.m.done.items); }
 function openList() { return S.m.tasks.items; }
-function isWaiting(i) { return i.meta.st === 'Waiting'; }
-function isNext(i) { return whereOf(i.id) === 'open' && !isWaiting(i) && i.meta.ty !== 'Meeting' && i.meta.ty !== 'FYI'; }
+function isWaiting(i) { return i.meta.status === 'waiting'; }
+function isNext(i) { return whereOf(i.id) === 'open' && !isWaiting(i) && i.meta.type !== 'meeting' && i.meta.type !== 'fyi'; }
 function nextList() { return openList().filter(isNext); }
 function inboxList() {
-  return S.m.inbox.items.slice().sort(function (a, b) { var x = a.meta.asg || '9999', y = b.meta.asg || '9999'; return x < y ? -1 : (x > y ? 1 : (a.id < b.id ? -1 : 1)); });
+  return S.m.inbox.items.slice().sort(function (a, b) { var x = receivedOf(a.meta) || '9999', y = receivedOf(b.meta) || '9999'; return x < y ? -1 : (x > y ? 1 : (a.id < b.id ? -1 : 1)); });
 }
 function openBlockers(i) { return depList(i).filter(function (d) { return whereOf(d) === 'open'; }); }
 function dependsOn(a, b, seen) {
@@ -2014,14 +2076,14 @@ function dependsOn(a, b, seen) {
   var t = item(a);
   return !!t && depList(t).some(function (x) { return dependsOn(x, b, seen); });
 }
-function age(i) { return isDay(i.meta.asg) ? Math.max(0, -dd(i.meta.asg)) : 0; }
+function age(i) { var r = receivedOf(i.meta); return isDay(r) ? Math.max(0, -dd(r)) : 0; }
 function listName(i) {
   var w = whereOf(i.id);
   if (w === 'inbox') return 'Inbox';
   if (w === 'done') return 'Done';
   if (isWaiting(i)) return 'Waiting for';
-  if (i.meta.ty === 'Meeting') return 'Upcoming';
-  if (i.meta.ty === 'FYI') return 'FYI';
+  if (i.meta.type === 'meeting') return 'Upcoming';
+  if (i.meta.type === 'fyi') return 'FYI';
   return 'Next actions';
 }
 function homeView(i) { return { Inbox: 'inbox', Done: 'done', 'Waiting for': 'waiting', Upcoming: 'upcoming', FYI: 'fyi', 'Next actions': 'next' }[listName(i)]; }
@@ -2048,13 +2110,13 @@ function short(name, n) {
 }
 function clip(t, n) { t = String(t || ''); if (t.length <= n) return t; var cut = t.lastIndexOf(' ', n); return t.slice(0, cut > n - 30 ? cut : n) + '…'; }
 function allTags() { var o = {}; allItems().forEach(function (i) { tagsOf(i).forEach(function (t) { o[t] = 1; }); }); return Object.keys(o).sort(function (a, b) { return a.localeCompare(b); }); }
-function whoLabel(i) { return isWaiting(i) ? 'Waiting on' : (i.meta.ty === 'Meeting' ? 'With' : 'Person'); }
+function whoLabel(i) { return isWaiting(i) ? 'Waiting on' : (i.meta.type === 'meeting' ? 'With' : 'Person'); }
 function realWho(i) { var w = i.meta.who || ''; return w === 'Unassigned' ? '' : w; }
 
-/* "When" is worked out from due; urg only matters when there is no due date. */
-var URGW = { today: ['Today, no date', 'warn', 1], week: ['This week', 'soft', 2], soon: ['Soon', 'soft', 3], later: ['Later', 'soft', 5], fyi: ['FYI', 'soft', 6] };
+/* "When" is worked out from the due date; urgency only matters when there is none. */
+var URGW = { today: ['Today, no date', 'warn', 1], 'this week': ['This week', 'soft', 2], soon: ['Soon', 'soft', 3], later: ['Later', 'soft', 5], fyi: ['FYI', 'soft', 6] };
 function when(i) {
-  var due = i.meta.due || '';
+  var due = dueOf(i.meta);
   if (isDay(due)) {
     var n = dd(due), t = timeOf(due), tail = t ? ' ' + t : '';
     if (n < 0) return { label: 'Overdue ' + (-n) + 'd', tone: 'danger', bucket: 0, key: due };
@@ -2062,33 +2124,34 @@ function when(i) {
     if (n === 1) return { label: 'Tomorrow' + tail, tone: '', bucket: 2, key: due };
     return { label: fmt(due) + tail, tone: '', bucket: n <= 7 ? 2 : (n <= 14 ? 3 : 4), key: due };
   }
-  var u = URGW[i.meta.urg] || URGW.later;
+  var u = URGW[i.meta.urgency] || URGW.later;
   return { label: u[0], tone: u[1], bucket: u[2], key: '9999-' + u[2] };
 }
 function urgFor(due) { return urgForDue(due, todayStr()); }
 function sortItems(list) {
   return list.slice().sort(function (a, b) {
     var wa = when(a), wb = when(b);
-    return (wa.bucket - wb.bucket) || (wa.key < wb.key ? -1 : (wa.key > wb.key ? 1 : 0)) || ((Number(a.meta.p) || 2) - (Number(b.meta.p) || 2)) || (a.id < b.id ? -1 : 1);
+    return (wa.bucket - wb.bucket) || (wa.key < wb.key ? -1 : (wa.key > wb.key ? 1 : 0)) || (prioRank(a.meta.priority) - prioRank(b.meta.priority)) || (a.id < b.id ? -1 : 1);
   });
 }
-function sortByDue(list) { return list.slice().sort(function (a, b) { return String(a.meta.due || '9999').localeCompare(String(b.meta.due || '9999')) || (a.id < b.id ? -1 : 1); }); }
+function sortByDue(list) { return list.slice().sort(function (a, b) { return String(dueOf(a.meta) || '9999').localeCompare(String(dueOf(b.meta) || '9999')) || (a.id < b.id ? -1 : 1); }); }
 function todayItems() {
   return openList().filter(function (i) {
-    return i.meta.ty !== 'FYI' && !isWaiting(i) && ((isDay(i.meta.due) && dd(i.meta.due) <= 0) || (!isDay(i.meta.due) && i.meta.urg === 'today'));
+    var due = dueOf(i.meta);
+    return i.meta.type !== 'fyi' && !isWaiting(i) && ((isDay(due) && dd(due) <= 0) || (!isDay(due) && i.meta.urgency === 'today'));
   });
 }
 
 /* ===================== people, projects and systems ===================== */
-function isExt(p) { return /^(y|yes|true|1)$/i.test(p.meta.ext || ''); }
+function isExt(p) { return p.meta.external === 'yes'; }
 function isMe(p) { return p.meta.id === USER_ID; }
 function gaps(p) {
-  if (p.meta.st === 'Left') return [];
-  var need = isExt(p) ? ['co', 'title'] : ['co', 'dept', 'title', 'mgr'];
+  if (p.meta.status === 'left') return [];
+  var need = isExt(p) ? ['company', 'title'] : ['company', 'department', 'title', 'manager'];
   return need.filter(function (k) { return !p.meta[k]; });
 }
-var GAP_LABEL = { co: 'organisation', dept: 'department', title: 'job title', mgr: 'manager' };
-function activePeople() { return S.m.people.people.filter(function (p) { return p.meta.st !== 'Left'; }); }
+var GAP_LABEL = { company: 'organisation', department: 'department', title: 'job title', manager: 'manager' };
+function activePeople() { return S.m.people.people.filter(function (p) { return p.meta.status !== 'left'; }); }
 function entsOf(kind) { return S.m[EDEF[kind].key].ents; }
 function entDesc(id, seen) {
   seen = seen || {};
@@ -2128,7 +2191,7 @@ function personOpenCount(p) {
   if (p.meta.id) relsOf(p.meta.id).forEach(function (r) { if (whereOf(r.other) === 'open') ids[r.other] = 1; });
   return Object.keys(ids).length;
 }
-var ST_TONE = { Active: 'ok', Live: 'ok', 'On hold': 'warn', Delayed: 'warn', 'In build': 'info', Done: '', Retired: '' };
+var ST_TONE = { active: 'ok', live: 'ok', 'on hold': 'warn', delayed: 'warn', 'in build': 'info', done: '', retired: '' };
 var REL_WORDS = { concerns: ['Concerns', 'Concerned by'], involves: ['Involves', 'Involved in'], owns: ['Owns', 'Owned by'], uses: ['Uses', 'Used by'] };
 function relWord(r) { if (r.type === 'related') return 'Related'; var m = REL_WORDS[r.type]; return m ? m[r.from ? 0 : 1] : r.type; }
 function unknownWhos() {
@@ -2150,9 +2213,9 @@ function lastRefresh() {
 function lastClaudeRun() { var l = S.m.log; return l.length ? fmtDT(l[l.length - 1].at) : ''; }
 var PROMPTS = {
   waiting: ['Draft a chaser', 'Summarise where this stands'],
-  Meeting: ['Prepare an agenda', 'Draft a pre-read email'],
-  Document: ['Summarise it for me', 'List questions to raise'],
-  Task: ['Draft a reply', 'Split into sub-tasks', 'Suggest next steps'],
+  meeting: ['Prepare an agenda', 'Draft a pre-read email'],
+  document: ['Summarise it for me', 'List questions to raise'],
+  task: ['Draft a reply', 'Split into sub-tasks', 'Suggest next steps'],
   P: ['Update their details', 'Note a change of role'],
   PRJ: ['Summarise where this project stands', 'List what is blocking it'],
   SYS: ['Update the status', 'Add a note']
@@ -2163,7 +2226,7 @@ function promptsFor(id) {
   var i = item(id);
   if (!i) return [];
   if (isWaiting(i)) return PROMPTS.waiting;
-  return PROMPTS[i.meta.ty] || PROMPTS.Task;
+  return PROMPTS[i.meta.type] || PROMPTS.task;
 }
 
 /* ===================== related-item suggestions for triage =====================
@@ -2208,7 +2271,7 @@ function cleanTitle(t) { return String(t || '').replace(/\s*[\r\n\u2028\u2029\u0
 function cleanName(t) { return String(t || '').replace(/[{};\r\n\u2028\u2029\u0085]/g, ' ').replace(/^\s*-\s+/, '').replace(/\s+/g, ' ').trim(); }
 function parseQuick(text, typeOverride) {
   var toks = String(text).trim().split(/\s+/).filter(Boolean);
-  var out = { words: [], who: '', whoNew: false, prj: [], prjNew: [], tags: [], p: '', date: '', time: '', ty: 'Task' };
+  var out = { words: [], who: '', whoNew: false, prj: [], prjNew: [], tags: [], p: '', date: '', time: '', ty: 'task' };
   var dows = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   var mons = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
   var tags = allTags(), active = activePeople(), today = todayStr();
@@ -2236,8 +2299,8 @@ function parseQuick(text, typeOverride) {
       if (ct && out.tags.indexOf(ct) < 0) out.tags.push(ct);
       continue;
     }
-    if (/^!(high|h|1|urgent)$/i.test(t)) { out.p = '1'; continue; }
-    if (/^!(low|l|3)$/i.test(t)) { out.p = '3'; continue; }
+    if (/^!(high|h|1|urgent)$/i.test(t)) { out.p = 'high'; continue; }
+    if (/^!(low|l|3)$/i.test(t)) { out.p = 'low'; continue; }
     if (low === 'today') { out.date = today; continue; }
     if (low === 'tomorrow' || low === 'tmrw') { out.date = addDays(today, 1); continue; }
     if (/^(mon|tue|wed|thu|fri|sat|sun)(day|sday|nesday|rsday|urday)?$/.test(low)) { out.date = nextDow(dows.indexOf(low.slice(0, 3))); continue; }
@@ -2261,14 +2324,14 @@ function parseQuick(text, typeOverride) {
   }
   if (out.time && !out.date) out.date = today;
   out.title = cleanTitle(out.words.join(' '));
-  var ty = 'Task';
-  if (/^read\b/i.test(out.title)) ty = 'Document';
-  if (out.time && /\b(meeting|call|1:1|review|catch-up|sync|workshop|inspection|interview|demo)\b/i.test(out.title)) ty = 'Meeting';
+  var ty = 'task';
+  if (/^read\b/i.test(out.title)) ty = 'document';
+  if (out.time && /\b(meeting|call|1:1|review|catch-up|sync|workshop|inspection|interview|demo)\b/i.test(out.title)) ty = 'meeting';
   out.ty = typeOverride || ty;
   return out;
 }
-var TYPE_WORD = { Task: 'Task', Meeting: 'Meeting', Process: 'Process', Document: 'Read or review', FYI: 'FYI' };
-var QA_TYPES = ['Task', 'Meeting', 'Document', 'Process', 'FYI'];
+var TYPE_WORD = Object.assign({}, TYPE_NAME, { document: 'Read or review' });
+var QA_TYPES = ['task', 'meeting', 'document', 'process', 'fyi'];
 
 /* ===================== counts, review ===================== */
 function counts() {
@@ -2278,9 +2341,9 @@ function counts() {
     inbox: inboxCount(),
     next: nextList().length,
     waiting: open.filter(isWaiting).length,
-    upcoming: open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) > 0 && i.meta.ty !== 'FYI'; }).length,
-    fyi: open.filter(function (i) { return i.meta.ty === 'FYI'; }).length,
-    projects: entsOf('PRJ').filter(function (p) { return (p.meta.st || 'Active') === 'Active'; }).length,
+    upcoming: open.filter(function (i) { var d = dueOf(i.meta); return isDay(d) && dd(d) > 0 && i.meta.type !== 'fyi'; }).length,
+    fyi: open.filter(function (i) { return i.meta.type === 'fyi'; }).length,
+    projects: entsOf('PRJ').filter(function (p) { return (p.meta.status || 'active') === 'active'; }).length,
     people: activePeople().length,
     systems: entsOf('SYS').length,
     review: reviewSteps().filter(function (x) { return x.attention && !x.done; }).length,
@@ -2296,13 +2359,13 @@ function reviewState() {
 function reviewSteps() {
   var rs = reviewState().done, open = openList();
   var inbox = S.m.inbox.items.length;
-  var overdue = open.filter(function (i) { return isOverdue(i, todayStr()) && i.meta.ty !== 'FYI'; }).length;
+  var overdue = open.filter(function (i) { return isOverdue(i, todayStr()) && i.meta.type !== 'fyi'; }).length;
   var dueToday = todayItems().length;
   var waiting = open.filter(isWaiting), long = waiting.filter(function (i) { return age(i) >= 14; }).length;
-  var active = entsOf('PRJ').filter(function (p) { return (p.meta.st || 'Active') === 'Active'; });
+  var active = entsOf('PRJ').filter(function (p) { return (p.meta.status || 'active') === 'active'; });
   var stuck = active.filter(function (p) { var ids = entDesc(p.meta.id); return !open.some(function (i) { return isNext(i) && prjOf(i).some(function (x) { return ids.indexOf(x) >= 0; }); }); }).length;
-  var undated = nextList().filter(function (i) { return !isDay(i.meta.due) && i.meta.urg !== 'later'; }).length;
-  var fyi = open.filter(function (i) { return i.meta.ty === 'FYI'; }).length;
+  var undated = nextList().filter(function (i) { return !isDay(dueOf(i.meta)) && i.meta.urgency !== 'later'; }).length;
+  var fyi = open.filter(function (i) { return i.meta.type === 'fyi'; }).length;
   var gp = activePeople().filter(function (p) { return gaps(p).length; }).length;
   var asks = S.m.asks.notes.length;
   var defs = [
@@ -2340,7 +2403,7 @@ function search(qs) {
       var lab = has(i.id + ' ' + i.title);
       var bits = [listName(i)];
       if (src[0] === 'open') bits.push(when(i).label);
-      if (src[0] === 'done' && i.meta.done) bits.push('done ' + fmt(i.meta.done));
+      if (src[0] === 'done' && i.meta['done-date']) bits.push('done ' + fmt(i.meta['done-date']));
       if (where) bits.push('matched in ' + where);
       tasks.push({ label: i.title, sub: bits.join(' · '), id: i.id, act: 'open', arg: i.id, lab: lab, rank: (src[0] === 'open' ? 0 : src[0] === 'inbox' ? 1 : 2) + (lab ? 0 : 3) });
     });
@@ -2348,11 +2411,11 @@ function search(qs) {
   tasks.sort(function (a, b) { return a.rank - b.rank || (a.id < b.id ? -1 : 1); });
   if (tasks.length) groups.push({ title: 'Tasks', items: tasks.slice(0, 8).concat(tasks.length > 8 ? [{ label: 'Show all ' + tasks.length + ' matching items', sub: 'On All items, with inbox and done', id: '', act: 'all', arg: String(qs).trim() }] : []), more: tasks.length - 8, lab: tasks[0].lab });
   var people = S.m.people.people.filter(function (p) { return has(p.name + ' ' + Object.keys(p.meta).map(function (k) { return p.meta[k]; }).join(' ') + ' ' + p.grp + ' ' + wordsOf(p)); })
-    .map(function (p) { return { label: p.name, sub: [p.meta.title, p.meta.co, p.meta.st === 'Left' ? 'left' : ''].filter(Boolean).join(' · ') || 'Person', id: p.meta.id || '', act: 'person', arg: p.meta.id || '', lab: has(p.name) }; })
+    .map(function (p) { return { label: p.name, sub: [p.meta.title, p.meta.company, p.meta.status === 'left' ? 'left' : ''].filter(Boolean).join(' · ') || 'Person', id: p.meta.id || '', act: 'person', arg: p.meta.id || '', lab: has(p.name) }; })
     .sort(function (a, b) { return (b.lab - a.lab) || a.label.localeCompare(b.label); });
   if (people.length) groups.push({ title: 'People', items: people.slice(0, 5), more: people.length - 5, lab: people[0].lab });
   var ents = entsOf('PRJ').concat(entsOf('SYS')).filter(function (e) { return e.meta.id && has(e.meta.id + ' ' + e.name + ' ' + wordsOf(e) + ' ' + linksOf(e).map(function (l) { return l.label; }).join(' ')); })
-    .map(function (e) { return { label: e.name, sub: [KIND_WORD[kindOf(e.meta.id)], e.meta.type !== KIND_WORD[kindOf(e.meta.id)] ? e.meta.type : '', e.meta.st].filter(Boolean).join(' · '), id: e.meta.id, act: 'ent', arg: e.meta.id, lab: has(e.meta.id + ' ' + e.name) }; })
+    .map(function (e) { return { label: e.name, sub: [KIND_WORD[kindOf(e.meta.id)], e.meta.type !== KIND_WORD[kindOf(e.meta.id)].toLowerCase() ? cap(e.meta.type) : '', cap(e.meta.status)].filter(Boolean).join(' · '), id: e.meta.id, act: 'ent', arg: e.meta.id, lab: has(e.meta.id + ' ' + e.name) }; })
     .sort(function (a, b) { return (b.lab - a.lab); });
   if (ents.length) groups.push({ title: 'Projects and systems', items: ents.slice(0, 5), more: ents.length - 5, lab: ents[0].lab });
   var c = cmds.filter(function (x) { return has(x.label); });
@@ -2420,31 +2483,31 @@ function linkA(l) {
 /* ===================== rows and sections ===================== */
 function vRow(i, o) {
   o = o || {};
-  var w = whereOf(i.id), inbox = w === 'inbox', done = w === 'done', waiting = isWaiting(i), fyi = i.meta.ty === 'FYI' && !done && !inbox;
+  var w = whereOf(i.id), inbox = w === 'inbox', done = w === 'done', waiting = isWaiting(i), fyi = i.meta.type === 'fyi' && !done && !inbox, due = dueOf(i.meta);
   var meta = [];
   if (!o.hideProject) { var ps = prjOf(i).map(function (p) { var e = entById(p); return e ? short(e.name) : p; }); if (ps.length) meta.push(ps.join(', ')); }
   var who = realWho(i);
-  if (!o.hidePerson && who) meta.push((waiting ? 'waiting on ' : (i.meta.ty === 'Meeting' ? 'with ' : '')) + who);
+  if (!o.hidePerson && who) meta.push((waiting ? 'waiting on ' : (i.meta.type === 'meeting' ? 'with ' : '')) + who);
   var subs = subsOf(i);
   if (subs.length) meta.push(subs.filter(function (x) { return x.x; }).length + ' of ' + subs.length + ' sub-tasks');
   if (inbox) meta.push('from ' + srcKind(i));
-  if (done && i.meta.done) meta.push('done ' + fmt(i.meta.done));
+  if (done && i.meta['done-date']) meta.push('done ' + fmt(i.meta['done-date']));
   var badges = '';
   if (S.fresh.has(i.id)) badges += badge('Updated', 'info');
   if (!done) {
     var bl = openBlockers(i);
     if (bl.length) badges += badge('Depends on ' + bl.join(', '), 'danger');
     if (waiting && !inbox) { var a = age(i); badges += badge('Waiting ' + plural(a, 'day'), a >= 14 ? 'warn' : 'info'); }
-    if (i.meta.st === 'In progress') badges += badge('In progress');
-    if (i.meta.p === '1') badges += badge('High', 'flag');
+    if (i.meta.status === 'in progress') badges += badge(STATUS_LABEL['in progress']);
+    if (i.meta.priority === 'high') badges += badge(PRIORITY_LABEL.high, 'flag');
     var n = asksFor(i.id).length;
     if (n) badges += badge(n + ' for agent', 'claude');
     if (draftsFor(i.id).length) badges += badge('Draft ready', 'claude');
   }
   var wh = when(i), whenLabel = wh.label;
-  if (waiting && isDay(i.meta.due)) whenLabel = 'Promised ' + fmt(i.meta.due);
-  var showWhen = !done && !o.hideWhen && !(waiting && !isDay(i.meta.due)) && !(fyi && !isDay(i.meta.due));
-  var time = o.timeFirst ? timeOf(i.meta.due) : '';
+  if (waiting && isDay(due)) whenLabel = 'Promised ' + fmt(due);
+  var showWhen = !done && !o.hideWhen && !(waiting && !isDay(due)) && !(fyi && !isDay(due));
+  var time = o.timeFirst ? timeOf(due) : '';
   var title = o.waiting ? waitTitle(i) : i.title;
   var lead = (inbox || fyi) ? '<span class="pip' + (fyi ? ' grey' : '') + '" aria-hidden="true"></span>'
     : '<input type="checkbox" data-ch="done" data-id="' + i.id + '"' + (done ? ' checked' : '') + ' aria-label="' + esc((done ? 'Reopen: ' : 'Mark done: ') + i.title) + '">';
@@ -2465,9 +2528,9 @@ function vRow(i, o) {
 }
 var REASONS = ['Not actionable', 'Already handled', 'Duplicate', 'Not mine'];
 // Done: on an FYI it reads Acknowledge; on a Proposal it accepts and marks done in one step
-function doneBtn(i, cls) { return bt(i.meta.ty === 'FYI' ? 'Acknowledge' : 'Done', 'done-now', { id: i.id, cls: cls, attrs: whereOf(i.id) === 'inbox' ? ' title="Accept and mark done"' : '' }); }
+function doneBtn(i, cls) { return bt(i.meta.type === 'fyi' ? 'Acknowledge' : 'Done', 'done-now', { id: i.id, cls: cls, attrs: whereOf(i.id) === 'inbox' ? ' title="Accept and mark done"' : '' }); }
 var SNOOZE = [[1, '+1 day'], [3, '+3 days'], [7, '+1 week'], [28, '+4 weeks']];
-function canSnooze(i) { return whereOf(i.id) === 'open' && isDay(i.meta.due) && i.meta.ty !== 'Meeting'; }
+function canSnooze(i) { return whereOf(i.id) === 'open' && isDay(dueOf(i.meta)) && i.meta.type !== 'meeting'; }
 function vSnooze(id) { return '<div class="seg" data-k="seg-snooze" role="group" aria-label="Snooze ' + id + ' from today">' + SNOOZE.map(function (x) { return '<button type="button" data-act="snooze" data-id="' + id + '" data-v="' + x[0] + '">' + x[1] + '</button>'; }).join('') + '</div>'; }
 function vReasons(id) {
   if (S.dupFor === id) return '<div class="box" data-k="reasons-dup" style="margin-top:8px"><label class="h3" for="f-dupq" style="margin:0">Which item does ' + id + ' duplicate?</label>' +
@@ -2496,12 +2559,12 @@ function rowsOf(list, o) { return list.map(function (i) { return vRow(i, o); });
 
 /* ===================== focus lists ===================== */
 function viewToday() {
-  var open = openList().filter(function (i) { return i.meta.ty !== 'FYI' && !isWaiting(i); });
+  var open = openList().filter(function (i) { return i.meta.type !== 'fyi' && !isWaiting(i); });
   var overdue = sortItems(open.filter(function (i) { return isOverdue(i, todayStr()); }));
-  var dueToday = sortByDue(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) === 0; }));
-  var planned = sortItems(open.filter(function (i) { return !isDay(i.meta.due) && i.meta.urg === 'today'; }));
+  var dueToday = sortByDue(open.filter(function (i) { var d = dueOf(i.meta); return isDay(d) && dd(d) === 0; }));
+  var planned = sortItems(open.filter(function (i) { return !isDay(dueOf(i.meta)) && i.meta.urgency === 'today'; }));
   var horizon = addWorkdays(todayStr(), 3);
-  var coming = sortByDue(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) > 0 && i.meta.due.slice(0, 10) <= horizon; }));
+  var coming = sortByDue(open.filter(function (i) { var d = dueOf(i.meta); return isDay(d) && dd(d) > 0 && d.slice(0, 10) <= horizon; }));
   var b = '';
   if (overdue.length) b += vSec('overdue', 'Overdue', rowsOf(overdue, { snooze: true }));
   b += vSec('duetoday', 'Due today', rowsOf(dueToday, { timeFirst: true }), { empty: 'Nothing is due today.' });
@@ -2514,9 +2577,9 @@ function viewToday() {
 }
 function vCards() {
   var open = openList(), now = new Date(), hm = pad2(now.getHours()) + ':' + pad2(now.getMinutes());
-  var meetings = open.filter(function (i) { return i.meta.ty === 'Meeting' && isDay(i.meta.due); });
-  var meetToday = meetings.filter(function (i) { return dd(i.meta.due) === 0; });
-  var nextM = sortByDue(meetings.filter(function (i) { var n = dd(i.meta.due); return n > 0 || (n === 0 && (timeOf(i.meta.due) || '23:59') >= hm); }))[0];
+  var meetings = open.filter(function (i) { return i.meta.type === 'meeting' && isDay(dueOf(i.meta)); });
+  var meetToday = meetings.filter(function (i) { return dd(dueOf(i.meta)) === 0; });
+  var nextM = sortByDue(meetings.filter(function (i) { var d = dueOf(i.meta), n = dd(d); return n > 0 || (n === 0 && (timeOf(d) || '23:59') >= hm); }))[0];
   var inbox = inboxCount();
   var waiting = open.filter(isWaiting).sort(function (a, b) { return age(b) - age(a); });
   var asks = S.m.asks.notes.length;
@@ -2547,8 +2610,8 @@ function vQuick() {
     q.prj.forEach(function (p) { var e = entById(p); chips += badge(e ? e.name : p, 'info'); });
     q.prjNew.forEach(function (x) { chips += badge('New project: ' + x, 'warn'); });
     q.tags.forEach(function (x) { chips += badge('#' + x); });
-    if (q.p === '1') chips += badge('High', 'flag');
-    if (q.p === '3') chips += badge('Low', 'soft');
+    if (q.p === 'high') chips += badge(PRIORITY_LABEL.high, 'flag');
+    if (q.p === 'low') chips += badge(PRIORITY_LABEL.low, 'soft');
     h += '<div class="qa-prev" id="qa-help"><span class="hint">Will add</span><button type="button" class="qa-type" data-act="qa-type" title="Change the type" aria-label="Type: ' + esc(TYPE_WORD[q.ty]) + '. Click to change">' + esc(TYPE_WORD[q.ty]) + ic('chev', 's') + '</button>' + chips + '</div>' +
       '<div class="qa-title">Title: <strong>' + esc(q.title) + '</strong> <span class="hint">· press Enter to add</span></div>';
   } else {
@@ -2566,7 +2629,7 @@ function inboxCount() { return S.m.inbox.items.length + changeCards().length + a
 function ackItems() { return allItems().concat(S.m.people.people, entsOf('PRJ'), entsOf('SYS')).filter(function (x) { return commentsOf(x).some(toAck); }); }
 function recId(x) { return x.id || x.meta.id; }
 // The calendar is the record for a Meeting it mirrors, so a change to one is made there, not undone here.
-function fromCalendar(x, c) { return !!x.id && x.meta.ty === 'Meeting' && c.f.author === 'calendar'; }
+function fromCalendar(x, c) { return !!x.id && x.meta.type === 'meeting' && c.f.author === 'calendar'; }
 // the latest unacknowledged change to each field, which alone shows Undo -> [{field, value, which}]
 function undosOf(x) {
   var seen = {};
@@ -2608,8 +2671,8 @@ function vSeen(c) {
 // one end of a Relationship: its type, ID, title or name, and Description; each opens its page
 function vEnd(id) {
   var k = kindOf(id), label = labelOf(id), kind = KIND_WORD[k] || k, desc = '', sub = '';
-  if (k === 'T') { var t = item(id); if (t) { kind = t.meta.ty || 'Task'; desc = firstLine(t); if (whereOf(id) === 'done') sub = 'done'; else if (whereOf(id) === 'inbox') sub = 'in the inbox'; } }
-  else if (k === 'P') { var p = personById(id); if (p) { sub = [p.meta.title, p.meta.co].filter(Boolean).join(', '); desc = firstLine(p); } }
+  if (k === 'T') { var t = item(id); if (t) { kind = TYPE_NAME[t.meta.type] || TYPE_NAME.task; desc = firstLine(t); if (whereOf(id) === 'done') sub = 'done'; else if (whereOf(id) === 'inbox') sub = 'in the inbox'; } }
+  else if (k === 'P') { var p = personById(id); if (p) { sub = [p.meta.title, p.meta.company].filter(Boolean).join(', '); desc = firstLine(p); } }
   else { var e = entById(id); if (e) desc = firstLine(e); }
   return '<div class="end" data-k="end-' + id + '"><div class="k">' + esc(kind) + (sub ? ' · ' + esc(sub) : '') + ' <span class="id">' + id + '</span></div>' +
     (label === null ? '<div class="hint">Not found in your files.</div>' : '<button type="button" class="t" data-act="open" data-id="' + id + '">' + esc(label) + '</button>') +
@@ -2631,13 +2694,13 @@ function vChange(c) {
   } else if (c.type === 'priority') {
     var pp = personById(c.id);
     body = '<div class="q">Make ' + (pp ? '<button type="button" class="t inl" data-act="open" data-id="' + c.id + '">' + esc(pp.name) + '</button>' : esc(c.name)) + ' a Priority person?</div>' +
-      '<div class="meta">' + esc(pp ? [pp.meta.title, pp.meta.co].filter(Boolean).join(', ') : c.id + ' is not in People') + '</div>' +
+      '<div class="meta">' + esc(pp ? [pp.meta.title, pp.meta.company].filter(Boolean).join(', ') : c.id + ' is not in People') + '</div>' +
       '<div class="meta">' + esc(vSeen(c)) + '</div>' + vWhy(c);
     acts = (pp ? bt('Yes', 'prio-yes', { v: c.line, cls: 'primary sm' }) : '') + bt('No', 'chg-no', v);
   } else {
     var p = personById(c.id);
     body = '<div class="q">New email for ' + (p ? '<button type="button" class="t inl" data-act="open" data-id="' + c.id + '">' + esc(p.name) + '</button>' : esc(c.name)) + '</div>' +
-      '<div class="meta">' + esc([c.email, p ? [p.meta.title, p.meta.co].filter(Boolean).join(', ') : c.id + ' is not in People'].filter(Boolean).join(' · ')) + '</div>' + vWhy(c);
+      '<div class="meta">' + esc([c.email, p ? [p.meta.title, p.meta.company].filter(Boolean).join(', ') : c.id + ' is not in People'].filter(Boolean).join(' · ')) + '</div>' + vWhy(c);
     acts = (p ? bt('Yes', 'email-yes', { v: c.line, cls: 'primary sm' }) : '') + bt('No', 'chg-no', v);
   }
   return '<div class="row chg" data-k="c-' + esc(key) + '"><div class="lead"><span class="pip" aria-hidden="true"></span></div><div class="body">' + body + '</div><div class="right">' + acts + '</div></div>';
@@ -2675,11 +2738,11 @@ function viewNext() {
     var none = sortItems(ready.filter(function (i) { return !prjOf(i).some(function (p) { return entById(p); }); }));
     if (none.length) b += vSec('noprj', 'Not in a project', rowsOf(none));
   } else if (S.group === 'kind') {
-    [['Task', 'Do'], ['Document', 'Read or review'], ['Process', 'Run a process']].forEach(function (k) {
-      var rows = sortItems(ready.filter(function (i) { return (i.meta.ty || 'Task') === k[0]; }));
+    [['task', 'Do'], ['document', 'Read or review'], ['process', 'Run a process']].forEach(function (k) {
+      var rows = sortItems(ready.filter(function (i) { return (i.meta.type || 'task') === k[0]; }));
       if (rows.length) b += vSec('k-' + k[0], k[1], rowsOf(rows));
     });
-    var other = sortItems(ready.filter(function (i) { return ['Task', 'Document', 'Process'].indexOf(i.meta.ty || 'Task') < 0; }));
+    var other = sortItems(ready.filter(function (i) { return ['task', 'document', 'process'].indexOf(i.meta.type || 'task') < 0; }));
     if (other.length) b += vSec('k-other', 'Other', rowsOf(other));
   } else {
     b += vSec('all', 'All actions', rowsOf(sortItems(ready)), { empty: 'Nothing to do. Enjoy it.' });
@@ -2697,7 +2760,7 @@ function viewWaiting() {
   var groups = Object.keys(by).map(function (w) { return { w: w, items: by[w].slice().sort(function (a, b) { return age(b) - age(a); }), max: Math.max.apply(null, by[w].map(age)) }; }).sort(function (a, b) { return b.max - a.max || a.w.localeCompare(b.w); });
   var b = groups.map(function (g) {
     var p = personByName(g.w);
-    var sub = p ? [p.meta.title, p.meta.co, isExt(p) ? 'external' : ''].filter(Boolean).join(' · ') : '';
+    var sub = p ? [p.meta.title, p.meta.company, isExt(p) ? 'external' : ''].filter(Boolean).join(' · ') : '';
     return vSec('w-' + g.w, g.w, rowsOf(g.items, { waiting: true, hidePerson: true }), { count: '', sub: sub, link: p && p.meta.id ? lk('Open person', 'person', { id: p.meta.id }) : '' });
   }).join('');
   var inb = S.m.inbox.items.filter(isWaiting);
@@ -2707,24 +2770,24 @@ function viewWaiting() {
   return { title: 'Waiting for', sub: plural(list.length, 'request') + ' open' + (list.length ? ' · oldest ' + plural(oldest, 'day') : ''), body: '<div class="list">' + b + '</div>' };
 }
 function viewUpcoming() {
-  var list = openList().filter(function (i) { return isDay(i.meta.due) && i.meta.ty !== 'FYI'; });
+  var list = openList().filter(function (i) { return isDay(dueOf(i.meta)) && i.meta.type !== 'fyi'; });
   var overdue = sortByDue(list.filter(function (i) { return isOverdue(i, todayStr()); }));
   var days = {}, order = [];
-  sortByDue(list.filter(function (i) { return dd(i.meta.due) >= 0; })).forEach(function (i) { var k = i.meta.due.slice(0, 10); if (!days[k]) { days[k] = []; order.push(k); } days[k].push(i); });
+  sortByDue(list.filter(function (i) { return dd(dueOf(i.meta)) >= 0; })).forEach(function (i) { var k = i.meta['due-date']; if (!days[k]) { days[k] = []; order.push(k); } days[k].push(i); });
   var b = '';
   if (overdue.length) b += vSec('u-overdue', 'Overdue', rowsOf(overdue, { snooze: true }));
   order.forEach(function (k) {
     var n = dd(k), t = (n === 0 ? 'Today, ' : (n === 1 ? 'Tomorrow, ' : '')) + fmtLong(k);
     b += vSec('u-' + k, t, days[k].map(function (i) { return vRow(i, { timeFirst: true, hideWhen: true, waiting: isWaiting(i) }); }), { count: '' });
   });
-  var undated = nextList().filter(function (i) { return !isDay(i.meta.due); }).length;
+  var undated = nextList().filter(function (i) { return !isDay(dueOf(i.meta)); }).length;
   if (undated) b += vSec('u-nodate', 'No date', [], { count: '', hint: plural(undated, 'action') + ' with no due date', link: lk('Open Next actions', 'go', { v: 'next' }) });
   if (!b) b = vSec('u-none', 'Nothing dated', [], { count: '', empty: 'Nothing has a due date yet.' });
-  var future = list.filter(function (i) { return dd(i.meta.due) >= 0; }).length;
+  var future = list.filter(function (i) { return dd(dueOf(i.meta)) >= 0; }).length;
   return { title: 'Upcoming', sub: plural(future, 'dated item') + ' and meetings, by day', body: '<div class="list">' + b + '</div>' };
 }
 function viewFyi() {
-  var l = sortItems(openList().filter(function (i) { return i.meta.ty === 'FYI'; }));
+  var l = sortItems(openList().filter(function (i) { return i.meta.type === 'fyi'; }));
   return { title: 'FYI', sub: plural(l.length, 'thing') + ' to know. Acknowledge them to file them away.', body: '<div class="list">' + vSec('fyi', 'To read and file', rowsOf(l), { empty: 'Nothing to file.' }) + '</div>' };
 }
 function prjName(id) { return entById(id) ? entPath(id) : id; }
@@ -2756,10 +2819,10 @@ function viewAll() {
   return { title: 'All items', sub: sub, tools: tools, qa: true, body: bar + '<div class="list">' + b + '</div>' };
 }
 function viewDone() {
-  var list = S.m.done.items.slice().sort(function (a, b) { return String(b.meta.done || '').localeCompare(String(a.meta.done || '')) || (a.id < b.id ? 1 : -1); });
+  var list = S.m.done.items.slice().sort(function (a, b) { return String(b.meta['done-date'] || '').localeCompare(String(a.meta['done-date'] || '')) || (a.id < b.id ? 1 : -1); });
   var mon = mondayOf(todayStr()), last = addDays(mon, -7), groups = [], idx = {};
   list.slice(0, S.doneLimit).forEach(function (i) {
-    var d = i.meta.done || '', k;
+    var d = i.meta['done-date'] || '', k;
     if (!isDay(d)) k = 'Undated';
     else if (d >= mon) k = 'This week';
     else if (d >= last) k = 'Last week';
@@ -2788,14 +2851,14 @@ function viewProject(id) {
   var e = entById(id);
   if (!e) return missingEntity('Projects', 'projects');
   var all = prjItems(id), open = all.filter(function (i) { return whereOf(i.id) === 'open'; });
-  var dated = sortByDue(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) >= 0; }));
-  var meeting = dated.filter(function (i) { return i.meta.ty === 'Meeting'; })[0];
+  var dated = sortByDue(open.filter(function (i) { var d = dueOf(i.meta); return isDay(d) && dd(d) >= 0; }));
+  var meeting = dated.filter(function (i) { return i.meta.type === 'meeting'; })[0];
   var people = [];
   all.filter(function (i) { return whereOf(i.id) !== 'done'; }).forEach(function (i) { var w = realWho(i); if (w && people.indexOf(w) < 0) people.push(w); });
   var uses = relsOf(id).filter(function (r) { return kindOf(r.other) === 'SYS'; }).map(function (r) { return r.other; });
   var hasNext = open.some(isNext), blocked = open.filter(function (i) { return openBlockers(i).length; }).length;
-  var st = e.meta.st || 'Active';
-  var pills = badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + (hasNext ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) + (blocked ? badge(blocked + ' waiting on a dependency', 'danger') : '') + '<span class="sp">' + copyId(id) + '</span>';
+  var st = e.meta.status || 'active';
+  var pills = badge(cap(st), ST_TONE[st]) + badge(cap(e.meta.type || 'project')) + (hasNext ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) + (blocked ? badge(blocked + ' waiting on a dependency', 'danger') : '') + '<span class="sp">' + copyId(id) + '</span>';
   var parent = e.meta.parent ? entById(e.meta.parent) : null, kids = kidsOf(id);
   var facts = fact('Next date', [dated[0] ? fv(when(dated[0]).label + ', ' + dated[0].title, 'open', dated[0].id) : fv('Nothing dated')]) +
     fact('Key meeting', [meeting ? fv(when(meeting).label + ', ' + meeting.title, 'open', meeting.id) : fv('None scheduled')]) +
@@ -2810,15 +2873,15 @@ function viewProject(id) {
   var b = vSec('pn', 'Next actions', row(sortItems(open.filter(isNext))), { empty: 'No next action. This project is stuck until you add one.' });
   var w = open.filter(isWaiting);
   if (w.length) b += vSec('pw', 'Waiting for', row(w, { waiting: true }));
-  var m = sortByDue(open.filter(function (i) { return i.meta.ty === 'Meeting' && !isWaiting(i); }));
+  var m = sortByDue(open.filter(function (i) { return i.meta.type === 'meeting' && !isWaiting(i); }));
   if (m.length) b += vSec('pm', 'Meetings', row(m, { timeFirst: true }));
-  var f = open.filter(function (i) { return i.meta.ty === 'FYI' && !isWaiting(i); });
+  var f = open.filter(function (i) { return i.meta.type === 'fyi' && !isWaiting(i); });
   if (f.length) b += vSec('pf', 'FYI', row(f));
   var inb = all.filter(function (i) { return whereOf(i.id) === 'inbox'; });
   if (inb.length) b += vSec('pi', 'In your inbox', row(inb));
   var dn = all.filter(function (i) { return whereOf(i.id) === 'done'; });
   if (dn.length) b += vSec('pd', 'Done', row(dn));
-  return { title: e.name, sub: [e.meta.type || 'Project', parent ? 'part of ' + entPath(parent.meta.id) : ''].filter(Boolean).join(' · '), crumb: ['Projects', 'projects'], tools: entTools(id), body: box + '<div class="list">' + b + '</div>' };
+  return { title: e.name, sub: [cap(e.meta.type || 'project'), parent ? 'part of ' + entPath(parent.meta.id) : ''].filter(Boolean).join(' · '), crumb: ['Projects', 'projects'], tools: entTools(id), body: box + '<div class="list">' + b + '</div>' };
 }
 function viewSystem(id) {
   var e = entById(id);
@@ -2828,13 +2891,13 @@ function viewSystem(id) {
   var parts = kidsOf(id);
   var projects = relsOf(id).filter(function (r) { return kindOf(r.other) === 'PRJ'; }).map(function (r) { return r.other; });
   var owners = relsOf(id).filter(function (r) { return r.type === 'owns' && kindOf(r.other) === 'P'; }).map(function (r) { return r.other; }).filter(function (pid) { var p = personById(pid); return !(p && owner && p === owner); });
-  var st = e.meta.st || '';
+  var st = e.meta.status || '';
   var facts = fact('Owner', [owner && owner.meta.id ? fv(owner.name, 'person', owner.meta.id) : fv(e.meta.owner || 'Not set')].concat(owners.map(function (x) { return fv((labelOf(x) || x) + ' (related)', 'person', x); }))) +
     fact('Part of', [parent ? fv(parent.name, 'ent', parent.meta.id) : fv('Stands alone')]) +
     fact('Parts', parts.length ? parts.map(function (x) { return fv(x.name, 'ent', x.meta.id); }) : [fv('None')]) +
     fact('Used by', projects.length ? projects.map(function (x) { return fv(labelOf(x) || x, 'ent', x); }) : [fv('No projects related')]);
   var ls = linksOf(e);
-  var box = '<div class="entity" data-k="entity"><div class="pills">' + (st ? badge(st, ST_TONE[st]) : badge('No status', 'soft')) + badge(e.meta.type || 'System') + '<span class="sp">' + copyId(id) + '</span></div>' +
+  var box = '<div class="entity" data-k="entity"><div class="pills">' + (st ? badge(cap(st), ST_TONE[st]) : badge('No status', 'soft')) + badge(cap(e.meta.type) || 'System') + '<span class="sp">' + copyId(id) + '</span></div>' +
     vDescText(e) + '<div class="facts">' + facts + '</div>' +
     (ls.length ? '<div class="links">' + ls.map(linkA).join('') + '</div>' : '') + vAsksBox(id) + '</div>';
   var items = sysItems(id);
@@ -2843,38 +2906,38 @@ function viewSystem(id) {
   if (inb.length) b += vSec('si', 'In your inbox', rowsOf(inb));
   var dn = items.filter(function (i) { return whereOf(i.id) === 'done'; });
   if (dn.length) b += vSec('sd', 'Done', rowsOf(dn));
-  return { title: e.name, sub: [e.meta.type, e.meta.owner ? 'owned by ' + e.meta.owner : ''].filter(Boolean).join(' · '), crumb: ['Systems', 'systems'], tools: entTools(id), body: box + '<div class="list">' + b + '</div>' };
+  return { title: e.name, sub: [cap(e.meta.type), e.meta.owner ? 'owned by ' + e.meta.owner : ''].filter(Boolean).join(' · '), crumb: ['Systems', 'systems'], tools: entTools(id), body: box + '<div class="list">' + b + '</div>' };
 }
 function viewPerson(id) {
   var p = personById(id);
   if (!p) return missingEntity('People', 'people');
   var chain = [], cur = p, guard = 0;
-  while (cur && cur.meta.mgr && guard++ < 6) {
-    var m = personByName(cur.meta.mgr);
-    chain.push(m && m.meta.id ? fv(m.name + (isMe(m) ? ' (you)' : ''), 'person', m.meta.id) : fv(cur.meta.mgr));
+  while (cur && cur.meta.manager && guard++ < 6) {
+    var m = personByName(cur.meta.manager);
+    chain.push(m && m.meta.id ? fv(m.name + (isMe(m) ? ' (you)' : ''), 'person', m.meta.id) : fv(cur.meta.manager));
     if (m === p) break;
     cur = m;
   }
-  var reports = S.m.people.people.filter(function (x) { return x.meta.mgr === p.name && x.meta.st !== 'Left'; });
+  var reports = S.m.people.people.filter(function (x) { return x.meta.manager === p.name && x.meta.status !== 'left'; });
   var owns = systemsOwnedBy(p), g = gaps(p);
-  var pills = (isExt(p) ? badge('External', 'info') : '') + (p.meta.st === 'Left' ? badge('Left') : '') +
-    (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : (p.meta.st === 'Left' ? '' : badge('Details complete', 'ok'))) + (p.grp ? badge(p.grp, 'soft') : '') + '<span class="sp">' + copyId(id) + '</span>';
-  var facts = fact('Organisation', [fv([p.meta.co, p.meta.dept].filter(Boolean).join(' › ') || 'Not set')]) +
+  var pills = (isExt(p) ? badge('External', 'info') : '') + (p.meta.status === 'left' ? badge('Left') : '') +
+    (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : (p.meta.status === 'left' ? '' : badge('Details complete', 'ok'))) + (p.grp ? badge(p.grp, 'soft') : '') + '<span class="sp">' + copyId(id) + '</span>';
+  var facts = fact('Organisation', [fv([p.meta.company, p.meta.department].filter(Boolean).join(' › ') || 'Not set')]) +
     fact('Reports to', chain.length ? chain : [fv(isExt(p) ? 'External' : 'Not set')]) +
     fact('Direct reports', reports.length ? reports.map(function (x) { return fv(x.name, x.meta.id ? 'person' : '', x.meta.id); }) : [fv('None')]) +
     fact('Owns', owns.length ? owns.map(function (x) { return fv(x.name, 'ent', x.meta.id); }) : [fv('No systems')]) +
-    fact('Last checked', [fv(p.meta.chk ? fmtY(p.meta.chk) : 'Never')]);
-  var hist = subVals(p, 'hist');
+    fact('Last checked', [fv(p.meta['checked-date'] ? fmtY(p.meta['checked-date']) : 'Never')]);
+  var hist = getSub(p, 'history');
   var box = '<div class="entity" data-k="entity"><div class="pills">' + pills + '</div>' + vDescText(p) +
     '<div class="facts">' + facts + '</div>' + vAsksBox(id) +
-    (hist.length ? '<div><div class="h3">Change history</div>' + hist.map(function (h) { var k = h.indexOf(' | '); return '<div class="hint">' + esc(k > 0 && isDay(h) ? fmtY(h.slice(0, 10)) + ': ' + h.slice(k + 3) : h) + '</div>'; }).join('') + '</div>' : '') + '</div>';
+    (hist.length ? '<div><div class="h3">Change history</div>' + hist.map(function (h) { return '<div class="hint">' + esc(histText(h)) + '</div>'; }).join('') + '</div>' : '') + '</div>';
   var name = p.name, first = name.split(' ')[0];
   var all = allItems(), theirs = all.filter(function (i) { return i.meta.who === name; });
   var open = theirs.filter(function (i) { return whereOf(i.id) === 'open'; });
-  var b = vSec('po', 'Open with ' + first, rowsOf(sortItems(open.filter(function (i) { return !isWaiting(i) && i.meta.ty !== 'Meeting'; })), { hidePerson: true }), { empty: 'Nothing open with ' + first + '.' });
+  var b = vSec('po', 'Open with ' + first, rowsOf(sortItems(open.filter(function (i) { return !isWaiting(i) && i.meta.type !== 'meeting'; })), { hidePerson: true }), { empty: 'Nothing open with ' + first + '.' });
   var waiting = theirs.filter(function (i) { return isWaiting(i) && whereOf(i.id) !== 'done'; });
   if (waiting.length) b += vSec('pw', 'Waiting on ' + first, waiting.map(function (i) { return vRow(i, { hidePerson: true, waiting: whereOf(i.id) === 'open' }); }));
-  var meetings = sortByDue(open.filter(function (i) { return i.meta.ty === 'Meeting' && !isWaiting(i); }));
+  var meetings = sortByDue(open.filter(function (i) { return i.meta.type === 'meeting' && !isWaiting(i); }));
   if (meetings.length) b += vSec('pm', 'Meetings with ' + first, rowsOf(meetings, { hidePerson: true, timeFirst: true }));
   var inbox = theirs.filter(function (i) { return whereOf(i.id) === 'inbox' && !isWaiting(i); });
   if (inbox.length) b += vSec('pi', 'In your inbox', rowsOf(inbox, { hidePerson: true }));
@@ -2887,9 +2950,11 @@ function viewPerson(id) {
   if (mentioned.length) b += vSec('pmn', 'Mentioned in', rowsOf(mentioned), { hint: 'name appears in notes or sub-tasks' });
   var dn = theirs.filter(function (i) { return whereOf(i.id) === 'done'; });
   if (dn.length) b += vSec('pd', 'Done with ' + first, rowsOf(dn, { hidePerson: true }));
-  var tools = entTools(id) + (p.meta.st === 'Left' ? '' : bt('Mark details checked', 'check-person', { id: id, icon: 'check' }));
-  return { title: name + (isMe(p) ? ' (you)' : ''), sub: [p.meta.title, [p.meta.co, p.meta.dept].filter(Boolean).join(' › ')].filter(Boolean).join(' · '), crumb: ['People', 'people'], tools: tools, body: box + '<div class="list">' + b + '</div>' };
+  var tools = entTools(id) + (p.meta.status === 'left' ? '' : bt('Mark details checked', 'check-person', { id: id, icon: 'check' }));
+  return { title: name + (isMe(p) ? ' (you)' : ''), sub: [p.meta.title, [p.meta.company, p.meta.department].filter(Boolean).join(' › ')].filter(Boolean).join(' · '), crumb: ['People', 'people'], tools: tools, body: box + '<div class="list">' + b + '</div>' };
 }
+// a history line as the page shows it: "Mon 6 Oct 2026: Job title: Buyer → Senior buyer"
+function histText(h) { var f = h.f || {}, d = f['changed-date'], w = f.changed ? (PLABEL[f.changed] || f.changed) + ': ' : ''; return (isDay(d) ? fmtY(d) + ': ' : '') + w + nl(h.v).replace(/\n/g, ' '); }
 function missingEntity(label, view) {
   return { title: 'Not found', sub: 'It may have been deleted or renamed in the files.', crumb: [label, view], body: '<div class="empty">' + lk('Back to ' + label, 'go', { v: view }) + '</div>' };
 }
@@ -2923,39 +2988,39 @@ function viewProjects() {
   var q = S.eq.trim().toLowerCase(), list = treeOrder('PRJ', q);
   var cards = list.map(function (o) {
     var e = o.e, id = e.meta.id, all = prjItems(id), open = all.filter(function (i) { return whereOf(i.id) === 'open'; });
-    var next = open.filter(isNext), waiting = open.filter(isWaiting), meetings = open.filter(function (i) { return i.meta.ty === 'Meeting'; });
+    var next = open.filter(isNext), waiting = open.filter(isWaiting), meetings = open.filter(function (i) { return i.meta.type === 'meeting'; });
     var inbox = all.filter(function (i) { return whereOf(i.id) === 'inbox'; }), done = all.filter(function (i) { return whereOf(i.id) === 'done'; });
     var blocked = open.filter(function (i) { return openBlockers(i).length; }).length;
-    var dated = sortByDue(open.filter(function (i) { return isDay(i.meta.due) && dd(i.meta.due) >= 0; }));
-    var st = e.meta.st || 'Active', live = st === 'Active';
+    var dated = sortByDue(open.filter(function (i) { var d = dueOf(i.meta); return isDay(d) && dd(d) >= 0; }));
+    var st = e.meta.status || 'active', live = st === 'active';
     var badges = (live ? (next.length ? badge('Has a next action', 'ok') : badge('No next action', 'danger')) : '') + (blocked ? badge(blocked + ' waiting on a dependency', 'danger') : '') + (waiting.length ? badge(waiting.length + ' waiting', 'info') : '') + (inbox.length ? badge(inbox.length + ' in inbox') : '') + (asksFor(id).length ? badge(asksFor(id).length + ' for agent', 'claude') : '');
-    return '<article class="ecard" data-k="c-' + id + '"' + (o.dep ? ' style="margin-left:' + Math.min(o.dep, 3) * 18 + 'px"' : '') + '><div class="pills">' + badge(st, ST_TONE[st]) + badge(e.meta.type || 'Project') + '<span class="sp id">' + id + '</span></div>' +
+    return '<article class="ecard" data-k="c-' + id + '"' + (o.dep ? ' style="margin-left:' + Math.min(o.dep, 3) * 18 + 'px"' : '') + '><div class="pills">' + badge(cap(st), ST_TONE[st]) + badge(cap(e.meta.type || 'project')) + '<span class="sp id">' + id + '</span></div>' +
       (e.meta.parent && entById(e.meta.parent) ? '<div class="path">Part of ' + esc(entPath(e.meta.parent)) + '</div>' : '') +
       '<button type="button" class="nm" data-act="ent" data-id="' + id + '">' + esc(e.name) + '</button>' +
       (firstLine(e) ? '<div class="sum">' + esc(clip(firstLine(e), 150)) + '</div>' : '') + (badges ? '<div class="pills">' + badges + '</div>' : '') +
       '<div class="lines"><div><span class="k">Next date</span> ' + esc(dated[0] ? when(dated[0]).label + ', ' + clip(dated[0].title, 70) : 'Nothing dated') + '</div><div><span class="k">Open</span> ' + esc(plural(next.length, 'action') + ', ' + plural(meetings.length, 'meeting') + ', ' + done.length + ' done') + '</div></div></article>';
   });
-  var active = entsOf('PRJ').filter(function (p) { return (p.meta.st || 'Active') === 'Active'; }).length;
+  var active = entsOf('PRJ').filter(function (p) { return (p.meta.status || 'active') === 'active'; }).length;
   return { title: 'Projects', sub: active + ' active · ' + entsOf('PRJ').length + ' in all', body: entToolbar('PRJ') + (cards.length ? '<div class="grid-cards">' + cards.join('') + '</div>' : '<div class="empty">' + (q ? 'No project matches.' : 'No projects yet.') + '</div>') };
 }
 function viewSystems() {
   var q = S.eq.trim().toLowerCase(), list = treeOrder('SYS', q);
   var cards = list.map(function (o) {
     var e = o.e, id = e.meta.id, items = sysItems(id).filter(function (i) { return whereOf(i.id) === 'open'; });
-    var parent = e.meta['part-of'] ? entById(e.meta['part-of']) : null, st = e.meta.st || '';
+    var parent = e.meta['part-of'] ? entById(e.meta['part-of']) : null, st = e.meta.status || '';
     var badges = (items.length ? badge(plural(items.length, 'open item')) : '') + (asksFor(id).length ? badge(asksFor(id).length + ' for agent', 'claude') : '');
-    return '<article class="ecard" data-k="c-' + id + '"' + (o.dep ? ' style="margin-left:' + Math.min(o.dep, 3) * 18 + 'px"' : '') + '><div class="pills">' + (st ? badge(st, ST_TONE[st]) : badge('No status', 'soft')) + badge(e.meta.type || 'System') + '<span class="sp id">' + id + '</span></div>' +
+    return '<article class="ecard" data-k="c-' + id + '"' + (o.dep ? ' style="margin-left:' + Math.min(o.dep, 3) * 18 + 'px"' : '') + '><div class="pills">' + (st ? badge(cap(st), ST_TONE[st]) : badge('No status', 'soft')) + badge(cap(e.meta.type) || 'System') + '<span class="sp id">' + id + '</span></div>' +
       '<button type="button" class="nm" data-act="ent" data-id="' + id + '">' + esc(e.name) + '</button>' +
       (firstLine(e) ? '<div class="sum">' + esc(clip(firstLine(e), 150)) + '</div>' : '') + (badges ? '<div class="pills">' + badges + '</div>' : '') +
       '<div class="lines"><div><span class="k">Owner</span> ' + esc(e.meta.owner || 'Not set') + '</div><div><span class="k">Part of</span> ' + esc(parent ? parent.name : 'Stands alone') + '</div></div></article>';
   });
-  var notLive = entsOf('SYS').filter(function (x) { return (x.meta.st || '') !== 'Live'; }).length;
+  var notLive = entsOf('SYS').filter(function (x) { return (x.meta.status || '') !== 'live'; }).length;
   return { title: 'Systems', sub: plural(entsOf('SYS').length, 'system') + ' · ' + notLive + ' not live', body: entToolbar('SYS') + (cards.length ? '<div class="grid-cards">' + cards.join('') + '</div>' : '<div class="empty">' + (q ? 'No system matches.' : 'No systems yet.') + '</div>') };
 }
 function viewPeople() {
   var all = S.m.people.people, act = activePeople();
-  var defs = [['all', 'All', act.length], ['internal', 'Internal', act.filter(function (p) { return !isExt(p); }).length], ['external', 'External', act.filter(isExt).length], ['gaps', 'Missing details', act.filter(function (p) { return gaps(p).length; }).length], ['left', 'Left', all.filter(function (p) { return p.meta.st === 'Left'; }).length]];
-  var list = S.pf === 'left' ? all.filter(function (p) { return p.meta.st === 'Left'; }) : act;
+  var defs = [['all', 'All', act.length], ['internal', 'Internal', act.filter(function (p) { return !isExt(p); }).length], ['external', 'External', act.filter(isExt).length], ['gaps', 'Missing details', act.filter(function (p) { return gaps(p).length; }).length], ['left', 'Left', all.filter(function (p) { return p.meta.status === 'left'; }).length]];
+  var list = S.pf === 'left' ? all.filter(function (p) { return p.meta.status === 'left'; }) : act;
   if (S.pf === 'internal') list = list.filter(function (p) { return !isExt(p); });
   if (S.pf === 'external') list = list.filter(isExt);
   if (S.pf === 'gaps') list = list.filter(function (p) { return gaps(p).length; });
@@ -2970,15 +3035,15 @@ function viewPeople() {
   var row = function (p) {
     var g = gaps(p), pid = p.meta.id || '';
     return '<div class="tr" role="listitem" data-k="p-' + esc(pid || p.name) + '"><div><button type="button" class="nm" data-act="person" data-id="' + esc(pid) + '"' + (pid ? '' : ' disabled') + '>' + esc(p.name + (isMe(p) ? ' (you)' : '')) + '</button><div class="hint">' + esc(p.meta.title || 'No job title') + '</div></div>' +
-      '<div class="c2">' + esc([p.meta.co, p.meta.dept].filter(Boolean).join(' › ') || 'Not set') + (isExt(p) ? ' ' + badge('External', 'info') : '') + '</div>' +
-      '<div class="c3">' + esc(p.meta.mgr || (isExt(p) ? 'External' : 'Not set')) + '</div>' +
-      '<div class="r">' + (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : '') + (p.meta.st === 'Left' ? badge('Left') : '') + '<span class="hint">' + personOpenCount(p) + ' open</span></div></div>';
+      '<div class="c2">' + esc([p.meta.company, p.meta.department].filter(Boolean).join(' › ') || 'Not set') + (isExt(p) ? ' ' + badge('External', 'info') : '') + '</div>' +
+      '<div class="c3">' + esc(p.meta.manager || (isExt(p) ? 'External' : 'Not set')) + '</div>' +
+      '<div class="r">' + (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : '') + (p.meta.status === 'left' ? badge('Left') : '') + '<span class="hint">' + personOpenCount(p) + ' open</span></div></div>';
   };
   var sorted = list.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
   var body = '';
   if (S.pgroup === 'none') body = sorted.map(row).join('');
   else {
-    var kf = { co: function (p) { return p.meta.co || 'No organisation'; }, dept: function (p) { return p.meta.dept || 'No department'; }, grp: function (p) { return p.grp || 'Other'; } }[S.pgroup];
+    var kf = { co: function (p) { return p.meta.company || 'No organisation'; }, dept: function (p) { return p.meta.department || 'No department'; }, grp: function (p) { return p.grp || 'Other'; } }[S.pgroup];
     var groups = {}, order = [];
     sorted.forEach(function (p) { var k = kf(p); if (!groups[k]) { groups[k] = []; order.push(k); } groups[k].push(p); });
     order.sort(function (a, b) { return (/^No /.test(a) - /^No /.test(b)) || a.localeCompare(b); });
@@ -3070,7 +3135,7 @@ function linkCands(id, mode, q, o) {
   var t = kindOf(id) === 'T' ? item(id) : null;
   if (t) depList(t).forEach(function (x) { linked[x] = 1; });
   var c = [];
-  function addItem(x, done) { if (x.id !== id && !linked[x.id] && (!blocked || !dependsOn(x.id, id))) c.push({ id: x.id, label: x.title, kind: x.meta.ty || 'Task', done: done, at: String((done ? x.meta.done : x.meta.asg) || ''), hay: x.id + ' ' + x.title }); }
+  function addItem(x, done) { if (x.id !== id && !linked[x.id] && (!blocked || !dependsOn(x.id, id))) c.push({ id: x.id, label: x.title, kind: TYPE_NAME[x.meta.type] || TYPE_NAME.task, done: done, at: String((done ? x.meta['done-date'] : receivedOf(x.meta)) || ''), hay: x.id + ' ' + x.title }); }
   openList().concat(S.m.inbox.items).forEach(function (x) { addItem(x, false); });
   if (!blocked && o.done) S.m.done.items.forEach(function (x) { addItem(x, true); });
   if (!blocked) {
@@ -3102,7 +3167,7 @@ function mergeCands(id, q) {
   var words = q.split(/\s+/), c = [];
   allItems().forEach(function (x) {
     var hay = (x.id + ' ' + x.title).toLowerCase(), w = whereOf(x.id);
-    if (canMerge(me, x) && words.every(function (v) { return hay.indexOf(v) >= 0; })) c.push({ id: x.id, label: x.title, kind: w === 'inbox' ? 'Proposal' : TYPE_WORD[x.meta.ty || 'Task'] || x.meta.ty, done: w === 'done', at: String((w === 'done' ? x.meta.done : x.meta.asg) || '') });
+    if (canMerge(me, x) && words.every(function (v) { return hay.indexOf(v) >= 0; })) c.push({ id: x.id, label: x.title, kind: w === 'inbox' ? 'Proposal' : TYPE_WORD[x.meta.type || 'task'] || x.meta.type, done: w === 'done', at: String((w === 'done' ? x.meta['done-date'] : receivedOf(x.meta)) || '') });
   });
   function rank(x) { return x.id.toLowerCase() === q ? 0 : (x.label.toLowerCase().indexOf(q) === 0 ? 1 : 2); }
   c.sort(function (a, b) { return rank(a) - rank(b) || (!!a.done - !!b.done) || (a.at < b.at ? 1 : a.at > b.at ? -1 : 0) || idNum(b.id) - idNum(a.id); });
@@ -3139,10 +3204,11 @@ var AUTHOR_WORD = { user: 'You', agent: 'Agent' };
 function authorOf(c) { var a = c.f.author || ''; return AUTHOR_WORD[a] || (a ? a.charAt(0).toUpperCase() + a.slice(1) : 'Unknown'); }
 function whenOf(c) { var at = c.f['added-datetime']; return at ? fmtDT(at) : 'Earlier'; }
 // a Comment's text, under the field change it made, if it made one: "Due date: 30 Oct → 6 Nov"
-var CHANGE_WORD = { due: 'Due date', st: 'Status', who: 'Person', title: 'Job title', co: 'Company', dept: 'Department', mgr: 'Reports to' };
+var CHANGE_WORD = { 'due-date': 'Due date', 'due-time': 'Due time', status: 'Status', who: 'Person', title: 'Job title', company: 'Company', department: 'Department', manager: 'Reports to' };
 function changeVal(field, v) {
-  if (!v) return field === 'st' ? 'To do' : 'none';
-  if (field !== 'due' || !isDay(v)) return v;
+  if (field === 'status') return STATUS_LABEL[v || ''] || v;
+  if (!v) return 'none';
+  if (field !== 'due-date' || !isDay(v)) return v;
   var d = pd(v); return d.getDate() + ' ' + MON[d.getMonth()] + yearTail(d) + (timeOf(v) ? ' ' + timeOf(v) : '');
 }
 function changeText(g) { return (CHANGE_WORD[g.field] || g.field) + ': ' + changeVal(g.field, g.from) + ' → ' + changeVal(g.field, g.to); }
@@ -3177,12 +3243,12 @@ function vClaudeTab(id) {
 }
 function panelTask(i) {
   var id = i.id, w = whereOf(id), inbox = w === 'inbox', done = w === 'done';
-  var due = i.meta.due || '', rels = relsOf(id), deps = depList(i), blocks = blocksOf(id), asks = asksFor(id);
-  var h = panelHead(id, (inbox ? 'Proposal · ' : '') + TYPE_WORD[i.meta.ty || 'Task'] + ' · ' + listName(i), false);
-  if (inbox) h += '<div class="note" data-k="note-inbox">Proposed by the agent from ' + esc(srcKind(i)) + (i.meta.asg ? ' on ' + esc(fmtDT(i.meta.asg)) : '') + '. Correct anything below, then accept or dismiss.</div>';
-  if (done) h += '<div class="note ok" data-k="note-done" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">Done on ' + esc(i.meta.done ? fmt(i.meta.done) : 'an earlier date') + '.</span>' + bt('Reopen', 'reopen', { id: id, cls: 'sm' }) + '</div>';
+  var due = dueOf(i.meta), got = receivedOf(i.meta), rels = relsOf(id), deps = depList(i), blocks = blocksOf(id), asks = asksFor(id);
+  var h = panelHead(id, (inbox ? 'Proposal · ' : '') + (TYPE_WORD[i.meta.type || 'task'] || i.meta.type) + ' · ' + listName(i), false);
+  if (inbox) h += '<div class="note" data-k="note-inbox">Proposed by the agent from ' + esc(srcKind(i)) + (got ? ' on ' + esc(fmtDT(got)) : '') + '. Correct anything below, then accept or dismiss.</div>';
+  if (done) h += '<div class="note ok" data-k="note-done" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">Done on ' + esc(i.meta['done-date'] ? fmt(i.meta['done-date']) : 'an earlier date') + '.</span>' + bt('Reopen', 'reopen', { id: id, cls: 'sm' }) + '</div>';
   h += '<label class="sr" for="f-title">Title</label><textarea id="f-title" class="title-in" rows="2" data-ch="title" data-kd="title" data-id="' + id + '">' + esc(i.title) + '</textarea>';
-  if (!done) h += '<div class="pills" data-k="row-status"><div class="seg" data-k="seg-status" role="group" aria-label="Status">' + STATUS.map(function (x) { return '<button type="button" data-act="status" data-id="' + id + '" data-v="' + x + '"' + pressed((i.meta.st || 'To do') === x) + '>' + x + '</button>'; }).join('') + '</div>' + doneBtn(i, '') + '</div>';
+  if (!done) h += '<div class="pills" data-k="row-status"><div class="seg" data-k="seg-status" role="group" aria-label="Status">' + STATUS.map(function (x) { return '<button type="button" data-act="status" data-id="' + id + '" data-v="' + esc(x) + '"' + pressed((i.meta.status || '') === x) + '>' + esc(STATUS_LABEL[x]) + '</button>'; }).join('') + '</div>' + doneBtn(i, '') + '</div>';
   h += vTabs(id, rels.length + deps.length, asks.length);
   if (S.tab === 'links') {
     var x = '<section data-k="sec-blockers"><h3 class="h3">Depends on</h3>' + (deps.length ? deps.map(function (d) {
@@ -3200,9 +3266,9 @@ function panelTask(i) {
     var whenText = 'No due date';
     if (isDay(due)) whenText = fmt(due) + ', ' + relDays(dd(due));
     var f = fRow('Due', 'f-due', '<input id="f-due" class="in" type="date" data-ch="due" data-id="' + id + '" value="' + esc(due.slice(0, 10)) + '"><label class="sr" for="f-time">Due time</label><input id="f-time" class="in" type="time" data-ch="due-time" data-id="' + id + '" value="' + esc(timeOf(due)) + '"><span class="hint">' + esc(whenText) + '</span>' + (canSnooze(i) ? '<div style="flex-basis:100%">' + vSnooze(id) + '</div>' : ''));
-    if (!isDay(due)) f += fRow('Urgency', 'f-urg', '<select id="f-urg" class="in" data-ch="urg" data-id="' + id + '">' + opts([['today', 'Today'], ['week', 'This week'], ['soon', 'Soon'], ['later', 'Later'], ['fyi', 'FYI']], i.meta.urg || 'later') + '</select>');
-    f += fRow('Priority', 'f-p', '<select id="f-p" class="in" data-ch="p" data-id="' + id + '">' + opts([['1', 'High'], ['2', 'Normal'], ['3', 'Low']], i.meta.p || '2') + '</select>');
-    var ty = i.meta.ty || 'Task', tyl = [['Task', 'Task'], ['Meeting', 'Meeting'], ['Document', 'Read or review'], ['Process', 'Process'], ['FYI', 'FYI']];
+    if (!isDay(due)) f += fRow('Urgency', 'f-urg', '<select id="f-urg" class="in" data-ch="urg" data-id="' + id + '">' + opts(URG_ORDER.map(function (u) { return [u, URG[u]]; }), i.meta.urgency || 'later') + '</select>');
+    f += fRow('Priority', 'f-p', '<select id="f-p" class="in" data-ch="p" data-id="' + id + '">' + opts([['high', PRIORITY_LABEL.high], ['medium', 'Normal'], ['low', PRIORITY_LABEL.low]], i.meta.priority || 'medium') + '</select>');
+    var ty = i.meta.type || 'task', tyl = QA_TYPES.map(function (t) { return [t, TYPE_WORD[t]]; });
     if (TYPES.indexOf(ty) < 0) tyl.push([ty, ty]);
     f += fRow('Type', 'f-ty', '<select id="f-ty" class="in" data-ch="ty" data-id="' + id + '">' + opts(tyl, ty) + '</select>');
     f += fRow(whoLabel(i), 'f-who', '<input id="f-who" class="in" type="text" list="dl-people" autocomplete="off" data-ch="who" data-id="' + id + '" value="' + esc(who) + '">' +
@@ -3224,7 +3290,7 @@ function panelTask(i) {
       '<div style="flex-basis:100%">' + vPicks(linkCands(id, 'related', S.sysQ, { kind: 'System' }), 'sys-add', 'No system matches.') + '</div>', true);
     f += fRow('Tags', 'f-tag', tagsOf(i).map(function (t) { return '<span class="tag">' + esc(t) + '<button type="button" class="xbtn" data-act="tag-del" data-id="' + id + '" data-v="' + esc(t) + '" aria-label="Remove tag ' + esc(t) + '">' + ic('x', 's') + '</button></span>'; }).join('') +
       '<input id="f-tag" class="in" type="text" list="dl-tags" autocomplete="off" data-in="tagDraft" data-kd="tag" data-id="' + id + '" value="' + esc(S.tagDraft) + '" placeholder="Add tag, Enter" style="width:150px">', true);
-    f += fRow('Assigned', 'f-asg', '<input id="f-asg" class="in" type="datetime-local" data-ch="asg" data-id="' + id + '" value="' + esc(isDay(i.meta.asg) ? String(i.meta.asg).slice(0, 16).replace(' ', 'T') : '') + '"><span class="hint">from ' + esc(srcKind(i)) + '</span>');
+    f += fRow('Assigned', 'f-asg', '<input id="f-asg" class="in" type="datetime-local" data-ch="asg" data-id="' + id + '" value="' + esc(isDay(got) ? got.slice(0, 16).replace(' ', 'T') : '') + '"><span class="hint">from ' + esc(srcKind(i)) + '</span>');
     var subs = subsOf(i), nd = subs.filter(function (s) { return s.x; }).length;
     var sb = '<section data-k="sec-subs"><h3 class="h3">Sub-tasks' + (subs.length ? ' <span class="n">' + nd + ' of ' + subs.length + ' done</span>' : '') + '</h3>' + subs.map(function (s, k) {
       var cid = 'sub-' + k;
@@ -3245,7 +3311,7 @@ function panelTask(i) {
       tail += '<div class="foot" data-k="foot-inbox">' + bt('Accept', 'accept', { id: id, cls: 'primary' }) + bt('Dismiss…', 'dismiss-open', { id: id, attrs: ' aria-expanded="' + (S.dismissFor === id) + '"' }) + (pos >= 0 ? '<span class="hint">' + (pos + 1) + ' of ' + il.length + ' in the inbox</span>' : '') + '</div>';
       if (S.dismissFor === id && S.dismissAt === 'panel') tail += vReasons(id);
     } else {
-      var canM = i.meta.ty !== 'Meeting';
+      var canM = i.meta.type !== 'meeting';
       if (!done || canM) tail += '<div class="foot" data-k="foot-del">' + (canM ? bt('Merge a duplicate into this…', 'merge-open', { id: id, cls: 'sm', attrs: ' aria-expanded="' + (S.mergeFor === id) + '"' }) : '') +
         (done ? '' : bt('Delete task', 'del', { id: id, cls: 'danger sm' }) + '<span class="hint">You can undo for a few seconds.</span>') + '</div>';
       if (canM) tail += vMerge(id);
@@ -3256,22 +3322,22 @@ function panelTask(i) {
 }
 function panelPerson(p) {
   var id = p.meta.id, rels = relsOf(id), asks = asksFor(id);
-  var h = panelHead(id, 'Person' + (p.meta.st === 'Left' ? ' · left' : ''), !(S.view === 'person' && S.entity === id));
+  var h = panelHead(id, 'Person' + (p.meta.status === 'left' ? ' · left' : ''), !(S.view === 'person' && S.entity === id));
   h += '<h2 data-k="pname" style="margin:0;font:600 18px/1.3 var(--font-d)">' + esc(p.name) + (isMe(p) ? ' <span class="hint">(you)</span>' : '') + '</h2>';
   h += vTabs(id, rels.length, asks.length);
   if (S.tab === 'links') h += tabPanel('links', vLinked(id) + vLinkAdd(id, false));
   else if (S.tab === 'claude') h += tabPanel('claude', vClaudeTab(id));
   else {
-    var field = function (k, label, list) { return fRow(label, 'pf-' + k, '<input id="pf-' + k + '" class="in" type="text" autocomplete="off"' + (list ? ' list="' + list + '"' : '') + ' data-ch="pf" data-id="' + id + '" data-f="' + k + '" value="' + esc(k === 'grp' ? p.grp : (p.meta[k] || '')) + '" style="width:100%">'); };
+    var field = function (k, label, list) { return fRow(label, 'pf-' + k, '<input id="pf-' + k + '" class="in" type="text" autocomplete="off"' + (list ? ' list="' + list + '"' : '') + ' data-ch="pf" data-id="' + id + '" data-f="' + k + '" value="' + esc(k === 'group' ? p.grp : (p.meta[k] || '')) + '" style="width:100%">'); };
     var g = gaps(p);
     var f = (g.length ? '<div class="note warn" data-k="gapnote">Missing ' + esc(g.map(function (k) { return GAP_LABEL[k]; }).join(', ')) + '.</div>' : '') +
-      field('co', 'Organisation', 'dl-co') + field('dept', 'Department', 'dl-dept') + field('title', 'Job title', 'dl-title') + field('mgr', 'Reports to', 'dl-people') + field('grp', 'Group', 'dl-pgrp') +
+      field('company', 'Organisation', 'dl-co') + field('department', 'Department', 'dl-dept') + field('title', 'Job title', 'dl-title') + field('manager', 'Reports to', 'dl-people') + field('group', 'Group', 'dl-pgrp') +
       fRow('External', 'pf-ext', '<input type="checkbox" id="pf-ext" data-ch="p-ext" data-id="' + id + '"' + (isExt(p) ? ' checked' : '') + '><span class="hint">Outside the company (needs only organisation and job title)</span>') +
-      '<div class="f" data-k="row-pst"><span class="lbl" id="l-pst">Status</span><div class="ctl"><div class="seg" role="group" aria-labelledby="l-pst">' + [['', 'Active'], ['Left', 'Left']].map(function (s) { return '<button type="button" data-act="p-st" data-id="' + id + '" data-v="' + s[0] + '"' + pressed((p.meta.st === 'Left' ? 'Left' : '') === s[0]) + '>' + s[1] + '</button>'; }).join('') + '</div></div></div>' +
-      fRow('Last checked', '', '<span>' + esc(p.meta.chk ? fmtY(p.meta.chk) : 'Never') + '</span>' + bt('Mark checked today', 'check-person', { id: id, cls: 'sm' }));
+      '<div class="f" data-k="row-pst"><span class="lbl" id="l-pst">Status</span><div class="ctl"><div class="seg" role="group" aria-labelledby="l-pst">' + [['', 'Active'], ['left', 'Left']].map(function (s) { return '<button type="button" data-act="p-st" data-id="' + id + '" data-v="' + s[0] + '"' + pressed((p.meta.status === 'left' ? 'left' : '') === s[0]) + '>' + s[1] + '</button>'; }).join('') + '</div></div></div>' +
+      fRow('Last checked', '', '<span>' + esc(p.meta['checked-date'] ? fmtY(p.meta['checked-date']) : 'Never') + '</span>' + bt('Mark checked today', 'check-person', { id: id, cls: 'sm' }));
     f += vDescComments(id, p, 'Who they are and anything worth knowing');
-    var hist = subVals(p, 'hist');
-    if (hist.length) f += '<section data-k="sec-hist"><h3 class="h3">Change history</h3>' + hist.map(function (x) { var k = x.indexOf(' | '); return '<div class="ctx src">' + esc(k > 0 && isDay(x) ? fmtY(x.slice(0, 10)) + ': ' + x.slice(k + 3) : x) + '</div>'; }).join('') + '</section>';
+    var hist = getSub(p, 'history');
+    if (hist.length) f += '<section data-k="sec-hist"><h3 class="h3">Change history</h3>' + hist.map(function (x) { return '<div class="ctx src">' + esc(histText(x)) + '</div>'; }).join('') + '</section>';
     f += '<div class="hint" data-k="hint-names">Names can’t be changed here, because tasks refer to people by name. Edit PEOPLE.md and the tasks together if a name is wrong.</div>';
     f += '<div class="foot" data-k="foot-p">' + bt('Remove from People', 'p-remove', { id: id, cls: 'danger sm' }) + '<span class="hint">Tasks keep the name. You can undo.</span></div>';
     h += tabPanel('details', f);
@@ -3287,11 +3353,11 @@ function panelEnt(e) {
   else if (S.tab === 'claude') h += tabPanel('claude', vClaudeTab(id));
   else {
     var types = D.types.slice(); if (e.meta.type && types.indexOf(e.meta.type) < 0) types.push(e.meta.type);
-    var sts = D.sts.slice(); if (e.meta.st && sts.indexOf(e.meta.st) < 0) sts.push(e.meta.st);
+    var sts = D.sts.slice(); if (e.meta.status && sts.indexOf(e.meta.status) < 0) sts.push(e.meta.status);
     var ex = entDesc(id);
     var parents = [['', kind === 'PRJ' ? '(no parent project)' : '(not part of another system)']].concat(entsOf(kind).filter(function (x) { return x.meta.id && ex.indexOf(x.meta.id) < 0; }).map(function (x) { return [x.meta.id, kind === 'PRJ' ? entPath(x.meta.id) : x.name]; }));
-    var f = fRow('Type', 'ef-type', '<select id="ef-type" class="in" data-ch="e-type" data-id="' + id + '">' + opts([['', '(no type)']].concat(types.map(function (t) { return [t, t]; })), e.meta.type || '') + '</select>') +
-      fRow('Status', 'ef-st', '<select id="ef-st" class="in" data-ch="e-st" data-id="' + id + '">' + opts([['', '(no status)']].concat(sts.map(function (t) { return [t, t]; })), e.meta.st || '') + '</select>') +
+    var f = fRow('Type', 'ef-type', '<select id="ef-type" class="in" data-ch="e-type" data-id="' + id + '">' + opts([['', '(no type)']].concat(types.map(function (t) { return [t, cap(t)]; })), e.meta.type || '') + '</select>') +
+      fRow('Status', 'ef-st', '<select id="ef-st" class="in" data-ch="e-st" data-id="' + id + '">' + opts([['', '(no status)']].concat(sts.map(function (t) { return [t, cap(t)]; })), e.meta.status || '') + '</select>') +
       fRow(kind === 'PRJ' ? 'Parent' : 'Part of', 'ef-parent', '<select id="ef-parent" class="in" data-ch="e-parent" data-id="' + id + '" style="max-width:100%">' + opts(parents, e.meta[D.pk] || '') + '</select>');
     if (kind === 'SYS') f += fRow('Owner', 'ef-owner', '<input id="ef-owner" class="in" type="text" list="dl-people" autocomplete="off" data-ch="e-owner" data-id="' + id + '" value="' + esc(e.meta.owner || '') + '" style="width:100%">');
     f += fRow('Group', 'ef-grp', '<input id="ef-grp" class="in" type="text" list="dl-egrp-' + kind + '" autocomplete="off" data-ch="e-grp" data-id="' + id + '" value="' + esc(e.grp) + '" style="width:100%">');
@@ -3440,8 +3506,8 @@ function vDatalists() {
   var uniq = function (arr) { var o = {}, out = []; arr.forEach(function (v) { if (v && !o[v]) { o[v] = 1; out.push(v); } }); return out.sort(function (a, b) { return a.localeCompare(b); }); };
   var dl = function (id, vals) { return '<datalist id="' + id + '">' + vals.map(function (v) { return '<option value="' + esc(v) + '"></option>'; }).join('') + '</datalist>'; };
   var ppl = S.m.people.people;
-  return '<div hidden data-k="dls">' + dl('dl-people', uniq(activePeople().map(function (p) { return p.name; }))) + dl('dl-tags', allTags()) + dl('dl-prj', entsOf('PRJ').filter(function (e) { return e.meta.id && (e.meta.st || 'Active') !== 'Done'; }).map(function (e) { return entPath(e.meta.id); }).sort()) +
-    dl('dl-co', uniq(ppl.map(function (p) { return p.meta.co; }))) + dl('dl-dept', uniq(ppl.map(function (p) { return p.meta.dept; }))) + dl('dl-title', uniq(ppl.map(function (p) { return p.meta.title; }))) +
+  return '<div hidden data-k="dls">' + dl('dl-people', uniq(activePeople().map(function (p) { return p.name; }))) + dl('dl-tags', allTags()) + dl('dl-prj', entsOf('PRJ').filter(function (e) { return e.meta.id && (e.meta.status || 'active') !== 'done'; }).map(function (e) { return entPath(e.meta.id); }).sort()) +
+    dl('dl-co', uniq(ppl.map(function (p) { return p.meta.company; }))) + dl('dl-dept', uniq(ppl.map(function (p) { return p.meta.department; }))) + dl('dl-title', uniq(ppl.map(function (p) { return p.meta.title; }))) +
     dl('dl-pgrp', uniq(ppl.map(function (p) { return p.grp; }))) + dl('dl-egrp-PRJ', uniq(entsOf('PRJ').map(function (e) { return e.grp; }))) + dl('dl-egrp-SYS', uniq(entsOf('SYS').map(function (e) { return e.grp; }))) + '</div>';
 }
 var GATE = {
@@ -3476,7 +3542,7 @@ OPS.newPrjOnTask = function (id, name, out) {
   var wants = {};
   return op('New project on ' + id, ['projects', 'tasks', 'inbox', 'done'], function (M) {
     var pid = ensureProject(M.projects, name, wants), f = fItem(M, id);
-    if (f) { var ps = prjOf(f.it).map(rid); if (ps.indexOf(pid) < 0) ps.push(pid); f.it.meta.prj = ps.join(','); }
+    if (f) { var ps = prjOf(f.it).map(rid); if (ps.indexOf(pid) < 0) ps.push(pid); f.it.meta.projects = ps.join(', '); }
     if (out) out.id = pid;
   });
 };
@@ -3493,7 +3559,7 @@ OPS.restoreEnt = function (kind, snap) {
     snap.rels.forEach(function (l) { if (R.lines.indexOf(l) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); added = true; } });
     if (added) relRefresh(R);
     if (kind === 'PRJ') ANY.forEach(function (k) {
-      M[k].items.forEach(function (i) { if (snap.tasks.indexOf(i.id) >= 0) { var ps = prjOf(i); if (ps.indexOf(snap.id) < 0) { ps.push(snap.id); i.meta.prj = ps.join(','); } } });
+      M[k].items.forEach(function (i) { if (snap.tasks.indexOf(i.id) >= 0) { var ps = prjOf(i); if (ps.indexOf(snap.id) < 0) { ps.push(snap.id); i.meta.projects = ps.join(', '); } } });
     });
   });
 };
@@ -3664,15 +3730,17 @@ function targetId() {
 /* ===================== task actions ===================== */
 function cur(id) { return item(id); }
 function patch(id, p, toast, undo) { commit(OPS.meta(id, p), toast ? { toast: toast, undo: undo } : null); }
+// a patch that sets an Item's due date and time from one value, as dueOf gives it ('' clears both)
+function duePatch(v) { var m = {}; setDue(m, v); return { 'due-date': m['due-date'] || '', 'due-time': m['due-time'] || '' }; }
 function toggleDone(id, viaKey) {
   var i = item(id), w = whereOf(id);
   if (!i) return;
   var nb = viaKey ? neighbour(id) : null;
   if (w === 'open') {
-    var prevSt = i.meta.st || '';
+    var prevSt = i.meta.status || '';
     commit(OPS.complete(id, todayStr()), { toast: 'Done: ' + clip(i.title, 60), undo: OPS.reopen(id, prevSt) });
   } else if (w === 'done') {
-    var prevDone = i.meta.done || todayStr();
+    var prevDone = i.meta['done-date'] || todayStr();
     commit(OPS.reopen(id));
     toastShow('Reopened ' + id + '. It is back in ' + listName(item(id)) + '.', OPS.complete(id, prevDone));
   } else return;
@@ -3717,14 +3785,14 @@ function doneNow(id) {
   var i = item(id), w = whereOf(id);
   if (!i) return;
   if (w === 'inbox') acceptDone(id);
-  else if (w === 'open') { if (i.meta.ty === 'FYI') acknowledge(id); else toggleDone(id); }
+  else if (w === 'open') { if (i.meta.type === 'fyi') acknowledge(id); else toggleDone(id); }
 }
 function snoozeItem(id, days) {
   var i = item(id);
   if (!i || !canSnooze(i) || !days) return;
-  var was = i.meta.due, due = snooze(was, days, todayStr());
+  var was = dueOf(i.meta), due = snooze(was, days, todayStr());
   S.snoozeFor = null;
-  patch(id, { due: due }, 'Snoozed ' + id + ' to ' + fmtDT(due) + '.', OPS.meta(id, { due: was }));
+  patch(id, duePatch(due), 'Snoozed ' + id + ' to ' + fmtDT(due) + '.', OPS.meta(id, duePatch(was)));
 }
 // A Dismiss remembers only the message, in DISMISSED.md, until its source has moved past it; Already handled is not a Dismiss.
 function dismiss(id, reason) {
@@ -3733,7 +3801,7 @@ function dismiss(id, reason) {
   if (reason === 'Already handled') { acceptDone(id); return; }
   if (reason === 'Duplicate') { S.dupFor = id; S.dupQ = ''; forceClear('f-dupq'); focusLater('#f-dupq'); return; }
   var why = String(reason || 'not actionable').toLowerCase();
-  var lines = ignorable(getSub(i, 'ref').map(function (b) { return b.v.trim(); })).map(function (r) { return dismissLine(i, r, why); });
+  var lines = ignorable(getSub(i, 'source-key').map(function (b) { return b.v.trim(); })).map(function (r) { return dismissLine(i, r, why); });
   var text = serItem(i), nx = nextInbox(id), cs = changesOn(S.m.inbox, id);
   S.dismissFor = null;
   commit(OPS.dismiss(id, lines));
@@ -3786,7 +3854,7 @@ function markDoneAck(id) {
   if (!i || (w !== 'open' && w !== 'inbox')) return;
   var list = commentsOf(i), which = list.filter(toAck).map(function (c) { return [list.indexOf(c), c.v]; }), keys = ['tasks', 'inbox', 'done', 'rels'];
   var steps = (w === 'inbox' ? [OPS.accept(id, [])] : []).concat([OPS.complete(id, todayStr()), OPS.ack(id, which, false)]);
-  var back = [OPS.ack(id, which, true), OPS.reopen(id, i.meta.st || '')].concat(w === 'inbox' ? [OPS.unaccept(id, [])] : []);
+  var back = [OPS.ack(id, which, true), OPS.reopen(id, i.meta.status || '')].concat(w === 'inbox' ? [OPS.unaccept(id, [])] : []);
   commit(op('Mark done ' + id, keys, function (M) { steps.forEach(function (s) { s.fn(M); }); }),
     { toast: 'Done: ' + clip(i.title, 60), undo: op('Undo done ' + id, keys, function (M) { back.forEach(function (s) { s.fn(M); }); }) });
 }
@@ -3801,8 +3869,8 @@ function personAdd(line, priority) {
 function deleteTask(id) {
   var i = item(id);
   if (!i || whereOf(id) !== 'open') return;
-  var refs = ignorable(getSub(i, 'ref').map(function (b) { return b.v; }));
-  var lines = refs.map(function (r) { return r + ' | ' + todayStr() + ' | deleted by user (' + id + ')'; });
+  var refs = ignorable(getSub(i, 'source-key').map(function (b) { return b.v; }));
+  var lines = refs.map(function (r) { return ignoredLine(r, todayStr(), 'deleted by user (' + id + ')'); });
   var text = serItem(i);
   if (S.sel === id) { S.panel = false; S.sel = null; }
   commit(OPS.del(id, lines), { toast: 'Deleted ' + id + '.' + (lines.length ? ' Its source won’t be proposed again.' : ''), undo: OPS.undel(text, lines) });
@@ -3815,13 +3883,13 @@ function chase(id) {
   var line = aLine(id, nowStamp(), 'Draft a short, polite chaser to ' + who + ' about: ' + waitTitle(i) + '. Ask for an update or a firm date.');
   commit(OPS.addAsk(line), { toast: 'Queued for the agent: a chaser to ' + who + '.', undo: OPS.removeAsk(line) });
 }
-function gotIt(id) { var i = item(id); if (!i) return; patch(id, { st: '' }, 'Marked as received. ' + id + ' is back in ' + (i.meta.ty === 'Meeting' ? 'Upcoming' : i.meta.ty === 'FYI' ? 'FYI' : 'Next actions') + '.', OPS.meta(id, { st: 'Waiting' })); }
-function acknowledge(id) { var i = item(id); if (!i) return; commit(OPS.complete(id, todayStr()), { toast: 'Filed ' + id + ' as read.', undo: OPS.reopen(id, i.meta.st || '') }); }
+function gotIt(id) { var i = item(id); if (!i) return; patch(id, { status: '' }, 'Marked as received. ' + id + ' is back in ' + (i.meta.type === 'meeting' ? 'Upcoming' : i.meta.type === 'fyi' ? 'FYI' : 'Next actions') + '.', OPS.meta(id, { status: 'waiting' })); }
+function acknowledge(id) { var i = item(id); if (!i) return; commit(OPS.complete(id, todayStr()), { toast: 'Filed ' + id + ' as read.', undo: OPS.reopen(id, i.meta.status || '') }); }
 function makeTask(id) {
   var i = item(id);
   if (!i) return;
-  var prev = { ty: i.meta.ty || '', urg: i.meta.urg || '', p: i.meta.p || '' };
-  patch(id, { ty: 'Task', urg: isDay(i.meta.due) ? urgFor(i.meta.due) : 'week', p: i.meta.p && i.meta.p !== '3' ? i.meta.p : '2' }, id + ' is now a task in Next actions.', OPS.meta(id, prev));
+  var prev = { type: i.meta.type || '', urgency: i.meta.urgency || '', priority: i.meta.priority || '' }, due = dueOf(i.meta);
+  patch(id, { type: 'task', urgency: isDay(due) ? urgFor(due) : 'this week', priority: i.meta.priority && i.meta.priority !== 'low' ? i.meta.priority : 'medium' }, id + ' is now a task in Next actions.', OPS.meta(id, prev));
 }
 function addQuick() {
   var q = parseQuick(S.qa || '', S.qaType);
@@ -3834,13 +3902,13 @@ function addQuick() {
   if (it) toastShow('Added ' + out.id + ' to ' + listName(it) + ' · ' + when(it).label + (q.prjNew.length ? ' · new project ' + q.prjNew.join(', ') : ''), OPS.removeAdded(out.id));
   render();
 }
-function setDue(id, date, time) {
+function setItemDue(id, date, time) {
   var i = item(id);
   if (!i) return;
   if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
   if (date && parseInt(date, 10) < 1990) return;
-  var p = { due: date ? date + (time ? ' ' + time : '') : '' };
-  if (date && i.meta.ty !== 'FYI') p.urg = urgFor(date);
+  var p = duePatch(date ? date + (time ? ' ' + time : '') : '');
+  if (date && i.meta.type !== 'fyi') p.urgency = urgFor(date);
   patch(id, p);
 }
 // the Item or Record an ID names, and the Comment at k among its Comments
@@ -3975,7 +4043,7 @@ var ACT = {
     var id = did(el), done = function () { S.copied = id; render(); setTimeout(function () { if (S.copied === id) { S.copied = null; render(); } }, 1500); };
     try { navigator.clipboard.writeText(id).then(done, function () { fallbackCopy(id); done(); }); } catch (e) { fallbackCopy(id); done(); }
   },
-  status: function (el) { var v = dvv(el); patch(did(el), { st: v === 'To do' ? '' : v }); },
+  status: function (el) { patch(did(el), { status: dvv(el) || '' }); },
   accept: function (el) { accept(did(el)); },
   'done-now': function (el) { doneNow(did(el)); },
   snooze: function (el) { snoozeItem(did(el), +dvv(el)); },
@@ -4087,13 +4155,13 @@ var ACT = {
   'check-person': function (el) {
     var p = personOf(did(el));
     if (!p) return;
-    var prev = p.meta.chk || '';
-    commit(OPS.patchPerson(p.name, { chk: todayStr() }, todayStr()), { toast: p.name + ' marked as checked today.', undo: OPS.patchPerson(p.name, { chk: prev }, todayStr()) });
+    var prev = p.meta['checked-date'] || '';
+    commit(OPS.patchPerson(p.name, { 'checked-date': todayStr() }, todayStr()), { toast: p.name + ' marked as checked today.', undo: OPS.patchPerson(p.name, { 'checked-date': prev }, todayStr()) });
   },
   'p-st': function (el) {
     var p = personOf(did(el)), v = dvv(el);
-    if (!p || (p.meta.st || '') === v) return;
-    commit(OPS.patchPerson(p.name, { st: v }, todayStr()), { toast: v === 'Left' ? p.name + ' marked as left.' : p.name + ' is active again.', undo: OPS.patchPerson(p.name, { st: p.meta.st === 'Left' ? '' : 'Left' }, todayStr()) });
+    if (!p || (p.meta.status || '') === v) return;
+    commit(OPS.patchPerson(p.name, { status: v }, todayStr()), { toast: v === 'left' ? p.name + ' marked as left.' : p.name + ' is active again.', undo: OPS.patchPerson(p.name, { status: p.meta.status || '' }, todayStr()) });
   },
   'p-remove': function (el) {
     var p = personOf(did(el));
@@ -4134,13 +4202,13 @@ function same(a, b) { return a.length === b.length && a.every(function (x, k) { 
 var CH = {
   done: function (el) { var id = did(el), had = document.activeElement === el, nb = neighbour(id); toggleDone(id); if (had && nb) focusLater('.main [data-row="' + nb + '"] input[type="checkbox"], .main [data-row="' + nb + '"] .t'); },
   title: function (el) { var id = did(el), i = item(id), v = cleanTitle(el.value); if (!i) return; if (!v) { forceClear(el.id); render(); return; } if (v !== i.title) commit(OPS.title(id, v)); },
-  due: function (el) { var id = did(el), i = item(id); if (i) setDue(id, el.value, timeOf(i.meta.due)); },
-  'due-time': function (el) { var id = did(el), i = item(id); if (!i) return; var d = String(i.meta.due || '').slice(0, 10); if (!isDay(d)) { if (!el.value) return; d = todayStr(); } setDue(id, d, el.value); },
-  urg: function (el) { patch(did(el), { urg: el.value }); },
-  p: function (el) { patch(did(el), { p: el.value }); },
-  ty: function (el) { var p = { ty: el.value }, i = item(did(el)); if (i && !isDay(i.meta.due)) { if (el.value === 'FYI') p.urg = 'fyi'; else if (i.meta.urg === 'fyi') p.urg = 'week'; } patch(did(el), p); },
+  due: function (el) { var id = did(el), i = item(id); if (i) setItemDue(id, el.value, i.meta['due-time'] || ''); },
+  'due-time': function (el) { var id = did(el), i = item(id); if (!i) return; var d = i.meta['due-date'] || ''; if (!isDay(d)) { if (!el.value) return; d = todayStr(); } setItemDue(id, d, el.value); },
+  urg: function (el) { patch(did(el), { urgency: el.value }); },
+  p: function (el) { patch(did(el), { priority: el.value }); },
+  ty: function (el) { var p = { type: el.value }, i = item(did(el)); if (i && !isDay(dueOf(i.meta))) { if (el.value === 'fyi') p.urgency = 'fyi'; else if (i.meta.urgency === 'fyi') p.urgency = 'this week'; } patch(did(el), p); },
   who: function (el) { var i = item(did(el)), v = cleanName(el.value); if (i && v !== realWho(i)) patch(did(el), { who: v }); },
-  asg: function (el) { var v = el.value ? el.value.replace('T', ' ').slice(0, 16) : ''; patch(did(el), { asg: v }); },
+  asg: function (el) { var v = el.value ? el.value.replace('T', ' ').slice(0, 16) : ''; patch(did(el), { 'received-datetime': v, 'received-date': '' }); },
   desc: function (el) { var id = did(el), r = recIn(S.m, id); if (r && cleanText(el.value) !== descOf(r.x)) commit(OPS.desc(id, el.value)); },
   sub: function (el) { var id = did(el), k = +el.getAttribute('data-i'), i = item(id), s = i ? subsOf(i)[k] : null; if (s) commit(OPS.setSub(id, k, s.v, el.checked)); },
   'link-done': function (el) { S.linkDone = el.checked; render(); },
@@ -4151,14 +4219,14 @@ var CH = {
   pf: function (el) {
     var p = personOf(did(el)), k = el.getAttribute('data-f'), v = cleanName(el.value);
     if (!p) return;
-    if ((k === 'grp' ? p.grp : (p.meta[k] || '')) === v) return;
+    if ((k === 'group' ? p.grp : (p.meta[k] || '')) === v) return;
     var o = {}; o[k] = v;
     commit(OPS.patchPerson(p.name, o, todayStr()));
   },
-  'p-ext': function (el) { var p = personOf(did(el)); if (p) commit(OPS.patchPerson(p.name, { ext: el.checked ? 'Y' : '' }, todayStr())); },
+  'p-ext': function (el) { var p = personOf(did(el)); if (p) commit(OPS.patchPerson(p.name, { external: el.checked ? 'yes' : '' }, todayStr())); },
   'e-name': function (el) { var id = did(el), e = entById(id), v = cleanName(el.value); if (!e) return; if (!v) { forceClear(el.id); render(); return; } if (v !== e.name) commit(OPS.renameEnt(kindOf(id), id, v)); },
   'e-type': function (el) { commit(OPS.patchEnt(kindOf(did(el)), did(el), { type: el.value })); },
-  'e-st': function (el) { commit(OPS.patchEnt(kindOf(did(el)), did(el), { st: el.value })); },
+  'e-st': function (el) { commit(OPS.patchEnt(kindOf(did(el)), did(el), { status: el.value })); },
   'e-parent': function (el) { var id = did(el), D = EDEF[kindOf(id)], o = {}; o[D.pk] = el.value; commit(OPS.patchEnt(kindOf(id), id, o)); },
   'e-owner': function (el) { var e = entById(did(el)), v = cleanName(el.value); if (e && v !== (e.meta.owner || '')) commit(OPS.patchEnt('SYS', did(el), { owner: v })); },
   'e-grp': function (el) { var e = entById(did(el)), v = cleanName(el.value); if (e && v !== e.grp) commit(OPS.entGroup(kindOf(did(el)), did(el), v)); },
@@ -4232,7 +4300,7 @@ var SUB = {
     var ex = entsOf(kind).filter(function (e) { return e.name.toLowerCase() === name.toLowerCase(); })[0];
     if (ex) { toastShow('There is already a ' + D.word + ' called “' + ex.name + '”.'); return; }
     var out = {}, meta = { type: S.addType || D.types[0] };
-    if (kind === 'PRJ') meta.st = 'Active';
+    if (kind === 'PRJ') meta.status = 'active';
     commit(OPS.createEnt(kind, name, meta, out), { toast: 'Added ' + D.word + ' ' + (out.id || '') + '.' });
     S.adding = null; S.addName = '';
     if (out.id) { go(kind === 'PRJ' ? 'project' : 'system', out.id); select(out.id); }
@@ -4244,7 +4312,7 @@ var SUB = {
     commit(OPS.addPerson(name, grp), { toast: 'Added ' + name + ' to People.', undo: OPS.removePerson(name) });
     S.adding = null; S.addName = ''; S.addGrp = '';
     var p = personByName(name);
-    if (p && p.meta.id) select(p.meta.id, { focus: '#pf-co' }); else render();
+    if (p && p.meta.id) select(p.meta.id, { focus: '#pf-company' }); else render();
   }
 };
 
