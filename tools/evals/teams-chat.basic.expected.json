@@ -3,7 +3,7 @@
   "description": "One Teams run over the Example covering E18 and E19, the mention filter, priority people, files, commitments, asks with a shared reply pool, a watched channel and an out-of-scope chat.",
   "setup": [
     "Make a scratch data folder as README.md in this folder describes (a copy of the Example, discerny-example, as of its last commit), and connect the helper to it.",
-    "In its SOURCES.md teams-chat block, add \"- fixture: <absolute path to tools/evals/fixtures/teams-chat/basic>\" and change mention_read_cap to 2 (E18)."
+    "In its SOURCES.md teams-chat block, add \"- fixture: <absolute path to tools/evals/fixtures/teams-chat/basic>\" and change mention-read-cap to 2 (E18)."
   ],
   "expect": [
     {
@@ -34,12 +34,12 @@
     {
       "eval": "-",
       "message": "1760259000000",
-      "result": "Kept (inbound 1:1): new item to decide on quarantining lot RF-2214, who:Kwame Mensah; may propose relate to T-0007."
+      "result": "Kept (inbound 1:1): new item to decide on quarantining lot RF-2214, who: Kwame Mensah; may propose relate to T-0007."
     },
     {
       "eval": "-",
       "message": "1760266800000",
-      "result": "New item (priority person, 1:1): one-page audit readiness summary, due:2026-10-28, p:1."
+      "result": "New item (priority person, 1:1): one-page audit readiness summary, due-date: 2026-10-28, priority: high."
     },
     {
       "eval": "-",
@@ -49,7 +49,7 @@
     {
       "eval": "-",
       "message": "1760025600000",
-      "result": "Commitment: send the QP-08 training slides to Kwame, due:2026-10-14, p:2."
+      "result": "Commitment: send the QP-08 training slides to Kwame, due-date: 2026-10-14, priority: medium."
     },
     {
       "eval": "-",
@@ -84,7 +84,7 @@
     {
       "eval": "-",
       "message": "1760097600000",
-      "result": "Dropped by exclude_chat (lunch club)."
+      "result": "Dropped by exclude-chat (lunch club)."
     },
     {
       "eval": "E25",
@@ -94,7 +94,7 @@
     {
       "eval": "-",
       "message": "state",
-      "result": "watermark 2026-10-12T16:00:00Z, waiting_checked_through 2026-10-11T16:00:00Z, last_run 2026-10-12T16:00:00Z; discern check passes."
+      "result": "watermark 2026-10-12T16:00:00Z, waiting-checked-through 2026-10-11T16:00:00Z, last-run 2026-10-12T16:00:00Z; discern check passes."
     }
   ]
 }

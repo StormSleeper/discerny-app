@@ -7,7 +7,7 @@ description: Upgrades a Discerny data folder in an older Format to the app's, on
 
 Find the Discerny data folder as "Start here" in `AGENTS.md` says, and follow its "Rules for every edit". Run the helper from the app folder: `node tools/discern.mjs <command> --dir <data folder>`. `migrations/README.md` says what a Migration holds, if you need more than this skill gives.
 
-Never change the folder before the user has seen what will change and said yes. Never edit `DISCERNY.md`: only the helper records the Format. When you edit a file yourself, keep its line endings. A field a Migration fills in is not a change to the record, so it gets no `hist:` line and no new `chk:` date.
+Never change the folder before the user has seen what will change and said yes. Never edit `DISCERNY.md`: only the helper records the Format. When you edit a file yourself, keep its line endings. A field a Migration fills in is not a change to the record, so it gets no `history` line and no new `checked-date`.
 
 ## Upgrade
 

@@ -14,6 +14,9 @@ const CLI = path.join(REPO, 'tools', 'discern.mjs');
 const DATA = path.resolve(process.env.DISCERNY_TEST_DATA || path.join(REPO, '..', 'discerny-example'));
 const NOW = '2026-10-12T15:00:00Z';
 const DATES = path.join('tools', 'refresh-dates.mjs');
+// OLD is the Example as last committed with the short field codes, which the tests of the older Migrations start from;
+// BASE is the Example as committed, upgraded to the app's Format, which every other test starts from.
+const OLD = pinned(committed(shortCodes()));
 const BASE = upgraded(pinned(committed()));
 const FORMAT = /var FORMAT='([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'))[1];
 
@@ -21,18 +24,25 @@ const FORMAT = /var FORMAT='([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'disc
 // changes it. The tests expect exact results (next IDs, inbox contents), so they read it as of
 // its last git commit and ignore uncommitted edits. A folder named in $DISCERNY_TEST_DATA, or
 // one that is not the top of its own git repository, is copied as it stands.
-function committed() {
+function committed(rev = 'HEAD') {
   if (process.env.DISCERNY_TEST_DATA) return DATA;
   const top = spawnSync('git', ['-C', DATA, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
   if (top.status !== 0 || fs.realpathSync(top.stdout.trim()) !== fs.realpathSync(DATA)) return DATA;
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-base-'));
   const tar = path.join(d, '..', path.basename(d) + '.tar');
-  const a = spawnSync('git', ['-C', DATA, 'archive', '-o', tar, 'HEAD'], { encoding: 'utf8' });
+  const a = spawnSync('git', ['-C', DATA, 'archive', '-o', tar, rev], { encoding: 'utf8' });
   if (a.status !== 0) throw new Error(`git archive failed in ${DATA}: ${a.stderr}`);
   const x = spawnSync('tar', ['-xf', tar, '-C', d], { encoding: 'utf8' });
   fs.rmSync(tar, { force: true });
   if (x.status !== 0) throw new Error(`tar failed: ${x.stderr}`);
   return d;
+}
+
+// The commit before the one that took the short codes ("{ty:") out of the Example's TASKS.md, or HEAD while it has them.
+function shortCodes() {
+  const git = (...args) => spawnSync('git', ['-C', DATA, ...args], { encoding: 'utf8' });
+  const h = git('log', '-1', '--format=%H', '-S', '{ty:', '--', 'TASKS.md').stdout?.trim();
+  return h && !git('show', `${h}:TASKS.md`).stdout.includes('{ty:') ? `${h}~1` : 'HEAD';
 }
 
 // The tests expect the dates the Example had on Monday 12 October 2026, so its date tool shifts
@@ -50,20 +60,21 @@ function pinned(d) {
 }
 
 // The tests expect the Example in the app's Format, so their copy is upgraded first when it is older.
-// The Upgrade's backup beside it is deleted.
+// A Migration whose instructions stop the Upgrade is recorded as done: the Example needs none of them carried
+// out, since they only ask who the user is, and its user is P-0001 already. The Upgrade's backup beside it is deleted.
+// The upgraded copy is a new folder, so the one given stays as it was.
 function upgraded(d) {
   const up = (...args) => {
     const r = spawnSync(process.execPath, [CLI, 'upgrade', ...args, '--dir', d], { encoding: 'utf8' });
-    if (r.status !== 0) throw new Error(`upgrade ${args.join(' ')} failed on ${d}: ${r.stdout}${r.stderr}`);
-    return JSON.parse(r.stdout);
+    const json = r.status === 0 || r.status === 2 ? JSON.parse(r.stdout) : null;
+    if (!json || (r.status === 2 && !json.stopped)) throw new Error(`upgrade ${args.join(' ')} failed on ${d}: ${r.stdout}${r.stderr}`);
+    return json;
   };
   if (!up().pending.length) return d;
-  if (d === DATA) {
-    const c = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-base-'));
-    fs.cpSync(d, c, { recursive: true, filter: (f) => path.basename(f) !== '.git' });
-    d = c;
-  }
-  up('--write');
+  const c = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-base-'));
+  fs.cpSync(d, c, { recursive: true, filter: (f) => path.basename(f) !== '.git' });
+  d = c;
+  for (let r = up('--write'); r.stopped; r = up('--write')) up('--done', r.stopped);
   fs.readdirSync(path.dirname(d)).filter(n => n.startsWith(path.basename(d) + '.backup-'))
     .forEach(n => fs.rmSync(path.join(path.dirname(d), n), { recursive: true, force: true }));
   return d;
@@ -187,10 +198,10 @@ test('every source skill command refuses a folder in another Format with exit 2,
     [['match'], [{ scheme: 'mail', subject: 'Review' }]],
     [['who', 'ihartley']],
     [['local', '2026-10-24T09:00:00Z']],
-    [['add'], [draft()]],
+    [['add', 'outlook-mail'], [draft()]],
     [['meetings'], [event()]],
-    [['ignore'], [{ ref: 'mail|Bake-off Friday sign-up', reason: 'social' }]],
-    [['note', 'T-0028', 'Print order moved']],
+    [['ignore'], [{ 'source-key': 'mail|Bake-off Friday sign-up', reason: 'social' }]],
+    [['comment', 'T-0028', '--author', 'email', 'Print order moved']],
     [['ref', 'T-0020', 'cal|2026-10-23|fable range 2027 – go/no-go']],
     [['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z']],
     [['log'], 'outlook-mail · fetched 3'],
@@ -253,8 +264,10 @@ test('mail matching: short subjects, ambiguity, notices, waiting and replies (E1
   assert.equal(by.E4.outcome, 'waiting');
   assert.deepEqual(by.E4.ids, ['T-0022']);
   assert.equal(by.E4.who, 'Helena Sørensen');
-  assert.match(by.E5.action, /T-0007 chased 2026-10-09/);
-  assert.match(by.E6.action, /you replied 2026-10-09, consider closing T-0009/);
+  // News from the person an Item waits on is a Comment to acknowledge; what the user did is a Comment needing none.
+  assert.match(by.E4.action, /^if it is from the person T-0022 waits on, comment: discern comment T-0022 --author email --to-acknowledge "Helena replied on <d Mon>: <what they said, in a sentence>"/);
+  assert.equal(by.E5.action, 'comment: discern comment T-0007 --author email "Chased <who> on 9 Oct."');
+  assert.equal(by.E6.action, 'comment: discern comment T-0009 --author email "You replied on 9 Oct."');
   assert.equal(by.acc.outcome, 'drop');
   assert.equal(by.ign.outcome, 'ignored');
   assert.equal(by.self.from_user, true);
@@ -271,7 +284,7 @@ test('a mail on a tracked Meeting\'s thread that asks for or promises work is a 
   assert.equal(m.outcome, 'open');
   assert.deepEqual(m.ids, ['T-0013']);
   assert.match(m.action, /ask, a commitment or a material change \(a new agenda, a pre-read\)[^;]*new Task related to T-0013, due before it starts \(2026-10-22 10:00\)/);
-  assert.match(m.action, /new place or attendance[^;]*update to T-0013/);
+  assert.match(m.action, /new place is a Comment to acknowledge on T-0013; a new attendee is an involves Relationship to propose with T-0013/);
   assert.match(m.action, /new time or a cancellation[^;]*nothing: the calendar keeps T-0013 in step/);
   assert.doesNotMatch(m.action, /unless it adds an ask/);
 });
@@ -280,8 +293,8 @@ test('an ask ambiguous between a Meeting and another Item may update the other I
   const r = run(folder(), ['match'], [{ key: 'E2', scheme: 'mail', subject: 'Re: Management review', sender: 'oliver.pemberton@pennywhistle.example' }]);
   const e2 = r.json[0];
   assert.equal(e2.outcome, 'ambiguous');
-  assert.match(e2.action, /plainly continues T-0030, propose an update to it/);
-  assert.match(e2.action, /about T-0013 is assessed as a new Task related to T-0013[^;]*name T-0013, T-0030 in its note/);
+  assert.match(e2.action, /plainly continues T-0030, it is news on it: a new Due date, status or person with discern change T-0030 --author email --field <due-date, due-time, status or who>/);
+  assert.match(e2.action, /about T-0013 is assessed as a new Task related to T-0013[^;]*name T-0013, T-0030 in its description/);
   assert.doesNotMatch(e2.action, /one of T-00\d\d, T-00\d\d/);
 });
 
@@ -297,7 +310,7 @@ test('an ask on the thread of a Meeting still in the Inbox is a new Task related
 test('a calendar candidate is never the user\'s own message, even when the user organises the event and is passed as its sender', () => {
   const r = run(folder(), ['match'], [
     { key: 'prep', scheme: 'cal', subject: 'Supplier quality day', date: '2026-10-28', suffix: 'prep', sender: 'imogen.hartley@pennywhistle.example' },
-    { key: 'event', scheme: 'cal', subject: 'Supplier quality day', date: '2026-10-28', event_id: 'AAMk-sqd', sender: 'imogen.hartley@pennywhistle.example' },
+    { key: 'event', scheme: 'cal', subject: 'Supplier quality day', date: '2026-10-28', 'event-id': 'AAMk-sqd', sender: 'imogen.hartley@pennywhistle.example' },
   ]);
   for (const x of r.json) {
     assert.equal(x.from_user, undefined, x.key);
@@ -310,14 +323,15 @@ test('a calendar candidate is never the user\'s own message, even when the user 
 test('a decline for a Meeting with 4 people invited is a Task to reply to the sender, due a day after it was received', () => {
   const r = run(folder(), ['match'], [
     { key: 'dec', scheme: 'mail', subject: 'Declined: Goods-in walkthrough', sender: 'meera.ilangovan@pennywhistle.example',
-      when: '2026-10-13T12:00:00Z', invited: 4, meeting_start: { dateTime: '2026-10-20T10:00:00', timeZone: 'Europe/London' } },
+      when: '2026-10-13T12:00:00Z', invited: 4, 'meeting-start': { dateTime: '2026-10-20T10:00:00', timeZone: 'Europe/London' } },
   ]);
   assert.equal(r.code, 0, r.out);
   const [dec] = r.json;
   assert.equal(dec.outcome, 'reply');
   assert.equal(dec.title, 'Reply to Meera Ilangovan: Goods-in walkthrough');
   assert.equal(dec.who, 'Meera Ilangovan');
-  assert.equal(dec.due, '2026-10-14 13:00');
+  assert.equal(dec['due-date'], '2026-10-14');
+  assert.equal(dec['due-time'], '13:00');
 });
 
 test('a decline for a Meeting with 5 people invited, and a cancellation, are dropped even when they match a tracked Item', () => {
@@ -335,7 +349,7 @@ test('a decline whose event the agent could not find, a tentative proposing a ne
   const from = { sender: 'declan.moss@pennywhistle.example', when: '2026-10-13T12:00:00Z' };
   const r = run(folder(), ['match'], [
     { key: 'unknown', scheme: 'mail', subject: 'Declined: Rig design review', ...from },
-    { key: 'newtime', scheme: 'mail', subject: 'Tentative: Rig design review', new_time: true, invited: 9, ...from },
+    { key: 'newtime', scheme: 'mail', subject: 'Tentative: Rig design review', 'new-time': true, invited: 9, ...from },
     { key: 'tent', scheme: 'mail', subject: 'Tentative: Rig design review', invited: 9, ...from },
     { key: 'asks', scheme: 'mail', subject: 'Accepted: Rig design review', asks: true, invited: 9, ...from },
     { key: 'acc', scheme: 'mail', subject: 'Accepted: Rig design review', invited: 2, ...from },
@@ -357,16 +371,16 @@ test('a reply Task due on a Saturday or Sunday is due on the Monday at the same 
   const dec = when => ({ key: when, scheme: 'mail', subject: 'Declined: Goods-in walkthrough', sender: 'meera.ilangovan@pennywhistle.example', when, invited: 3 });
   const r = run(folder(), ['match'], [dec('2026-10-15T12:00:00Z'), dec('2026-10-16T12:00:00Z'), dec('2026-10-17T08:30:00Z')]);
   assert.equal(r.code, 0, r.out);
-  assert.deepEqual(r.json.map(x => x.due), ['2026-10-16 13:00', '2026-10-19 13:00', '2026-10-19 09:30']);
+  assert.deepEqual(r.json.map(x => `${x['due-date']} ${x['due-time']}`), ['2026-10-16 13:00', '2026-10-19 13:00', '2026-10-19 09:30']);
 });
 
 test('a reply Task is due at the Meeting\'s start when the Meeting starts before the day is up', () => {
   const r = run(folder(), ['match'], [
     { key: 'soon', scheme: 'mail', subject: 'Declined: Goods-in walkthrough', sender: 'meera.ilangovan@pennywhistle.example',
-      when: '2026-10-16T12:00:00Z', invited: 3, meeting_start: { dateTime: '2026-10-19T08:00:00', timeZone: 'UTC' } },
+      when: '2026-10-16T12:00:00Z', invited: 3, 'meeting-start': { dateTime: '2026-10-19T08:00:00', timeZone: 'UTC' } },
   ]);
   assert.equal(r.code, 0, r.out);
-  assert.equal(r.json[0].due, '2026-10-19 09:00');
+  assert.deepEqual([r.json[0]['due-date'], r.json[0]['due-time']], ['2026-10-19', '09:00']);
 });
 
 test('teams matching: legacy and new refs, containers by prefix (E19)', () => {
@@ -390,7 +404,7 @@ test('calendar matching: tracked, moved, cancelled (E20, E21)', () => {
   const d = folder();
   const r = run(d, ['match'], [
     { key: 'E20', scheme: 'cal', subject: 'Mk4 FAI – Tue 20 Oct', start: { dateTime: '2026-10-20T10:30:00', timeZone: 'Europe/London' } },
-    { key: 'E21', scheme: 'cal', subject: 'Fable Range 2027 – go/no-go', date: '2026-10-23', event_id: 'AAMkAGI-fable-gonogo-1021' },
+    { key: 'E21', scheme: 'cal', subject: 'Fable Range 2027 – go/no-go', date: '2026-10-23', 'event-id': 'AAMkAGI-fable-gonogo-1021' },
     { key: 'cancel', scheme: 'cal', subject: 'Canceled: Management review – Q3 2026', date: '2026-10-22', cancelled: true },
     { key: 'new', scheme: 'cal', subject: 'Calibration review', date: '2026-10-26' },
   ]);
@@ -408,8 +422,8 @@ test('calendar matching: tracked, moved, cancelled (E20, E21)', () => {
 test('calendar matching: a free event is a Meeting only when tracked and declined, and never gets prep or an invite (E26)', () => {
   const d = folder();
   const r = run(d, ['match'], [
-    { key: 'tracked', scheme: 'cal', subject: 'Imogen / Oliver 1:1', start: { dateTime: '2026-10-13T16:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-imogen-oliver-1013', free: true },
-    { key: 'untracked', scheme: 'cal', subject: 'Lunch and learn: laser cutter safety', date: '2026-10-14', event_id: 'AAMkAGI-lunch-learn-1014', free: true },
+    { key: 'tracked', scheme: 'cal', subject: 'Imogen / Oliver 1:1', start: { dateTime: '2026-10-13T16:00:00', timeZone: 'Europe/London' }, 'event-id': 'AAMkAGI-imogen-oliver-1013', free: true },
+    { key: 'untracked', scheme: 'cal', subject: 'Lunch and learn: laser cutter safety', date: '2026-10-14', 'event-id': 'AAMkAGI-lunch-learn-1014', free: true },
     { key: 'prep', scheme: 'cal', subject: 'Imogen / Oliver 1:1', date: '2026-10-13', suffix: 'prep', free: true },
     { key: 'invite', scheme: 'cal', subject: 'Lunch and learn: laser cutter safety', date: '2026-10-14', suffix: 'invite', free: true },
   ]);
@@ -428,20 +442,20 @@ test('calendar matching: a free event is a Meeting only when tracked and decline
 });
 
 const event = (o = {}) => ({ subject: 'Calibration review', start: { dateTime: '2026-10-14T09:00:00', timeZone: 'UTC' },
-  event_id: 'AAMkAGI-calibration-1014', organizer: 'declan.moss@pennywhistle.example', organizer_name: 'Declan Moss', ...o });
+  'event-id': 'AAMkAGI-calibration-1014', organizer: 'declan.moss@pennywhistle.example', 'organizer-name': 'Declan Moss', ...o });
 
 test('meetings drops a free event the user hasn\'t declined, writing nothing, and keeps a free declined one in step (E26)', () => {
   const d = folder();
   const before = read(d, 'TASKS.md');
   const evs = [
-    event({ subject: 'Imogen / Oliver 1:1', start: { dateTime: '2026-10-13T16:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-imogen-oliver-1013', free: true }),
-    event({ subject: 'Lunch and learn: laser cutter safety', event_id: 'AAMkAGI-lunch-learn-1014', free: true }),
+    event({ subject: 'Imogen / Oliver 1:1', start: { dateTime: '2026-10-13T16:00:00', timeZone: 'Europe/London' }, 'event-id': 'AAMkAGI-imogen-oliver-1013', free: true }),
+    event({ subject: 'Lunch and learn: laser cutter safety', 'event-id': 'AAMkAGI-lunch-learn-1014', free: true }),
   ];
   const r = run(d, ['meetings'], evs);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json, { added: [], moved: [], cancelled: [], unchanged: [], dropped: ['Imogen / Oliver 1:1', 'Lunch and learn: laser cutter safety'] });
   assert.equal(read(d, 'TASKS.md'), before, 'no calid source key, no new item, no counter change');
-  const declined = run(d, ['meetings'], [event({ subject: 'Weekly QA sync', start: { dateTime: '2026-10-15T09:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-weekly-qa-sync-1015', free: true, declined: true })]);
+  const declined = run(d, ['meetings'], [event({ subject: 'Weekly QA sync', start: { dateTime: '2026-10-15T09:00:00', timeZone: 'Europe/London' }, 'event-id': 'AAMkAGI-weekly-qa-sync-1015', free: true, declined: true })]);
   assert.deepEqual(declined.json.cancelled, [{ id: 'T-0031', title: 'Cancelled: Weekly QA sync' }]);
   assert.deepEqual(declined.json.dropped, []);
   assert.equal(run(d, ['check']).code, 0);
@@ -453,8 +467,8 @@ test('meetings puts a new event straight into TASKS.md as an open Meeting, due a
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.added, [{ id: 'T-0032', title: 'Calibration review', due: '2026-10-14 10:00' }]);
   const tasks = read(d, 'TASKS.md');
-  assert.match(tasks, /^- \[ \] T-0032 Calibration review \{ty:Meeting; who:Declan Moss; urg:week; p:2; due:2026-10-14 10:00; asg:2026-10-12 16:00\}\r?$/m);
-  assert.match(tasks, /  - ref: cal\|2026-10-14\|calibration review\r?\n  - ref: calid\|AAMkAGI-calibration-1014/);
+  assert.match(tasks, /^- \[ \] T-0032 Calibration review \{type: meeting; who: Declan Moss; urgency: this week; priority: medium; due-date: 2026-10-14; due-time: 10:00; received-datetime: 2026-10-12 16:00\}\r?$/m);
+  assert.match(tasks, /  - source-key: cal\|2026-10-14\|calibration review\r?\n  - source-key: calid\|AAMkAGI-calibration-1014/);
   assert.match(tasks, /<!-- next-id: 33 -->/);
   assert.doesNotMatch(read(d, 'INBOX.md'), /Calibration review/);
   assert.equal(run(d, ['check']).code, 0);
@@ -462,7 +476,7 @@ test('meetings puts a new event straight into TASKS.md as an open Meeting, due a
 
 test('meetings matches a Meeting already tracked by its cal source key, and a second run adds and changes nothing', () => {
   const d = folder();
-  const qa = event({ subject: 'Weekly QA sync', start: { dateTime: '2026-10-15T09:00:00', timeZone: 'GMT Standard Time' }, event_id: 'AAMkAGI-weekly-qa-sync-1015' });
+  const qa = event({ subject: 'Weekly QA sync', start: { dateTime: '2026-10-15T09:00:00', timeZone: 'GMT Standard Time' }, 'event-id': 'AAMkAGI-weekly-qa-sync-1015' });
   const first = run(d, ['meetings'], [event(), qa]);
   assert.equal(first.code, 0, first.out);
   assert.deepEqual(first.json.added.map(a => a.id), ['T-0032']);
@@ -474,27 +488,35 @@ test('meetings matches a Meeting already tracked by its cal source key, and a se
   assert.equal(read(d, 'TASKS.md'), after);
 });
 
-test('meetings gives a moved Meeting its new Due date and title, and a second run leaves it be', () => {
+test('meetings gives a moved Meeting its new Due date and title, with a Comment to acknowledge for each of due-date and due-time that moved, and a second run leaves it be', () => {
   const d = folder();
-  const moved = event({ subject: 'Fable Range 2027 – go/no-go', start: { dateTime: '2026-10-23T14:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-fable-gonogo-1021' });
+  const moved = event({ subject: 'Fable Range 2027 – go/no-go', start: { dateTime: '2026-10-23T14:00:00', timeZone: 'Europe/London' }, 'event-id': 'AAMkAGI-fable-gonogo-1021' });
   const r = run(d, ['meetings'], [moved]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.moved, [{ id: 'T-0020', title: 'Fable Range 2027 – go/no-go', from: '2026-10-21 14:00', to: '2026-10-23 14:00' }]);
   assert.deepEqual(r.json.added, []);
   const tasks = read(d, 'TASKS.md');
-  assert.match(tasks, /^- \[ \] T-0020 Fable Range 2027 – go\/no-go \{ty:Meeting; who:Hattie Lindqvist; prj:PRJ-0001; tg:Product Safety; urg:soon; p:1; due:2026-10-23 14:00; dep:T-0019; asg:2026-10-05 09:10\}\r?$/m);
-  assert.match(tasks, /  - ref: cal\|2026-10-23\|fable range 2027 – go\/no-go/);
+  assert.match(tasks, /^- \[ \] T-0020 Fable Range 2027 – go\/no-go \{type: meeting; who: Hattie Lindqvist; projects: PRJ-0001; tags: Product Safety; urgency: soon; priority: high; due-date: 2026-10-23; due-time: 14:00; dependencies: T-0019; received-datetime: 2026-10-05 09:10\}\r?$/m);
+  assert.match(tasks, /  - source-key: cal\|2026-10-23\|fable range 2027 – go\/no-go/);
+  assert.match(tasks, /\n  - comment: \{added-datetime: 2026-10-12 16:00; author: calendar; acknowledged: no; changed: due-date; from: 2026-10-21; to: 2026-10-23\}\r?\n    Moved in the calendar\.\r?\n/);
+  assert.doesNotMatch(tasks, /changed: due-time/, 'its time of day stayed');
+  // moved to another time on the same day: one change, to due-time
+  const later = run(d, ['meetings'], [{ ...moved, start: { dateTime: '2026-10-23T16:30:00', timeZone: 'Europe/London' } }]);
+  assert.equal(later.code, 0, later.out);
+  assert.match(read(d, 'TASKS.md'), /\n  - comment: \{added-datetime: 2026-10-12 16:00; author: calendar; acknowledged: no; changed: due-time; from: 14:00; to: 16:30\}\r?\n    Moved in the calendar\.\r?\n/);
+  assert.equal(read(d, 'TASKS.md').match(/author: calendar; acknowledged: no; changed: due-date/g).length, 1);
+  fs.writeFileSync(path.join(d, 'TASKS.md'), tasks);
   const again = run(d, ['meetings'], [moved]);
   assert.deepEqual(again.json.unchanged, ['T-0020']);
   assert.equal(read(d, 'TASKS.md'), tasks);
   assert.equal(run(d, ['check']).code, 0);
 });
 
-test('meetings keeps a cancelled or declined Meeting open, retitled "Cancelled: …" with a note of when, and adds no untracked cancelled one', () => {
+test('meetings keeps a cancelled or declined Meeting open, retitled "Cancelled: …" with a Comment to acknowledge, and adds no untracked cancelled one', () => {
   const d = folder();
   const evs = [
-    event({ subject: 'Canceled: Weekly QA sync', start: { dateTime: '2026-10-15T09:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-weekly-qa-sync-1015', cancelled: true }),
-    event({ subject: 'Imogen / Oliver 1:1', start: { dateTime: '2026-10-13T16:00:00', timeZone: 'Europe/London' }, event_id: 'AAMkAGI-imogen-oliver-1013', declined: true }),
+    event({ subject: 'Canceled: Weekly QA sync', start: { dateTime: '2026-10-15T09:00:00', timeZone: 'Europe/London' }, 'event-id': 'AAMkAGI-weekly-qa-sync-1015', cancelled: true }),
+    event({ subject: 'Imogen / Oliver 1:1', start: { dateTime: '2026-10-13T16:00:00', timeZone: 'Europe/London' }, 'event-id': 'AAMkAGI-imogen-oliver-1013', declined: true }),
     event({ cancelled: true }),
   ];
   const r = run(d, ['meetings'], evs);
@@ -502,9 +524,9 @@ test('meetings keeps a cancelled or declined Meeting open, retitled "Cancelled: 
   assert.deepEqual(r.json.cancelled, [{ id: 'T-0031', title: 'Cancelled: Weekly QA sync' }, { id: 'T-0018', title: 'Cancelled: 1:1 with Oliver' }]);
   assert.deepEqual(r.json.added, []);
   const tasks = read(d, 'TASKS.md');
-  assert.match(tasks, /^- \[ \] T-0031 Cancelled: Weekly QA sync \{ty:Meeting; [^}]*due:2026-10-15 09:00;/m);
+  assert.match(tasks, /^- \[ \] T-0031 Cancelled: Weekly QA sync \{type: meeting; [^}]*due-date: 2026-10-15; due-time: 09:00;/m);
   assert.match(tasks, /^- \[ \] T-0018 Cancelled: 1:1 with Oliver \{/m);
-  assert.equal(tasks.match(/  - note: Found cancelled by the calendar Run on 2026-10-12 16:00/g).length, 2);
+  assert.equal(tasks.match(/\n  - comment: \{added-datetime: 2026-10-12 16:00; author: calendar; acknowledged: no\}\r?\n    Found cancelled\.\r?\n/g).length, 2);
   assert.doesNotMatch(tasks, /Calibration review/);
   assert.doesNotMatch(read(d, 'DONE.md'), /T-0031|T-0018/);
   const again = run(d, ['meetings'], evs);
@@ -514,10 +536,10 @@ test('meetings keeps a cancelled or declined Meeting open, retitled "Cancelled: 
 
 test('meetings never takes an older prep item carrying the Meeting\'s plain cal source key for the Meeting itself', () => {
   const d = folder();
-  const prep = { title: 'Prepare for Calibration review (14 Oct 10:00)', ty: 'Meeting', urg: 'week', p: 2, due: '2026-10-14 10:00', derived: true,
-    src: 'Calendar "Calibration review" organised by Declan Moss', refs: ['cal|2026-10-14|calibration review'] };
-  assert.equal(run(d, ['add'], [prep]).code, 0);
-  const r = run(d, ['meetings'], [event({ event_id: undefined })]);
+  const prep = { title: 'Prepare for Calibration review (14 Oct 10:00)', type: 'meeting', urgency: 'this week', priority: 'medium', 'due-date': '2026-10-14', 'due-time': '10:00', derived: true,
+    origin: 'Calendar "Calibration review" organised by Declan Moss', 'source-keys': ['cal|2026-10-14|calibration review'] };
+  assert.equal(run(d, ['add', 'outlook-mail'], [prep]).code, 0);
+  const r = run(d, ['meetings'], [event({ 'event-id': undefined })]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.added.map(a => a.title), ['Calibration review']);
   assert.deepEqual(r.json.unchanged, []);
@@ -525,47 +547,90 @@ test('meetings never takes an older prep item carrying the Meeting\'s plain cal 
   assert.equal(run(d, ['check']).code, 0);
 });
 
-const draft = (o = {}) => ({ title: 'Review the supplier sampling plan', ty: 'Task', who: 'Meera Ilangovan', urg: 'week', p: 2,
-  received: '2026-10-24T09:00:00Z', src: 'Email "Sampling plan" from Meera Ilangovan (24 Oct)', refs: ['mail|Sampling plan'], notes: ['Asks for comments by Fri.'], ...o });
+const draft = (o = {}) => ({ title: 'Review the supplier sampling plan', type: 'task', who: 'Meera Ilangovan', urgency: 'this week', priority: 'medium',
+  'received-datetime': '2026-10-24T09:00:00Z', origin: 'Email "Sampling plan" from Meera Ilangovan (24 Oct)', 'source-keys': ['mail|Sampling plan'], description: 'Asks for comments by Fri.', ...o });
 
 test('add raises the counter first, writes the inbox and refuses duplicates (E10)', () => {
   const d = folder();
-  const r = run(d, ['add'], [draft(), draft({ title: 'Prepare for supplier review', ty: 'Meeting', due: '2026-11-03 14:00', refs: ['mail|Supplier review – Feltcraft'] })]);
+  const r = run(d, ['add', 'outlook-mail'], [draft(), draft({ title: 'Prepare for supplier review', type: 'meeting', 'due-date': '2026-11-03', 'due-time': '14:00', 'source-keys': ['mail|Supplier review – Feltcraft'] })]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.added.map(a => a.id), ['T-0032', 'T-0033']);
   assert.ok(r.json.added[1].refs.includes('cal|2026-11-03|supplier review – feltcraft'));
   assert.match(read(d, 'TASKS.md'), /<!-- next-id: 34 -->/);
-  assert.match(read(d, 'INBOX.md'), /T-0032 Review the supplier sampling plan \{ty:Task; who:Meera Ilangovan; urg:week; p:2; asg:2026-10-24 10:00\}/);
-  const again = run(d, ['add'], [draft()]);
+  assert.match(read(d, 'INBOX.md'), /T-0032 Review the supplier sampling plan \{type: task; who: Meera Ilangovan; urgency: this week; priority: medium; received-datetime: 2026-10-24 10:00; source: outlook-mail\}/);
+  const again = run(d, ['add', 'outlook-mail'], [draft()]);
   assert.equal(again.code, 1);
   assert.match(again.json.error, /duplicate/);
   assert.equal(run(d, ['check']).code, 0);
 });
 
-test('add enforces the who rule and derives asg for derived items', () => {
+test('add enforces the who rule and derives received-datetime for derived items', () => {
   const d = folder();
-  const bad = run(d, ['add'], [draft({ who: 'Ilangovan, Meera' })]);
+  const bad = run(d, ['add', 'outlook-mail'], [draft({ who: 'Ilangovan, Meera' })]);
   assert.equal(bad.code, 1);
   assert.match(bad.json.error, /not a name in PEOPLE.md/);
-  const ok = run(d, ['add'], [draft({ received: undefined, derived: true, refs: ['cal|2026-10-20|mk4 fai – tue 20 oct|invite'] })]);
+  const ok = run(d, ['add', 'outlook-mail'], [draft({ 'received-datetime': undefined, derived: true, 'source-keys': ['cal|2026-10-20|mk4 fai – tue 20 oct|invite'] })]);
   assert.equal(ok.code, 0, ok.out);
-  assert.match(read(d, 'INBOX.md'), /asg:2026-10-12 16:00/);
+  assert.match(read(d, 'INBOX.md'), /received-datetime: 2026-10-12 16:00/);
+});
+
+test('add refuses the keys and values of older Formats, naming each key\'s new name, and writes nothing', () => {
+  const d = folder(), before = snapshot(d);
+  const old = { title: 'Review the plan', ty: 'Task', urg: 'week', p: 2, received: '2026-10-24T09:00:00Z', src: 'Email', refs: ['mail|Old keys'], due: '2026-10-30', st: 'Waiting', prj: 'PRJ-0001', tg: 'x', dep: 'T-0001', meeting_subject: 'x' };
+  const r = run(d, ['add', 'outlook-mail'], [old]);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.json.error, /^nothing was written/);
+  for (const [k, now] of [['ty', 'type'], ['urg', 'urgency'], ['p', 'priority'], ['received', 'received-datetime'], ['src', 'origin'], ['refs', 'source-keys'],
+    ['due', 'due-date and due-time'], ['st', 'status'], ['prj', 'projects'], ['tg', 'tags'], ['dep', 'dependencies'], ['meeting_subject', 'meeting-subject']]) {
+    assert.ok(r.json.error.includes(`draft 0: ${k} is an old name, not read: write ${now}`), `${k}: ${r.json.error}`);
+  }
+  for (const [o, said] of [[{ type: 'Task' }, /type must be one of task, meeting/], [{ urgency: 'week' }, /urgency must be one of today, this week/],
+    [{ priority: 2 }, /priority must be one of high, medium, low/], [{ status: 'Waiting' }, /status must be waiting or in progress/],
+    [{ 'due-date': '2026-10-30 09:00' }, /a time goes in due-time/], [{ 'due-time': '09:00' }, /due-time goes only beside a due-date/]]) {
+    const b = run(d, ['add', 'outlook-mail'], [draft(o)]);
+    assert.equal(b.code, 1, `${JSON.stringify(o)}: ${b.out}`);
+    assert.match(b.json.error, said);
+  }
+  assert.deepEqual(snapshot(d), before);
+});
+
+test('every helper command that reads JSON refuses an old key with exit 1, and writes nothing', () => {
+  const d = noChanges(folder()), before = snapshot(d);
+  for (const [args, input, key, now] of [
+    [['match'], [{ scheme: 'mail', subject: 'Samples', sender_name: 'Meera' }], 'sender_name', 'sender-name'],
+    [['match'], [{ scheme: 'mail', subject: 'Samples', meeting_date: '2026-10-20' }], 'meeting_date', 'meeting-date'],
+    [['match'], [{ scheme: 'cal', subject: 'QA weekly', date: '2026-10-12', event_id: 'ev1' }], 'event_id', 'event-id'],
+    [['propose', 'outlook-mail'], [rel(['T-0012', 'T-0025'], { 'received-datetime': undefined, received: '2026-10-12T08:14:00Z' })], 'received', 'received-datetime'],
+    [['propose', 'outlook-calendar'], [rel(['T-0012', 'T-0025'], { 'received-datetime': undefined, event_date: '2026-10-27' })], 'event_date', 'event-date'],
+    [['meetings'], [event({ 'event-id': undefined, event_id: 'AAMkAGI-calibration-1014' })], 'event_id', 'event-id'],
+    [['meetings'], [event({ web_link: 'https://example.test/e' })], 'web_link', 'web-link'],
+    [['ignore'], [{ ref: 'mail|Bake-off Friday sign-up', reason: 'social' }], 'ref', 'source-key'],
+  ]) {
+    const r = run(d, args, input);
+    assert.equal(r.code, 1, `${args[0]} ${key}: ${r.out}`);
+    assert.match(r.json.error, new RegExp(`${key} is an old name, not read: write ${now}`), `${args[0]} ${key}`);
+  }
+  assert.deepEqual(snapshot(d), before);
 });
 
 test('an interrupted run leaves a gap, never a duplicate ID (E14)', () => {
   const d = folder();
   fs.writeFileSync(path.join(d, 'TASKS.md'), read(d, 'TASKS.md').replace('<!-- next-id: 32 -->', '<!-- next-id: 34 -->'));
-  const r = run(d, ['add'], [draft()]);
+  const r = run(d, ['add', 'outlook-mail'], [draft()]);
   assert.deepEqual(r.json.added.map(a => a.id), ['T-0034']);
   assert.equal(run(d, ['check']).code, 0);
 });
 
 test('ignore refuses containers unless asked and skips repeats', () => {
   const d = folder();
-  assert.equal(run(d, ['ignore'], [{ ref: 'teams|lunchclub|*', reason: 'personal' }]).code, 1);
-  const r = run(d, ['ignore'], [{ ref: 'teams|lunchclub|*', reason: 'personal', container: true }, { ref: 'mail|Bake-off Friday sign-up', reason: 'social' }]);
+  assert.equal(run(d, ['ignore'], [{ 'source-key': 'teams|lunchclub|*', reason: 'personal' }]).code, 1);
+  const r = run(d, ['ignore'], [{ 'source-key': 'teams|lunchclub|*', reason: 'personal', container: true }, { 'source-key': 'mail|Bake-off Friday sign-up', reason: 'social' }]);
   assert.equal(r.json.ignored, 1);
-  assert.match(read(d, 'IGNORED.md'), /teams\|lunchclub\|\* \| 2026-10-12 \| personal/);
+  assert.match(read(d, 'IGNORED.md'), /^- teams\|lunchclub\|\* \{ignored-date: 2026-10-12; reason: personal\}$/m);
+  // a reason never breaks the braces
+  assert.equal(run(d, ['ignore'], [{ 'source-key': 'mail|Weekly digest', reason: 'noise; {automated}' }]).json.ignored, 1);
+  assert.match(read(d, 'IGNORED.md'), /^- mail\|Weekly digest \{ignored-date: 2026-10-12; reason: noise, ,automated,\}$/m);
+  assert.equal(run(d, ['ignore'], [{ 'source-key': 'mail|Weekly digest' }]).json.ignored, 0, 'read back as ignored');
 });
 
 test('add and ignore create a missing INBOX.md or IGNORED.md with the starter file\'s header', () => {
@@ -574,8 +639,8 @@ test('add and ignore create a missing INBOX.md or IGNORED.md with the starter fi
   const d = folder();
   fs.rmSync(path.join(d, 'INBOX.md'));
   fs.rmSync(path.join(d, 'IGNORED.md'));
-  assert.equal(run(d, ['add'], [draft()]).code, 0);
-  assert.equal(run(d, ['ignore'], [{ ref: 'mail|Bake-off Friday sign-up', reason: 'social' }]).code, 0);
+  assert.equal(run(d, ['add', 'outlook-mail'], [draft()]).code, 0);
+  assert.equal(run(d, ['ignore'], [{ 'source-key': 'mail|Bake-off Friday sign-up', reason: 'social' }]).code, 0);
   assert.equal(header(read(d, 'INBOX.md')), starter('INBOX.md'));
   assert.equal(header(read(d, 'IGNORED.md')), starter('IGNORED.md'));
 });
@@ -588,7 +653,9 @@ test('state: day windows from the cursor minus overlap, ask window, horizon and 
   assert.equal(s.windows.at(-1).before, NOW);
   assert.deepEqual(s.ask_window, { after: '2026-10-07T21:14:03Z', before: '2026-10-11T15:00:00Z' });
   assert.equal(s.user.name, 'Imogen Hartley');
-  assert.equal(s.priority_people[0].name, 'Oliver Pemberton');
+  assert.equal(s['priority-people'][0].name, 'Oliver Pemberton');
+  assert.equal(s['page-cap'], 10);
+  assert.deepEqual(s.user.emails, ['imogen.hartley@pennywhistle.example']);
   run(d, ['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z']);
   assert.equal(run(d, ['state', 'outlook-mail']).json.windows[0].after, '2026-10-10T11:05:41Z');
   const h = run(d, ['state', 'outlook-calendar']).json;
@@ -615,8 +682,8 @@ test('state hands out the ask window as day-long ask windows, oldest first, so a
   ]);
 });
 
-// A Run that read two windows and then spent page_cap inside the third commits that window's start as split.
-const tooBig = ['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z', 'split=2026-10-10T13:05:41Z', 'waiting_checked_through=2026-10-11T15:00:00Z', `last_run=${NOW}`];
+// A Run that read two windows and then spent page-cap inside the third commits that window's start as split.
+const tooBig = ['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z', 'split=2026-10-10T13:05:41Z', 'waiting-checked-through=2026-10-11T15:00:00Z', `last-run=${NOW}`];
 
 test('state hands out the day a Run found too big as hour-long windows, and the days either side a day long', () => {
   const d = folder();
@@ -634,10 +701,10 @@ test('commit takes the end of an hour in the split day as a watermark, keeps spl
   const d = folder();
   assert.equal(run(d, tooBig).code, 0);
   const later = '2026-10-12T18:00:00Z';
-  const inside = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-10T18:05:41Z', `last_run=${later}`]);
+  const inside = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-10T18:05:41Z', `last-run=${later}`]);
   assert.equal(inside.code, 0, inside.out);
   assert.match(read(d, 'SOURCES.md'), /- split: 2026-10-10T13:05:41Z/);
-  const past = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-11T13:05:41Z', `last_run=${later}`]);
+  const past = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-11T13:05:41Z', `last-run=${later}`]);
   assert.equal(past.code, 0, past.out);
   assert.doesNotMatch(read(d, 'SOURCES.md'), /split:/);
 });
@@ -645,32 +712,40 @@ test('commit takes the end of an hour in the split day as a watermark, keeps spl
 test('commit creates a block and replaces list keys with a value', () => {
   const d = folder();
   run(d, ['commit', 'gmail', 'watermark=2026-10-05T00:00:00Z', 'overlap=PT2H']);
-  run(d, ['commit', 'teams-chat', 'exclude_chat=19:lunch-club', 'last_result=fetched 3, inbox +1']);
+  run(d, ['commit', 'teams-chat', 'exclude-chat=19:lunch-club', 'last-result=fetched 3, inbox +1']);
   const t = read(d, 'SOURCES.md');
   assert.match(t, /## gmail\n- watermark: 2026-10-05T00:00:00Z\n- overlap: PT2H/);
-  assert.match(t, /- exclude_chat: 19:lunch-club\n- exclude_text/);
-  assert.match(t, /- last_result: fetched 3, inbox \+1/);
+  assert.match(t, /- exclude-chat: 19:lunch-club\n- exclude-text/);
+  assert.match(t, /- last-result: fetched 3, inbox \+1/);
+});
+
+test('commit refuses a key that is not written with hyphens, naming the key it should be, and writes nothing', () => {
+  const d = folder(), before = read(d, 'SOURCES.md');
+  const r = run(d, ['commit', 'outlook-mail', 'last_run=2026-10-12T15:00:00Z']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.json.error, /last_run is not a SOURCES\.md key[^"]*last-run/);
+  assert.equal(read(d, 'SOURCES.md'), before);
 });
 
 // The Example's outlook-mail Run at NOW reads from 8 Oct 13:05:41 (the watermark less 2 hours) in five windows:
 // four a day long, then 12 Oct 13:05:41 to 15:00. Its ask window runs from 7 Oct 21:14:03 to 11 Oct 15:00.
 test('commit after a Run reports a source caught up when its watermark and ask cursor reach the ends of their windows', () => {
   const d = folder();
-  const r = run(d, ['commit', 'outlook-mail', `watermark=${NOW}`, 'waiting_checked_through=2026-10-11T15:00:00Z', `last_run=${NOW}`]);
+  const r = run(d, ['commit', 'outlook-mail', `watermark=${NOW}`, 'waiting-checked-through=2026-10-11T15:00:00Z', `last-run=${NOW}`]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.behind, { days: 0, report: 'outlook-mail: caught up' });
 });
 
 test('commit after a Run that stopped one window short reports one day still to read', () => {
   const d = folder();
-  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-12T13:05:41Z', 'waiting_checked_through=2026-10-11T15:00:00Z', `last_run=${NOW}`]);
+  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-12T13:05:41Z', 'waiting-checked-through=2026-10-11T15:00:00Z', `last-run=${NOW}`]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.behind, { days: 1, report: 'outlook-mail: 1 day still to read, run again' });
 });
 
 test('commit after a Run that read two of its five windows reports three days still to read', () => {
   const d = folder();
-  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z', 'waiting_checked_through=2026-10-11T15:00:00Z', `last_run=${NOW}`]);
+  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-10T13:05:41Z', 'waiting-checked-through=2026-10-11T15:00:00Z', `last-run=${NOW}`]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.behind, { days: 3, report: 'outlook-mail: 3 days still to read, run again' });
 });
@@ -678,59 +753,91 @@ test('commit after a Run that read two of its five windows reports three days st
 test('commit refuses a watermark that is not the end of one of the Run\'s windows with exit 1, names the ends, and writes nothing', () => {
   const d = folder();
   const before = read(d, 'SOURCES.md');
-  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-11T09:30:00Z', `last_run=${NOW}`, 'last_result=fetched 40']);
+  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-11T09:30:00Z', `last-run=${NOW}`, 'last-result=fetched 40']);
   assert.equal(r.code, 1, r.out);
   assert.match(r.json.error, /watermark 2026-10-11T09:30:00Z/);
   assert.match(r.json.error, /2026-10-09T13:05:41Z, 2026-10-10T13:05:41Z, 2026-10-11T13:05:41Z, 2026-10-12T13:05:41Z, 2026-10-12T15:00:00Z/);
   assert.equal(read(d, 'SOURCES.md'), before);
 });
 
-test('commit takes the watermark a source already has, from a Run that spent page_cap inside its first window', () => {
+test('commit takes the watermark a source already has, from a Run that spent page-cap inside its first window', () => {
   const d = folder();
-  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-08T15:05:41Z', 'split=2026-10-08T13:05:41Z', `last_run=${NOW}`]);
+  const r = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-08T15:05:41Z', 'split=2026-10-08T13:05:41Z', `last-run=${NOW}`]);
   assert.equal(r.code, 0, r.out);
   assert.match(read(d, 'SOURCES.md'), /- watermark: 2026-10-08T15:05:41Z[^]*- split: 2026-10-08T13:05:41Z/);
 });
 
-test('commit takes any watermark when it is not a Run\'s: a start set with no last_run, or a source\'s first', () => {
+test('commit takes any watermark when it is not a Run\'s: a start set with no last-run, or a source\'s first', () => {
   const d = folder();
   assert.equal(run(d, ['commit', 'outlook-mail', 'watermark=2026-10-11T09:30:00Z']).code, 0);
   assert.match(read(d, 'SOURCES.md'), /- watermark: 2026-10-11T09:30:00Z/);
-  const first = run(d, ['commit', 'gmail', 'watermark=2026-10-11T09:30:00Z', `last_run=${NOW}`]);
+  const first = run(d, ['commit', 'gmail', 'watermark=2026-10-11T09:30:00Z', `last-run=${NOW}`]);
   assert.equal(first.code, 0, first.out);
   assert.match(read(d, 'SOURCES.md'), /## gmail\r?\n- watermark: 2026-10-11T09:30:00Z/);
 });
 
-test('commit counts asks still to check only from waiting_max_age before the Run, since older ones have aged out', () => {
+test('commit counts asks still to check only from waiting-max-age before the Run, since older ones have aged out', () => {
   const d = folder();
-  const r = run(d, ['commit', 'outlook-mail', `watermark=${NOW}`, 'waiting_checked_through=2026-09-01T00:00:00Z', `last_run=${NOW}`]);
+  const r = run(d, ['commit', 'outlook-mail', `watermark=${NOW}`, 'waiting-checked-through=2026-09-01T00:00:00Z', `last-run=${NOW}`]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.behind, { days: 20, report: 'outlook-mail: 20 days still to read, run again' });
 });
 
 test('commit after a Run that left an ask unclassified on 9 Oct reports the days of asks still to check, though its watermark caught up', () => {
   const d = folder();
-  const r = run(d, ['commit', 'outlook-mail', `watermark=${NOW}`, 'waiting_checked_through=2026-10-09T09:59:59Z', `last_run=${NOW}`]);
+  const r = run(d, ['commit', 'outlook-mail', `watermark=${NOW}`, 'waiting-checked-through=2026-10-09T09:59:59Z', `last-run=${NOW}`]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json.behind, { days: 3, report: 'outlook-mail: 3 days still to read, run again' });
 });
 
-test('ref is always allowed; note only with apply_task_updates', () => {
+test('ref adds a source key after the others, once', () => {
   const d = folder();
   assert.equal(run(d, ['ref', 'T-0020', 'cal|2026-10-23|fable range 2027 – go/no-go']).code, 0);
-  assert.match(read(d, 'TASKS.md'), /calid\|AAMkAGI-fable-gonogo-1021\n {2}- ref: cal\|2026-10-21\|fable range 2027 – go\/no-go\n {2}- ref: cal\|2026-10-23/);
-  assert.equal(run(d, ['note', 'T-0020', 'Moved to 23 Oct']).code, 2);
-  run(d, ['commit', 'defaults', 'apply_task_updates=true']);
-  assert.equal(run(d, ['note', 'T-0028', 'Print order moved to Thu 15 Oct']).code, 0);
-  assert.match(read(d, 'INBOX.md'), /- note: Print order moved to Thu 15 Oct/);
+  assert.match(read(d, 'TASKS.md'), /calid\|AAMkAGI-fable-gonogo-1021\n {2}- source-key: cal\|2026-10-21\|fable range 2027 – go\/no-go\n {2}- source-key: cal\|2026-10-23/);
+  const tasks = read(d, 'TASKS.md'), again = run(d, ['ref', 'T-0020', 'cal|2026-10-23|fable range 2027 – go/no-go']);
+  assert.equal(again.json.unchanged, true);
+  assert.equal(read(d, 'TASKS.md'), tasks);
+  assert.equal(run(d, ['ref', 'P-0003', 'mail|x']).code, 1);
+});
+
+test('note is no longer a command, and apply_task_updates is gone from the state', () => {
+  const d = folder();
+  assert.equal(run(d, ['note', 'T-0028', 'Print order moved']).code, 1);
+  assert.equal('apply_task_updates' in run(d, ['state', 'outlook-mail']).json, false);
+});
+
+test('comment appends a stamped Comment after the item\'s others, before its sub-tasks, and keeps every other line', () => {
+  const d = folder(), before = read(d, 'TASKS.md');
+  const r = run(d, ['comment', 'T-0001', '--author', 'email', '--to-acknowledge', 'Meera replied on 12 Oct: the fixture passed.']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json, { id: 'T-0001', author: 'email', 'added-datetime': '2026-10-12 16:00', acknowledge: true, file: 'TASKS.md' });
+  const tasks = read(d, 'TASKS.md');
+  assert.match(tasks, /    Ask Meera whether[^\n]*\n  - comment: \{added-datetime: 2026-10-12 16:00; author: email; acknowledged: no\}\n    Meera replied on 12 Oct: the fixture passed\.\n  - \[x\] Root cause analysis signed off\n/);
+  const added = '  - comment: {added-datetime: 2026-10-12 16:00; author: email; acknowledged: no}\n    Meera replied on 12 Oct: the fixture passed.\n';
+  assert.equal(tasks.replace(added, ''), before);
+  // One that needs no acknowledging, and one on a Record, which goes after its Description and links.
+  run(d, ['comment', 'T-0001', '--author', 'email', 'You replied on 12 Oct.']);
+  assert.match(read(d, 'TASKS.md'), /the fixture passed\.\n  - comment: \{added-datetime: 2026-10-12 16:00; author: email\}\n    You replied on 12 Oct\.\n  - \[x\]/);
+  assert.equal(run(d, ['comment', 'PRJ-0001', '--author', 'agent', 'Go/no-go moved to 30 Oct.']).code, 0);
+  assert.match(read(d, 'PROJECTS.md'), /EN71-Test-Plan\.xlsx\)\n  - comment: \{added-datetime: 2026-10-12 16:00; author: agent\}\n    Go\/no-go moved to 30 Oct\.\n- Proscenium/);
+  assert.equal(run(d, ['check']).code, 0);
+});
+
+test('comment refuses a missing author, the user\'s word, a word that isn\'t one, and an ID that isn\'t there', () => {
+  const d = folder(), before = snapshot(d);
+  for (const args of [['T-0001', 'Text'], ['T-0001', '--author', 'user', 'Text'], ['T-0001', '--author', 'Outlook Mail', 'Text'],
+    ['T-0001', '--author', 'email'], ['T-0999', '--author', 'email', 'Text'], ['X-1', '--author', 'email', 'Text']]) {
+    assert.equal(run(d, ['comment', ...args]).code, 1, args.join(' '));
+  }
+  assert.deepEqual(snapshot(d), before);
 });
 
 test('a first name finds the one person who has it, and no one when two do, on its own and as an ask\'s recipient', () => {
   const d = folder();
   assert.equal(run(d, ['who', 'Gus']).json.name, 'Gus Whitfield');
-  const ask = [{ key: 'g', scheme: 'teams', pass: 'ask', chat: '19:gus-imogen_cd34ef@unq.gbl.spaces', message: '1759914000000', recipient_name: 'Gus' }];
+  const ask = [{ key: 'g', scheme: 'teams', pass: 'ask', chat: '19:gus-imogen_cd34ef@unq.gbl.spaces', message: '1759914000000', 'recipient-name': 'Gus' }];
   assert.equal(run(d, ['match'], ask).json[0].who, 'Gus Whitfield');
-  fs.appendFileSync(path.join(d, 'PEOPLE.md'), '- Gus Ortega {id:P-0099; co:Feltcraft}\n');
+  fs.appendFileSync(path.join(d, 'PEOPLE.md'), '- Gus Ortega {id: P-0099; company: Feltcraft}\n');
   assert.equal(run(d, ['who', 'Gus']).json.name, null);
   assert.equal(run(d, ['match'], ask).json[0].who, null);
 });
@@ -751,12 +858,14 @@ test('migrate is no longer a command', () => {
 
 test('add takes lists as arrays or comma-separated strings, and has a dry run', () => {
   const d = folder();
-  const dry = run(d, ['add', '--dry-run'], [draft({ tg: 'Supplier Quality, Document Control', notes: 'One note.' })]);
-  assert.match(dry.json.would_add[0], /tg:Supplier Quality,Document Control/);
+  const dry = run(d, ['add', 'outlook-mail', '--dry-run'], [draft({ tags: 'Supplier Quality, Document Control', description: 'One line.\nAnother.' })]);
+  assert.match(dry.json.would_add[0], /\n  - description: One line\.\n    Another\.\n  - source-key: mail\|Sampling plan$/);
+  assert.equal(run(d, ['add', 'outlook-mail', '--dry-run'], [draft({ notes: ['Old style.'] })]).code, 1);
+  assert.match(dry.json.would_add[0], /tags: Supplier Quality, Document Control/);
   assert.doesNotMatch(read(d, 'INBOX.md'), /Review the supplier sampling plan/);
-  const r = run(d, ['add'], [draft({ tg: ['Supplier Quality', 'Document Control'], prj: 'PRJ-0001' })]);
+  const r = run(d, ['add', 'outlook-mail'], [draft({ tags: ['Supplier Quality', 'Document Control'], projects: 'PRJ-0001' })]);
   assert.equal(r.code, 0, r.out);
-  assert.match(read(d, 'INBOX.md'), /prj:PRJ-0001; tg:Supplier Quality,Document Control/);
+  assert.match(read(d, 'INBOX.md'), /projects: PRJ-0001; tags: Supplier Quality, Document Control/);
 });
 
 // connect and new write config.toml in the app folder, so they run in a throwaway copy of the app,
@@ -954,9 +1063,9 @@ test('upgrade lists the pending Migrations and previews the next, and changes no
 });
 
 // A copy of the Example alone in a fresh folder, so the backups an Upgrade makes beside it can be seen.
-function lone() {
+function lone(base = BASE) {
   const d = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-up-')), 'mine');
-  fs.cpSync(BASE, d, { recursive: true });
+  fs.cpSync(base, d, { recursive: true });
   return d;
 }
 const beside = (d) => fs.readdirSync(path.dirname(d)).sort();
@@ -1091,7 +1200,7 @@ function oldForms(d) {
     `  - ref: teams|ab12cd34${form ? '' : '|*'}`,
     '  - ref: mail|RE: Accepted:  Supplier day  agenda',
     ...(form ? [] : ['  - ref: cal|2026-10-23|supplier day agenda']),
-    '  - note: Bring the samples.',
+    '  - [ ] Bring the samples',
     '',
   ].join('\n');
   const done = (form) => read(d, 'DONE.md') + [
@@ -1116,7 +1225,7 @@ test('the first Migration\'s script imports only Node\'s built-in modules', () =
 });
 
 test('the first Migration previews each fix and changes nothing; --write makes them, keeping line endings; again, it changes nothing', () => {
-  const d = folder(), want = oldForms(d), before = snapshot(d);
+  const d = lone(OLD), want = oldForms(d), before = snapshot(d);
   const p = migrate(d);
   assert.equal(p.status, 0, p.stderr);
   assert.deepEqual(snapshot(d), before);
@@ -1146,7 +1255,7 @@ test('the first Migration finds nothing to change in the Example, and fails on a
 });
 
 test('upgrade previews the first Migration on a folder with the older Source key forms; --write applies it and records the Format; again, nothing is pending', () => {
-  const d = lone(), want = oldForms(d), before = snapshot(d);
+  const d = lone(OLD), want = oldForms(d), before = snapshot(d);
   const r = run(d, ['upgrade']);
   assert.equal(r.code, 0, r.out);
   assert.equal(r.json.folder, '0.1.0.0');
@@ -1154,21 +1263,36 @@ test('upgrade previews the first Migration on a folder with the older Source key
   assert.match(r.json.preview, /T-0033: gains cal\|2026-10-23\|supplier day agenda/);
   assert.match(r.json.preview, /teams\|c40e9a12 becomes teams\|c40e9a12\|\*/);
   assert.deepEqual(snapshot(d), before);
-  const w = run(d, ['upgrade', '--write']);
+  // A later Migration's required instructions stop the Upgrade; this folder's user is P-0001 already, so they need nothing.
+  const upgrade = (x) => {
+    let w = run(x, ['upgrade', '--write']);
+    for (; w.code === 2 && w.json.stopped; w = run(x, ['upgrade', '--write'])) assert.equal(run(x, ['upgrade', '--done', w.json.stopped]).code, 0);
+    return w;
+  };
+  const w = upgrade(d);
   assert.equal(w.code, 0, w.out);
   assert.ok(read(d, 'DISCERNY.md').includes(`<!-- format: ${FORMAT} -->`));
-  assert.deepEqual(beside(d), ['mine', 'mine.backup-0.1.0.0']);
-  for (const [f, t] of Object.entries(want)) assert.equal(read(d, f), t, f);
+  // Each --write that finds Migrations pending backs the folder up first, so a Migration after a stop adds a backup of its own.
+  assert.deepEqual(beside(d).slice(0, 2), ['mine', 'mine.backup-0.1.0.0']);
+  assert.ok(beside(d).slice(2).every(n => n.startsWith('mine.backup-')), beside(d).join(', '));
+  // The later Migrations rewrite these files too, so they are as the same folder would be upgraded from what the first Migration leaves.
+  const ref = lone(OLD);
+  Object.entries(want).forEach(([f, t]) => fs.writeFileSync(path.join(ref, f), t));
+  fs.writeFileSync(path.join(ref, 'DISCERNY.md'), `# Discerny data folder\n\n<!-- format: ${FIRST} -->\n`);
+  assert.equal(upgrade(ref).code, 0);
+  for (const f of Object.keys(want)) assert.equal(read(d, f), read(ref, f), f);
+  assert.match(read(d, 'TASKS.md'), /\n- \[ \] T-0032 Print shop chat \{type: task; urgency: later; priority: low; received-datetime: 2026-10-10 09:00\}\n  - source-key: teams\|c40e9a12\|\*\n/);
+  assert.match(read(d, 'IGNORED.md'), /\n- teams\|99aa88bb\|\* \{ignored-date: 2026-10-01; reason: chatter\}\n/);
   assert.equal(run(d, ['check']).code, 0);
   assert.deepEqual(run(d, ['upgrade']).json.pending, []);
 });
 
 test('transcript items share an event but not a calid ref', () => {
   const d = folder();
-  const m = run(d, ['match'], [{ scheme: 'cal', subject: 'QA weekly', date: '2026-10-12', event_id: 'ev1', suffix: 'transcript-1' }]).json[0];
+  const m = run(d, ['match'], [{ scheme: 'cal', subject: 'QA weekly', date: '2026-10-12', 'event-id': 'ev1', suffix: 'transcript-1' }]).json[0];
   assert.deepEqual(m.refs, ['cal|2026-10-12|qa weekly|transcript-1']);
-  const t = (n) => draft({ title: `Action ${n}`, received: undefined, derived: true, refs: [`cal|2026-10-12|qa weekly|transcript-${n}`, 'calid|ev1'] });
-  assert.equal(run(d, ['add'], [t(1), t(2)]).code, 0);
+  const t = (n) => draft({ title: `Action ${n}`, 'received-datetime': undefined, derived: true, 'source-keys': [`cal|2026-10-12|qa weekly|transcript-${n}`, 'calid|ev1'] });
+  assert.equal(run(d, ['add', 'outlook-mail'], [t(1), t(2)]).code, 0);
 });
 
 
@@ -1183,7 +1307,7 @@ test('refresh-dates --to a week later moves the dates and records the new as-of 
   const d = folder();
   const r = shift(d, '--to', '2026-10-19');
   assert.equal(r.code, 0, r.out);
-  assert.match(read(d, 'TASKS.md'), /T-0001 .*due:2026-10-21; st:In progress; asg:2026-08-10 09:12\}/);
+  assert.match(read(d, 'TASKS.md'), /T-0001 .*due-date: 2026-10-21; status: in progress; received-datetime: 2026-08-10 09:12\}/);
   assert.match(read(d, 'README.md'), /\*\*As of:\*\* Monday 19 October 2026/);
 });
 
@@ -1191,19 +1315,19 @@ test('refresh-dates moves every kind of date, in prose too, and leaves times of 
   const d = folder();
   assert.equal(shift(d, '--to', '2026-11-02').code, 0);
   const tasks = read(d, 'TASKS.md'), inbox = read(d, 'INBOX.md');
-  assert.match(tasks, /due:2026-12-08 09:30; asg:2026-09-02 14:20\}/);
+  assert.match(tasks, /due-date: 2026-12-08; due-time: 09:30; received-datetime: 2026-09-02 14:20\}/);
   assert.match(tasks, /from Meera Ilangovan \(24 Aug\)/);
   assert.match(tasks, /the ISO 9001 audit on 8 Dec\./);
   assert.match(tasks, /Three-day recertification audit, 8–10 Dec,/);
-  assert.match(tasks, /ref: cal\|2026-12-08\|pennywhistle recertification audit/);
+  assert.match(tasks, /source-key: cal\|2026-12-08\|pennywhistle recertification audit/);
   assert.match(inbox, /"Mk4 FAI – Tue 10 Nov"/);
-  assert.match(inbox, /ref: cal\|2026-11-10\|mk4 fai – tue 10 nov/);
-  assert.match(read(d, 'PEOPLE.md'), /hist: 2026-07-22 \| Job title/);
+  assert.match(inbox, /source-key: cal\|2026-11-10\|mk4 fai – tue 10 nov/);
+  assert.match(read(d, 'PEOPLE.md'), /history: \{changed-date: 2026-07-22; changed: title\}/);
   assert.match(read(d, 'PEOPLE.md'), /Left Pennywhistle on 3 Oct 2026\./);
   assert.match(read(d, 'PROJECTS.md'), /Current certificate expires 21 Jan 2027\./);
   assert.match(read(d, 'SOURCES.md'), /watermark: 2026-10-29T15:05:41Z/);
-  assert.match(read(d, 'ASK-AGENT-LOG.md'), /- 2026-10-23 09:05 \| T-0007 \| queued 2026-10-22 16:48 \|.*promised for 6 Nov/);
-  assert.match(read(d, 'IGNORED.md'), /scheduled maintenance Sat 3 Oct \| 2026-09-29 \|/);
+  assert.match(read(d, 'ASK-AGENT-LOG.md'), /- T-0007 \{requested-datetime: 2026-10-22 16:48; actioned-datetime: 2026-10-23 09:05\}\r?\n  - request: .*promised for 6 Nov/);
+  assert.match(read(d, 'IGNORED.md'), /scheduled maintenance Sat 3 Oct \{ignored-date: 2026-09-29;/);
   const draft = read(d, path.join('drafts', 'T-0007-scar-031-chaser.md'));
   assert.match(draft, /Requested: 2026-10-22 16:48/);
   assert.match(draft, /by 6 November\./);
@@ -1434,10 +1558,10 @@ test('serve gives the mtime of every file the page reads in one answer, 0 for a 
   const m = await (await api('api/mtimes')).json();
   assert.equal(m['PEOPLE.md'], Date.parse('2026-10-01T09:00:00Z'));
   assert.equal(m['IGNORED.md'], 0);
-  for (const f of ['TASKS.md', 'INBOX.md', 'DONE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md']) {
+  for (const f of ['TASKS.md', 'INBOX.md', 'DONE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md', 'DISMISSED.md']) {
     assert.equal(m[f], fs.existsSync(path.join(d, f)) ? Math.floor(fs.statSync(path.join(d, f)).mtimeMs) : 0, f);
   }
-  assert.equal(Object.keys(m).length, 12);
+  assert.equal(Object.keys(m).length, 13);
 });
 
 test('serve lists the Drafts, .md and .txt only, by name, and none when there is no drafts folder', async (t) => {
@@ -1656,4 +1780,632 @@ test('serve gives the UI at /', async (t) => {
   assert.equal(r.status, 200);
   assert.match(r.headers.get('Content-Type'), /^text\/html/);
   assert.equal(await r.text(), fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'));
+});
+
+// ---------------------------------------------------------------- Dismisses in DISMISSED.md
+const dismissed = (d, ...lines) => fs.writeFileSync(path.join(d, 'DISMISSED.md'), ['# Dismissed', '<!-- header -->', '', ...lines, ''].join('\n'));
+const dismissedKeys = (text) => text.split('\n').filter(l => l.startsWith('- ')).map(l => l.slice(2, l.lastIndexOf(' {')));
+
+test('match drops a candidate whose source key is in DISMISSED.md, mail by its subject and teams by its message', () => {
+  const d = folder();
+  const mail = { key: 'm', scheme: 'mail', pass: 'inbound', subject: 'Toy fair preview – stand plan', sender: 'someone@example.com', when: '2026-10-12T09:00:00Z' };
+  const chat = { key: 't', scheme: 'teams', pass: 'inbound', chat: '19:abcdef0123456789abcdef@thread.v2', message: '1760259600000', sender: 'someone@example.com', when: '2026-10-12T09:00:00Z' };
+  const first = run(d, ['match'], [mail, chat]).json;
+  assert.deepEqual(first.map(r => r.outcome), ['new', 'new']);
+  dismissed(d, ...first.map(r => `- ${r.ref} {source: outlook-mail; received-datetime: 2026-10-12 10:00; dismissed-date: 2026-10-12; reason: not actionable}`));
+  const again = run(d, ['match'], [{ ...mail, subject: 'RE: Toy fair preview – stand plan' }, chat, { ...chat, key: 'other', message: '1760259700000' }]).json;
+  assert.deepEqual(again.map(r => [r.outcome, r.action]), [['dismissed', 'drop'], ['dismissed', 'drop'], ['new', 'assess: capture it if actionable or FYI, otherwise ignore it']]);
+  const dup = run(d, ['add', 'outlook-mail'], [draft({ 'source-keys': [first[0].ref] })]);
+  assert.equal(dup.code, 1);
+  assert.match(dup.json.error, /already in the folder/);
+});
+
+test('add names the source each Proposal came from, and refuses without one or with one SOURCES.md lacks', () => {
+  const d = folder();
+  const none = run(d, ['add'], [draft()]);
+  assert.equal(none.code, 1);
+  assert.match(none.json.error, /discern add <source>/);
+  const bad = run(d, ['add', 'outlook-mial'], [draft()]);
+  assert.equal(bad.code, 1);
+  assert.match(bad.json.error, /no "## outlook-mial" block/);
+  assert.equal(run(d, ['add', 'defaults'], [draft()]).code, 1);
+  const ok = run(d, ['add', 'teams-chat'], [draft()]);
+  assert.equal(ok.code, 0, ok.out);
+  assert.match(read(d, 'INBOX.md'), /T-0032 Review the supplier sampling plan \{[^}]*; source: teams-chat\}/);
+});
+
+test('commit forgets a Dismiss once its source can no longer read the message again, and only then', () => {
+  const d = folder();
+  dismissed(d,
+    '- mail|Old thing {source: outlook-mail; received-datetime: 2026-10-10 09:00; dismissed-date: 2026-10-10; reason: not actionable}',
+    '- mail|Recent thing {source: outlook-mail; received-datetime: 2026-10-12 14:30; dismissed-date: 2026-10-12; reason: not mine}',
+    '- mail|Undated {source: outlook-mail; dismissed-date: 2026-10-12; reason: duplicate}',
+    '- cal|2026-10-11|qa weekly|prep {source: outlook-calendar; event-date: 2026-10-11; dismissed-date: 2026-10-10; reason: not actionable}',
+    '- cal|2026-10-14|qa weekly|prep {source: outlook-calendar; event-date: 2026-10-14; dismissed-date: 2026-10-10; reason: not actionable}',
+    '- mail|No source {received-datetime: 2026-10-10 09:00; dismissed-date: 2026-10-10; reason: not actionable}');
+  const left = () => dismissedKeys(read(d, 'DISMISSED.md'));
+  // 2026-10-12 14:30 in London is 13:30Z; the cursor is the watermark less PT2H.
+  let c = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-12T15:00:00Z']);
+  assert.equal(c.code, 0, c.out);
+  assert.equal(c.json.forgotten, 2);
+  assert.deepEqual(left(), ['mail|Recent thing', 'mail|Undated', 'cal|2026-10-14|qa weekly|prep', 'mail|No source']);
+  // A line naming no source waits for every stream source, teams-chat too.
+  c = run(d, ['commit', 'teams-chat', 'watermark=2026-10-12T15:00:00Z']);
+  assert.equal(c.json.forgotten, 1);
+  assert.deepEqual(left(), ['mail|Recent thing', 'mail|Undated', 'cal|2026-10-14|qa weekly|prep']);
+  c = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-12T16:00:00Z']);
+  assert.equal(c.json.forgotten, 1);
+  // With no time, the end of the day it was dismissed bounds the message.
+  assert.deepEqual(left(), ['mail|Undated', 'cal|2026-10-14|qa weekly|prep']);
+  c = run(d, ['commit', 'outlook-calendar', 'last-run=2026-10-15T09:00:00Z'], undefined, '2026-10-15T09:00:00Z');
+  assert.equal(c.json.forgotten, 1);
+  assert.deepEqual(left(), ['mail|Undated']);
+  c = run(d, ['commit', 'outlook-mail', 'watermark=2026-10-14T00:00:00Z']);
+  assert.equal(c.json.forgotten, 1);
+  assert.deepEqual(left(), []);
+  assert.match(read(d, 'DISMISSED.md'), /^# Dismissed\n<!-- header -->\n/);
+  assert.equal(run(d, ['commit', 'outlook-mail', 'last-result=x']).json.forgotten, 0);
+});
+
+// A file's header comment, on one line or several, swapped for the one an older Format had.
+const withHead = (t, head) => t.replace(/^<!--(?!\s*(?:next-id|format):)[^]*?-->$/m, head);
+
+// The Migration that moved Dismisses out of IGNORED.md: the one whose script creates DISMISSED.md.
+const DISMISS_SCRIPT = fs.readdirSync(path.join(REPO, 'migrations')).map(n => path.join(REPO, 'migrations', n, 'migrate.mjs'))
+  .find(f => fs.existsSync(f) && fs.readFileSync(f, 'utf8').includes("'DISMISSED.md'"));
+const OLD_HEADS = {
+  'IGNORED.md': '<!-- One line per source key never to be proposed again, ignored by a source skill or dismissed by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). -->',
+  'INBOX.md': '<!-- Proposals for new items from the discern-* source skills, waiting for the user to clarify them. Accept moves an item to TASKS.md; Dismiss logs it in IGNORED.md. -->',
+  'SOURCES.md': '<!-- Settings and state for source skills. "## defaults" holds settings every source skill shares; each skill then keeps its own "## <source-name>" block. Times are UTC (ISO 8601); durations are ISO 8601 (PT2H, P1D). Skills change single lines through tools/discern.mjs. See SOURCE-SKILLS.md. -->',
+};
+// A copy of the Example as the Format had it before: Dismisses in IGNORED.md, the old header comments and no
+// DISMISSED.md. INBOX.md has Windows line endings, which the Migration should keep.
+function dismissesIgnored(d) {
+  fs.rmSync(path.join(d, 'DISMISSED.md'), { force: true });
+  const head = (f, t) => withHead(t.replace(/\r\n/g, '\n'), OLD_HEADS[f]);
+  const keep = ['mail|Bake-off Friday sign-up | 2026-09-17 | social', 'mail|Weekly digest | 2026-09-18 | not actionable', 'mail|Mk3 brochure photography – proofs | 2026-10-08 | deleted by user (T-0016)'];
+  fs.writeFileSync(path.join(d, 'IGNORED.md'), ['# Ignored', OLD_HEADS['IGNORED.md'], '', keep[0],
+    'mail|Toy Industry Weekly: autumn trade fair preview | 2026-09-23 | not actionable (T-0010)', keep[1],
+    '- teams|19:c40e9a|1758962400999 | 2026-09-24 | not mine (T-0011)', 'mail|A | b | 2026-09-25 | duplicate (T-0012)',
+    'inbox|Call the printer | 2026-09-26 | already handled (T-0013)', 'mail|Old | 2026-09-27 | dismissed (T-0014)', keep[2], ''].join('\n'));
+  fs.writeFileSync(path.join(d, 'INBOX.md'), head('INBOX.md', read(d, 'INBOX.md')).replace(/\n/g, '\r\n'));
+  fs.writeFileSync(path.join(d, 'SOURCES.md'), head('SOURCES.md', read(d, 'SOURCES.md')));
+  return keep;
+}
+const migrateDismiss = (d, ...args) => spawnSync(process.execPath, [DISMISS_SCRIPT, d, ...args], { encoding: 'utf8' });
+
+test('the Dismiss Migration\'s script imports only Node\'s built-in modules', () => {
+  const src = fs.readFileSync(DISMISS_SCRIPT, 'utf8');
+  const from = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g)].map(m => m[1] || m[2] || m[3]);
+  assert.ok(from.length);
+  assert.deepEqual(from.filter(s => !s.startsWith('node:')), []);
+});
+
+test('the Dismiss Migration previews and changes nothing; --write removes past Dismisses, creates DISMISSED.md and rewords the headers; again, it changes nothing', () => {
+  const d = folder(), keep = dismissesIgnored(d), before = snapshot(d);
+  const p = migrateDismiss(d);
+  assert.equal(p.status, 0, p.stderr);
+  assert.deepEqual(snapshot(d), before);
+  for (const said of ['IGNORED.md', 'removes the Dismiss mail|Toy Industry Weekly', 'not mine (T-0011)', 'duplicate (T-0012)', 'already handled (T-0013)', 'dismissed (T-0014)', 'INBOX.md', 'SOURCES.md', 'DISMISSED.md'])
+    assert.ok(p.stdout.includes(said), `preview lacks "${said}":\n${p.stdout}`);
+  assert.doesNotMatch(p.stdout, /Weekly digest|Bake-off|deleted by user/);
+  const w = migrateDismiss(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  // The starter's headers have changed since, so these are the ones the Migration writes.
+  const ignoredHead = '<!-- One line per source key never to be proposed again, ignored by a source skill or deleted by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). A Proposal the user dismisses goes in DISMISSED.md instead. -->';
+  assert.deepEqual(read(d, 'IGNORED.md').split('\n'), ['# Ignored', ignoredHead, '', ...keep, '']);
+  assert.match(read(d, 'DISMISSED.md'), /^# Dismissed\n<!-- One line per source key of a Proposal the user dismissed, kept until its source can no longer read the message again: [^\n]* -->\n$/);
+  assert.equal(read(d, 'SOURCES.md').split('\n')[1], OLD_HEADS['SOURCES.md'].replace('Times are UTC (ISO 8601); durations are ISO 8601 (PT2H, P1D).',
+    'Times here are UTC (ISO 8601, `2026-10-15T15:05:41Z`), unlike the other files, which use local time in `timezone` (`YYYY-MM-DD HH:MM`). Durations are ISO 8601 (PT2H, P1D).'));
+  assert.match(read(d, 'INBOX.md'), /Dismiss remembers its message in DISMISSED\.md\. -->\r\n/);
+  assert.doesNotMatch(read(d, 'INBOX.md'), /[^\r]\n/);
+  const after = snapshot(d), again = migrateDismiss(d, '--write');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Nothing to change/);
+  assert.deepEqual(snapshot(d), after);
+});
+
+// ---------------------------------------------------------------- change Proposals in the Inbox
+const rel = (ids, o = {}) => ({ change: 'relationship', ids, 'received-datetime': '2026-10-12T08:14:00Z', why: 'Both chase the SCAR-031 8D report.', ...o });
+const newPerson = (o = {}) => ({ change: 'person', name: 'Jo Bloggs', email: 'jo@acme.example', company: 'Acme', title: 'Buyer', items: ['T-0027'], 'received-datetime': '2026-10-12T08:14:00Z', why: 'Asked about the dashboard.', ...o });
+const newEmail = (o = {}) => ({ change: 'email', email: 'meera.i@pennywhistle.example', person: 'P-0003', 'received-datetime': '2026-10-12T08:14:00Z', why: 'Signs as Meera Ilangovan.', ...o });
+// A copy of the Example with no change Proposals of its own, so a test sees only what it proposes.
+function noChanges(d) {
+  const t = read(d, 'INBOX.md'), at = t.search(/^## Changes\r?$/m);
+  if (at >= 0) fs.writeFileSync(path.join(d, 'INBOX.md'), t.slice(0, at).replace(/(\r?\n)+$/, '$1'));
+  return d;
+}
+const changeLines = d => { const t = read(d, 'INBOX.md').replace(/\r\n/g, '\n'); return t.slice(t.search(/^## Changes$/m)).trimEnd().split('\n'); };
+
+test('propose writes a Relationship, a new person and a new email under "## Changes", in the field names of SOURCE-SKILLS.md, and check passes', () => {
+  const d = noChanges(folder()), before = read(d, 'INBOX.md').replace(/\r\n/g, '\n');
+  const r = run(d, ['propose', 'outlook-mail'], [rel(['T-0012', 'T-0025']), rel(['SYS-0001', 'T-0028']), newPerson(), newEmail()]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.skipped, []);
+  assert.deepEqual(changeLines(d), [
+    '## Changes',
+    '- Relate T-0012 and T-0025 {kind: related; source: outlook-mail; received-datetime: 2026-10-12 09:14}',
+    '  - why: Both chase the SCAR-031 8D report.',
+    '- Relate SYS-0001 and T-0028 {kind: concerns; source: outlook-mail; received-datetime: 2026-10-12 09:14}',
+    '  - why: Both chase the SCAR-031 8D report.',
+    '- New person Jo Bloggs {email: jo@acme.example; company: Acme; title: Buyer; items: T-0027; source: outlook-mail; received-datetime: 2026-10-12 09:14}',
+    '  - why: Asked about the dashboard.',
+    '- Add email meera.i@pennywhistle.example to Meera Ilangovan (P-0003) {source: outlook-mail; received-datetime: 2026-10-12 09:14}',
+    '  - why: Signs as Meera Ilangovan.',
+  ]);
+  assert.ok(read(d, 'INBOX.md').replace(/\r\n/g, '\n').startsWith(before.trimEnd() + '\n\n## Changes\n'), 'the Items above are untouched, with one blank line before the heading');
+  const c = run(d, ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.deepEqual(c.json.warnings.filter(w => /INBOX/.test(w)), []);
+});
+
+test('add puts new Items above "## Changes", and a later propose adds below what is there', () => {
+  const d = noChanges(folder());
+  assert.equal(run(d, ['propose', 'outlook-mail'], [rel(['T-0012', 'T-0025'])]).code, 0);
+  const a = run(d, ['add', 'outlook-mail'], [draft()]);
+  assert.equal(a.code, 0, a.out);
+  assert.equal(run(d, ['propose', 'outlook-mail'], [newEmail()]).code, 0);
+  const raw = read(d, 'INBOX.md'), t = raw.replace(/\r\n/g, '\n'), id = a.json.added[0].id;
+  assert.ok(t.indexOf(id) < t.search(/^## Changes$/m), 'the new Item is above the heading');
+  assert.match(t, /  - source-key: mail\|Sampling plan\n\n## Changes\n- Relate T-0012 and T-0025 [^\n]*\n  - why: [^\n]*\n- Add email meera\.i@/);
+  assert.ok(!/\r\n/.test(raw) || !/[^\r]\n/.test(raw), 'one kind of line ending');
+  assert.equal(run(d, ['check']).code, 0);
+});
+
+test('propose skips what is already related, already proposed, said No to, or already someone\'s address, so a second run proposes nothing', () => {
+  const d = noChanges(folder());
+  fs.appendFileSync(path.join(d, 'IGNORED.md'), '- rel|T-0025|T-0009 {ignored-date: 2026-10-10; reason: the user said no}\n- person|no.thanks@acme.example {ignored-date: 2026-10-10; reason: the user said no}\n');
+  const r = run(d, ['propose', 'outlook-mail'], [
+    rel(['T-0007', 'T-0017']), rel(['T-0009', 'T-0025']), newPerson({ email: 'No.Thanks@acme.example' }),
+    newPerson({ name: 'Someone Else', email: 'meera.ilangovan@pennywhistle.example' }), rel(['T-0012', 'T-0025']), rel(['T-0025', 'T-0012']),
+  ]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.proposed, ['- Relate T-0012 and T-0025 {kind: related; source: outlook-mail; received-datetime: 2026-10-12 09:14}']);
+  assert.deepEqual(r.json.skipped.map(s => s.proposal), [0, 1, 2, 3, 5]);
+  assert.match(r.json.skipped[3].why, /Meera Ilangovan's \(P-0003\)/);
+  const again = run(d, ['propose', 'outlook-mail'], [rel(['T-0025', 'T-0012']), newPerson(), newPerson()]);
+  assert.equal(again.code, 0, again.out);
+  assert.equal(again.json.proposed.length, 1, 'Jo Bloggs once');
+  assert.match(again.json.skipped[0].why, /already proposed/);
+  assert.match(again.json.skipped[1].why, /twice in this batch/);
+});
+
+test('propose refuses a Proposal with no why, an end not in the folder, the wrong kind, a known name or a bad address, and writes nothing', () => {
+  const d = folder(), before = read(d, 'INBOX.md');
+  for (const [p, said] of [
+    [rel(['T-0012', 'T-0025'], { why: '' }), /why is required/],
+    [rel(['T-0012', 'T-0999']), /T-0999 is not in the folder: add a new item first/],
+    [rel(['T-0012', 'SYS-0001'], { kind: 'related' }), /can only be concerns, not related/],
+    [rel(['T-0012', 'T-0012']), /itself/],
+    [rel(['T-0012']), /two ends/],
+    [newPerson({ name: 'Meera Ilangovan' }), /already in PEOPLE\.md as P-0003: propose the address as a new email/],
+    [newPerson({ email: 'jo at acme' }), /not an email address/],
+    [newPerson({ items: ['T-0999'] }), /T-0999 is not an open or inbox item/],
+    [newEmail({ person: 'P-0999' }), /P-id of someone in PEOPLE\.md/],
+    [newEmail({ 'received-datetime': undefined }), /give received-datetime/],
+    [{ change: 'rename', why: 'x', 'received-datetime': '2026-10-12T08:14:00Z' }, /relationship, person, email or priority/],
+  ]) {
+    const r = run(d, ['propose', 'outlook-mail'], [newEmail({ email: 'ok@pennywhistle.example' }), p]);
+    assert.equal(r.code, 1, `${JSON.stringify(p)}: ${r.out}`);
+    assert.match(r.json.error, said);
+    assert.match(r.json.error, /^nothing was written/);
+  }
+  assert.equal(run(d, ['propose', 'nowhere'], [rel(['T-0012', 'T-0025'])]).code, 1);
+  assert.equal(read(d, 'INBOX.md'), before);
+});
+
+test('propose --dry-run shows the lines and writes nothing; a horizon source gives event-date in place of received-datetime', () => {
+  const d = folder(), before = read(d, 'INBOX.md');
+  const r = run(d, ['propose', 'outlook-calendar', '--dry-run'], [rel(['T-0029', 'T-0028'], { 'received-datetime': undefined, 'event-date': '2026-10-27' })]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.would_propose, ['- Relate T-0029 and T-0028 {kind: related; source: outlook-calendar; event-date: 2026-10-27}']);
+  assert.equal(read(d, 'INBOX.md'), before);
+});
+
+test('check warns about a line under "## Changes" it cannot read, or a Relationship naming an ID that is gone', () => {
+  const d = folder();
+  fs.appendFileSync(path.join(d, 'INBOX.md'), '\n## Changes\n- Rename T-0012 {source: outlook-mail}\n- Relate T-0012 and T-0999 {kind: related; source: outlook-mail}\n  - why: x\n');
+  const c = run(d, ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.ok(c.json.warnings.some(w => /unrecognised line "- Rename T-0012/.test(w)), c.out);
+  assert.ok(c.json.warnings.some(w => /names T-0999, which does not exist/.test(w)), c.out);
+  assert.ok(!c.json.warnings.some(w => /T-0030: unrecognised/.test(w)), 'the Changes are not taken for lines of the last Item');
+});
+
+// The Migration that brought in change Proposals, found by what it says it does, as next or once it has its number.
+const CHANGES_SCRIPT = (() => {
+  const dir = path.join(REPO, 'migrations');
+  const n = fs.readdirSync(dir).find(x => fs.existsSync(path.join(dir, x, 'migrate.mjs')) && /holds change Proposals too/.test(fs.readFileSync(path.join(dir, x, 'migrate.mjs'), 'utf8')));
+  return path.join(dir, n || 'next', 'migrate.mjs');
+})();
+const OLD_HEADS_2 = {
+  'INBOX.md': '<!-- Proposals for new items from the discern-* source skills, waiting for the user to clarify them. Accept moves an item to TASKS.md; Dismiss remembers its message in DISMISSED.md. IDs come from the next-id counter in TASKS.md. -->',
+  'IGNORED.md': '<!-- One line per source key never to be proposed again, ignored by a source skill or deleted by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). A Proposal the user dismisses goes in DISMISSED.md instead. -->',
+};
+// the headers as that Migration leaves them; a later one rewords them again
+const NEW_HEADS_2 = {
+  'INBOX.md': '<!-- Proposals from the discern-* source skills, waiting for the user to clarify them. New items come first: Accept moves an item to TASKS.md; Dismiss remembers its message in DISMISSED.md. IDs come from the next-id counter in TASKS.md. Changes to records follow under "## Changes", one line each with a "- why:" sub-line: a Relationship, a new person or a new email address, which the user answers Yes or No. -->',
+  'IGNORED.md': '<!-- One line per source key never to be proposed again, ignored by a source skill or deleted by the user: ref | YYYY-MM-DD | reason. Parse from the right (the source key may contain " | "). A Proposal the user dismisses goes in DISMISSED.md instead. A No to a proposed change is kept here too, as rel|<id>|<id> (either order) or person|<address>. -->',
+};
+const migrateChanges = (d, ...args) => spawnSync(process.execPath, [CHANGES_SCRIPT, d, ...args], { encoding: 'utf8' });
+
+test('the change Proposals Migration\'s script imports only Node\'s built-in modules', () => {
+  const src = fs.readFileSync(CHANGES_SCRIPT, 'utf8');
+  const from = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g)].map(m => m[1] || m[2] || m[3]);
+  assert.ok(from.length);
+  assert.deepEqual(from.filter(s => !s.startsWith('node:')), []);
+});
+
+test('the change Proposals Migration previews and changes nothing; --write rewords the INBOX.md and IGNORED.md headers, keeping line endings; again, it changes nothing', () => {
+  const d = folder();
+  for (const f of Object.keys(OLD_HEADS_2)) fs.writeFileSync(path.join(d, f), withHead(read(d, f).replace(/\r\n/g, '\n'), OLD_HEADS_2[f]).replace(/\n/g, f === 'INBOX.md' ? '\r\n' : '\n'));
+  const before = snapshot(d), p = migrateChanges(d);
+  assert.equal(p.status, 0, p.stderr);
+  assert.match(p.stdout, /Would change:\nINBOX\.md\n  header comment reworded\nIGNORED\.md\n  header comment reworded/);
+  assert.deepEqual(snapshot(d), before);
+  const w = migrateChanges(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  for (const f of Object.keys(OLD_HEADS_2)) assert.equal(read(d, f).replace(/\r\n/g, '\n').split('\n')[1], NEW_HEADS_2[f]);
+  assert.doesNotMatch(read(d, 'INBOX.md'), /[^\r]\n/);
+  assert.doesNotMatch(read(d, 'IGNORED.md'), /\r/);
+  const after = snapshot(d), again = migrateChanges(d, '--write');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Nothing to change/);
+  assert.deepEqual(snapshot(d), after);
+});
+
+// The Migration that turns notes into a Description and Comments and makes the user P-0001. It is found by its
+// first line, whatever the build it landed in. Its tests make a small folder in the Format before it, since the
+// Example is in the Format after it.
+const DESCRIPTIONS_SCRIPT = (() => {
+  const dir = path.join(REPO, 'migrations');
+  const n = fs.readdirSync(dir).find(x => fs.existsSync(path.join(dir, x, 'migrate.mjs')) && /^\/\/ Notes become a Description and Comments/.test(fs.readFileSync(path.join(dir, x, 'migrate.mjs'), 'utf8')));
+  return path.join(dir, n, 'migrate.mjs');
+})();
+const migrateNotes = (d, ...args) => spawnSync(process.execPath, [DESCRIPTIONS_SCRIPT, d, ...args], { encoding: 'utf8' });
+
+// user: the P-id whose note says they are the user of Discerny, or none
+function notesFolder(user = 'P-0001') {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-notes-'));
+  const said = id => id === user ? '  - note: The user of Discerny. Head of QA.' : '  - note: Supplier quality.';
+  const files = {
+    'TASKS.md': ['# Tasks', '<!-- next-id: 4 -->', '',
+      '- [ ] T-0001 Close the CAPA {ty:Task; who:Meera Ilangovan; urg:week; p:1}',
+      '  - src: Email "CAPA" from Meera (10 Aug)',
+      '  - note: Two returns reported.',
+      '  - note: The effectiveness check is left.',
+      '  - link: [CAPA log](https://example.test/capa)',
+      '  - ref: mail|CAPA',
+      '  - my: Ask Meera about the fixture.',
+      '  - my: And the new jaw.',
+      '  - [x] Root cause signed off',
+      '  - my: Then tell Lena.',
+      '- [ ] T-0002 Cancelled: Weekly QA sync {ty:Meeting; urg:week; p:2; due:2026-10-15 09:00}',
+      '  - src: Calendar "Weekly QA sync" organised by Meera',
+      '  - ref: cal|2026-10-15|weekly qa sync',
+      '  - note: Found cancelled by the calendar Run on 2026-10-12 17:00',
+      '- [ ] T-0003 Ask P-0001 and P-0004 about it {ty:Task; urg:later; p:3}',
+      '  - src: Teams',
+      ''].join('\r\n'),
+    'PEOPLE.md': ['# People', '<!-- next-id: 5 -->', '', '## QA',
+      '- Imogen Hartley {id:P-0001; title:Head of QA}', said('P-0001'),
+      '- Meera Ilangovan {id:P-0003; mgr:Imogen Hartley}', '  - note: Leads EN 71 testing.', '  - note: Owns the app.', '  - hist: 2026-07-08 | Job title: a → b',
+      '- Tomasz Kowalczyk {id:P-0004; mgr:Imogen Hartley}', said('P-0004'), ''].join('\n'),
+    'PROJECTS.md': ['# Projects', '<!-- next-id: 2 -->', '', '- Fable Range {id:PRJ-0001; type:Project; st:Active}', '  - note: Eleven puppets.', '  - note: Go/no-go 28 Oct.', '  - link: [Site](https://example.test/fable)', ''].join('\n'),
+    'SYSTEMS.md': ['# Systems', '<!-- next-id: 2 -->', '', '- QualiTrack {id:SYS-0001; type:Application; st:Live}', ''].join('\n'),
+    'RELATIONSHIPS.md': ['# Relationships', '', '- P-0004 -> SYS-0001 | owns', '- T-0003 -> P-0001 | involves', ''].join('\n'),
+    'SOURCES.md': ['# Sources', '', '## defaults', '- timezone: Europe/London', '- priority_people: P-0004, P-0003', '- apply_task_updates: false', '- page_cap: 10', ''].join('\n'),
+    'ASK-AGENT.md': ['# Ask agent queue', '', '- P-0004 | 2026-10-11 09:00 | Ask P-0001 whether this is me', ''].join('\n'),
+    'drafts/T-0003-ask.md': '# Draft – not sent\n\n- For: T-0003\n\nHi P-0004 (not P-00041),\n',
+  };
+  for (const [f, t] of Object.entries(files)) { fs.mkdirSync(path.dirname(path.join(d, f)), { recursive: true }); fs.writeFileSync(path.join(d, f), t); }
+  return d;
+}
+
+test('the Descriptions Migration\'s script imports only Node\'s built-in modules', () => {
+  const src = fs.readFileSync(DESCRIPTIONS_SCRIPT, 'utf8');
+  const from = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g)].map(m => m[1] || m[2] || m[3]);
+  assert.ok(from.length);
+  assert.deepEqual(from.filter(s => !s.startsWith('node:')), []);
+});
+
+test('the Descriptions Migration previews and changes nothing; --write makes notes a Description and Comments, keeping line endings; again, nothing', () => {
+  const d = notesFolder(), before = snapshot(d), p = migrateNotes(d);
+  assert.equal(p.status, 0, p.stderr);
+  assert.match(p.stdout, /^The user is P-0001, Imogen Hartley \(found by the note saying so\)\.\nWould change:/);
+  assert.match(p.stdout, /T-0001: the first note becomes the Description; 1 more note becomes a Comment by agent; 2 runs of my: lines become Comments by user/);
+  assert.match(p.stdout, /T-0002: the note of when the calendar found it cancelled becomes a Comment by calendar/);
+  assert.match(p.stdout, /PRJ-0001 Fable Range: 2 notes become the Description/);
+  assert.match(p.stdout, /apply_task_updates goes/);
+  assert.deepEqual(snapshot(d), before);
+  const w = migrateNotes(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  assert.equal(read(d, 'TASKS.md'), ['# Tasks', '<!-- next-id: 4 -->', '',
+    '- [ ] T-0001 Close the CAPA {ty:Task; who:Meera Ilangovan; urg:week; p:1}',
+    '  - src: Email "CAPA" from Meera (10 Aug)',
+    '  - description: Two returns reported.',
+    '  - link: [CAPA log](https://example.test/capa)',
+    '  - ref: mail|CAPA',
+    '  - comment: {author: agent}', '    The effectiveness check is left.',
+    '  - comment: {author: user}', '    Ask Meera about the fixture.', '    And the new jaw.',
+    '  - comment: {author: user}', '    Then tell Lena.',
+    '  - [x] Root cause signed off',
+    '- [ ] T-0002 Cancelled: Weekly QA sync {ty:Meeting; urg:week; p:2; due:2026-10-15 09:00}',
+    '  - src: Calendar "Weekly QA sync" organised by Meera',
+    '  - ref: cal|2026-10-15|weekly qa sync',
+    '  - comment: {added-datetime: 2026-10-12 17:00; author: calendar}', '    Found cancelled.',
+    '- [ ] T-0003 Ask P-0001 and P-0004 about it {ty:Task; urg:later; p:3}',
+    '  - src: Teams',
+    ''].join('\r\n'));
+  assert.match(read(d, 'PEOPLE.md'), /- Imogen Hartley \{id:P-0001; title:Head of QA\}\n  - description: Head of QA\.\n- Meera Ilangovan \{id:P-0003; mgr:Imogen Hartley\}\n  - description: Leads EN 71 testing\.\n    Owns the app\.\n  - hist: 2026-07-08/);
+  assert.match(read(d, 'PROJECTS.md'), /\{id:PRJ-0001; type:Project; st:Active\}\n  - description: Eleven puppets\.\n    Go\/no-go 28 Oct\.\n  - link: \[Site\]/);
+  assert.doesNotMatch(read(d, 'SOURCES.md'), /apply_task_updates/);
+  assert.match(read(d, 'RELATIONSHIPS.md'), /- P-0004 -> SYS-0001 \| owns/);
+  const after = snapshot(d), again = migrateNotes(d, '--write');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Nothing to change/);
+  assert.deepEqual(snapshot(d), after);
+});
+
+test('the Descriptions Migration makes the user P-0001 by swapping IDs in every file, free text included', () => {
+  const d = notesFolder('P-0004'), w = migrateNotes(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  assert.match(w.stdout, /The user is P-0004, Tomasz Kowalczyk \(found by the note saying so\): P-0004 and P-0001 swap IDs/);
+  const people = read(d, 'PEOPLE.md');
+  assert.match(people, /- Imogen Hartley \{id:P-0004; title:Head of QA\}\n  - description: Supplier quality\./);
+  assert.match(people, /- Tomasz Kowalczyk \{id:P-0001; mgr:Imogen Hartley\}\n  - description: Head of QA\./);
+  assert.match(people, /<!-- next-id: 5 -->/);
+  assert.match(read(d, 'RELATIONSHIPS.md'), /- P-0001 -> SYS-0001 \| owns\n- T-0003 -> P-0004 \| involves/);
+  assert.match(read(d, 'SOURCES.md'), /- priority_people: P-0001, P-0003/);
+  assert.match(read(d, 'ASK-AGENT.md'), /- P-0001 \| 2026-10-11 09:00 \| Ask P-0004 whether this is me/);
+  assert.match(read(d, 'TASKS.md'), /T-0003 Ask P-0004 and P-0001 about it/);
+  assert.match(read(d, 'drafts/T-0003-ask.md'), /Hi P-0001 \(not P-00041\),/);
+  // The sentence is gone, so a second run finds no one, says so, and swaps nothing back.
+  const after = snapshot(d), again = migrateNotes(d, '--write');
+  assert.match(again.stdout, /No Person's note says they are the user of Discerny, so the user stays as P-0001 \(Tomasz Kowalczyk\)/);
+  assert.deepEqual(snapshot(d), after);
+});
+
+test('with no Person saying so, the Descriptions Migration leaves the IDs alone; --user and --new-user then make the user P-0001', () => {
+  const d = notesFolder('none'), w = migrateNotes(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  assert.match(w.stdout, /No Person's note says they are the user of Discerny, so the user stays as P-0001 \(Imogen Hartley\): INSTRUCTIONS\.md asks/);
+  assert.match(read(d, 'PEOPLE.md'), /- Imogen Hartley \{id:P-0001; title:Head of QA\}/);
+  assert.equal(migrateNotes(d, '--user', 'P-0099').status, 1);
+  const u = migrateNotes(d, '--user', 'P-0003', '--write');
+  assert.equal(u.status, 0, u.stderr);
+  assert.match(read(d, 'PEOPLE.md'), /- Meera Ilangovan \{id:P-0001; mgr:Imogen Hartley\}/);
+  assert.match(read(d, 'SOURCES.md'), /- priority_people: P-0004, P-0001/);
+
+  const n = notesFolder('none'), before = snapshot(n), p = migrateNotes(n, '--new-user', 'Sam Ng');
+  assert.match(p.stdout, /The user is P-0005, Sam Ng \(made with --new-user\): P-0005 and P-0001 swap IDs/);
+  assert.deepEqual(snapshot(n), before);
+  assert.equal(migrateNotes(n, '--new-user', 'Sam Ng', '--write').status, 0);
+  const people = read(n, 'PEOPLE.md');
+  assert.match(people, /<!-- next-id: 6 -->\n\n## Me\n- Sam Ng \{id:P-0001\}\n\n## QA\n- Imogen Hartley \{id:P-0005; title:Head of QA\}/);
+  assert.match(read(n, 'RELATIONSHIPS.md'), /- T-0003 -> P-0005 \| involves/);
+  assert.equal(migrateNotes(n, '--new-user', 'sam ng', '--write').status, 1);
+});
+
+test('upgrade stops at the Descriptions Migration\'s instructions, which are required, and --done records it', () => {
+  const d = notesFolder();
+  fs.writeFileSync(path.join(d, 'DISCERNY.md'), '# Discerny data folder\n\n<!-- format: 0.3.0.2 -->\n');
+  const pending = run(d, ['upgrade']).json.pending, me = pending.find(m => path.join(REPO, 'migrations', m.version, 'migrate.mjs') === DESCRIPTIONS_SCRIPT);
+  assert.equal(me.instructions, 'required');
+  let w = run(d, ['upgrade', '--write']);
+  while (w.code === 2 && w.json.stopped !== me.version) { run(d, ['upgrade', '--done', w.json.stopped]); w = run(d, ['upgrade', '--write']); }
+  assert.equal(w.code, 2, w.out);
+  assert.match(w.json.next, /INSTRUCTIONS\.md with the user, then run: discern upgrade --done/);
+  assert.match(read(d, 'TASKS.md'), /  - description: Two returns reported\./);
+  assert.equal(run(d, ['upgrade', '--done', me.version]).code, 0);
+  fs.readdirSync(path.dirname(d)).filter(n => n.startsWith(path.basename(d) + '.backup-')).forEach(n => fs.rmSync(path.join(path.dirname(d), n), { recursive: true, force: true }));
+});
+
+// ---------------------------------------------------------------- field changes and Priority person Proposals
+test('change moves a Due date with a Comment to acknowledge naming the field, its old value and its new one, and check passes', () => {
+  const d = folder();
+  const r = run(d, ['change', 'T-0012', '--author', 'email', '--field', 'due-date', '--to', '2026-11-06', 'Kwame says the roll-out slips a week.']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual([r.json.field, r.json.from, r.json.to], ['due-date', '', '2026-11-06']);
+  const t = read(d, 'TASKS.md');
+  assert.match(t, /^- \[ \] T-0012 Roll out goods-in inspection procedure QP-08 rev F \{[^}]*; priority: medium; due-date: 2026-11-06; status: in progress; received-datetime: [^}]*\}\r?$/m);
+  assert.match(t, /\n  - comment: \{added-datetime: 2026-10-12 16:00; author: email; acknowledged: no; changed: due-date; from: ; to: 2026-11-06\}\r?\n    Kwame says the roll-out slips a week\.\r?\n/);
+  const s = run(d, ['change', 'T-0012', '--author', 'email', '--field', 'status', '--to', 'waiting', 'Waiting on the temps.']);
+  assert.equal(s.code, 0, s.out);
+  assert.match(read(d, 'TASKS.md'), /changed: status; from: in progress; to: waiting\}/);
+  // a time goes beside the date, and "" clears it
+  assert.equal(run(d, ['change', 'T-0012', '--author', 'email', '--field', 'due-time', '--to', '14:00', 'By 2pm.']).code, 0);
+  assert.match(read(d, 'TASKS.md'), /due-date: 2026-11-06; due-time: 14:00; status: waiting;/);
+  assert.equal(run(d, ['change', 'T-0012', '--author', 'email', '--field', 'due-time', '--to', '', 'Any time that day.']).code, 0);
+  assert.match(read(d, 'TASKS.md'), /due-date: 2026-11-06; status: waiting;/);
+  assert.match(read(d, 'TASKS.md'), /changed: due-time; from: 14:00; to: \}/);
+  const c = run(d, ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.deepEqual(c.json.warnings.filter(w => /T-0012/.test(w)), []);
+});
+
+test('change applies a change once: the same value again, or after an Undo put the old one back, changes nothing', () => {
+  const d = folder(), args = ['change', 'T-0012', '--author', 'email', '--field', 'due-date', '--to', '2026-11-06', 'Slips a week.'];
+  assert.equal(run(d, args).code, 0);
+  const after = read(d, 'TASKS.md'), again = run(d, args);
+  assert.equal(again.code, 0, again.out);
+  assert.equal(again.json.unchanged, true);
+  assert.equal(read(d, 'TASKS.md'), after);
+  // the user's Undo: the old value back, the Comment acknowledged
+  fs.writeFileSync(path.join(d, 'TASKS.md'), after.replace(/(T-0012 [^\n]*)due-date: 2026-11-06; /, '$1').replace('acknowledged: no; changed: due-date; from: ; to: 2026-11-06', 'changed: due-date; from: ; to: 2026-11-06'));
+  const undone = read(d, 'TASKS.md'), re = run(d, args);
+  assert.equal(re.json.unchanged, true, re.out);
+  assert.match(re.json.why, /applies once/);
+  assert.equal(read(d, 'TASKS.md'), undone);
+});
+
+test('change refuses the user\'s own fields, closing an Item, a done Item, a bad value, and records other than Items and People', () => {
+  const d = folder(), before = snapshot(d);
+  for (const [args, said] of [
+    [['T-0012', '--field', 'urgency', '--to', 'today'], /urgency is the user's own judgement/],
+    [['T-0012', '--field', 'projects', '--to', 'PRJ-0001'], /projects is the user's own judgement/],
+    [['T-0012', '--field', 'status', '--to', 'Done'], /closing an Item stays the user's[^"]*--suggests done/],
+    [['T-0012', '--field', 'done-date', '--to', '2026-10-12'], /closing an Item stays the user's/],
+    [['T-0002', '--field', 'due-date', '--to', '2026-11-06'], /T-0002 is done/],
+    [['T-0012', '--field', 'due-date', '--to', 'next week'], /YYYY-MM-DD/],
+    [['T-0012', '--field', 'due-date', '--to', '2026-11-06 09:00'], /a time goes in due-time/],
+    [['T-0012', '--field', 'due-time', '--to', '9am'], /HH:MM/],
+    [['T-0012', '--field', 'due-time', '--to', '09:00'], /T-0012 has no due-date/],
+    [['T-0012', '--field', 'status', '--to', 'blocked'], /waiting, in progress/],
+    [['T-0012', '--field', 'who', '--to', 'Jo Bloggs'], /a name in PEOPLE\.md/],
+    [['P-0003', '--field', 'emails', '--to', 'x@y.example'], /title, company, department, manager/],
+    [['PRJ-0001', '--field', 'status', '--to', 'done'], /not an Item or a Person/],
+    [['T-0012', '--field', 'due-date'], /usage/],
+    // the names of older Formats
+    [['T-0012', '--field', 'due', '--to', '2026-11-06'], /due is an old name, not read: write due-date or due-time/],
+    [['T-0012', '--field', 'st', '--to', 'waiting'], /st is an old name, not read: write status/],
+    [['P-0005', '--field', 'co', '--to', 'Puppet Studio'], /co is an old name, not read: write company/],
+  ]) {
+    const r = run(d, ['change', args[0], '--author', 'email', ...args.slice(1), 'why']);
+    assert.equal(r.code, 1, `${args.join(' ')}: ${r.out}`);
+    assert.match(r.json.error, said);
+  }
+  assert.match(run(d, ['change', 'T-0012', '--author', 'user', '--field', 'due-date', '--to', '2026-11-06', 'x']).json.error, /only the user writes Comments as user/);
+  assert.deepEqual(snapshot(d), before);
+});
+
+test('change on a Person sets the field, with a history line, checked-date and a Comment to acknowledge', () => {
+  const d = folder();
+  const r = run(d, ['change', 'P-0005', '--author', 'email', '--field', 'company', '--to', 'Puppet Studio', 'Signs as Puppet Studio now.']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.json.field, 'company');
+  const p = read(d, 'PEOPLE.md');
+  assert.match(p, /^- Bethan Rhys \{id: P-0005; company: Puppet Studio; [^}]*checked-date: 2026-10-12[^}]*\}\r?$/m);
+  assert.match(p, /\n  - history: \{changed-date: 2026-10-12; changed: company\}\r?\n    Central Functions → Puppet Studio\r?\n/);
+  assert.match(p, /\n  - comment: \{added-datetime: 2026-10-12 16:00; author: email; acknowledged: no; changed: company; from: Central Functions; to: Puppet Studio\}\r?\n    Signs as Puppet Studio now\.\r?\n/);
+  assert.equal(run(d, ['change', 'P-0005', '--author', 'email', '--field', 'manager', '--to', 'Nobody Known', 'x']).code, 1);
+  assert.equal(run(d, ['check']).code, 0);
+});
+
+test('comment --suggests done marks news that an Item is finished, and only with --to-acknowledge on an Item', () => {
+  const d = folder();
+  const r = run(d, ['comment', 'T-0012', '--author', 'teams', '--to-acknowledge', '--suggests', 'done', 'Kwame says the team is trained.']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(read(d, 'TASKS.md'), /\n  - comment: \{added-datetime: 2026-10-12 16:00; author: teams; acknowledged: no; suggests: done\}\r?\n    Kwame says the team is trained\.\r?\n/);
+  assert.equal(run(d, ['comment', 'T-0012', '--author', 'teams', '--suggests', 'done', 'x']).code, 1);
+  assert.equal(run(d, ['comment', 'P-0003', '--author', 'teams', '--to-acknowledge', '--suggests', 'done', 'x']).code, 1);
+  assert.equal(run(d, ['comment', 'T-0012', '--author', 'teams', '--to-acknowledge', '--suggests', 'open', 'x']).code, 1);
+  assert.equal(run(d, ['check']).code, 0);
+});
+
+test('a match on a tracked Item says to apply a field change with discern change and to send finished news with --suggests done', () => {
+  const r = run(folder(), ['match'], [{ key: 'm', scheme: 'teams', chat: '19:c40e9a', message: '1758532500211', sender: 'kwame.mensah@pennywhistle.example' }]);
+  const m = r.json[0];
+  assert.equal(m.outcome, 'open', r.out);
+  assert.match(m.action, /discern change T-0012 --author teams --field <due-date, due-time, status or who> --to "<the new value>"/);
+  assert.match(m.action, /discern comment T-0012 --author teams --to-acknowledge --suggests done/);
+  assert.doesNotMatch(m.action, /in the report/);
+});
+
+test('check warns about a Comment that changed a field no Skill changes, or suggests anything but done', () => {
+  const d = folder();
+  fs.writeFileSync(path.join(d, 'TASKS.md'), read(d, 'TASKS.md').replace(/(T-0012 [^\n]*\n)/, '$1  - comment: {added-datetime: 2026-10-12 09:00; author: email; acknowledged: no; changed: urgency; from: soon; to: today}\n    x\n  - comment: {added-datetime: 2026-10-12 09:01; author: email; suggests: closed}\n    y\n'));
+  const c = run(d, ['check']);
+  assert.ok(c.json.warnings.some(w => /changed: urgency, a field no Skill changes/.test(w)), c.out);
+  assert.ok(c.json.warnings.some(w => /suggests: closed/.test(w)), c.out);
+});
+
+test('check passes on the Example as the Migration leaves it, and reports any old field name or line shape planted afterwards as an error', () => {
+  const d = folder();
+  assert.equal(run(d, ['check']).code, 0);
+  const plant = (f, from, to) => fs.writeFileSync(path.join(d, f), read(d, f).replace(from, to));
+  const pristine = snapshot(d);
+  for (const [f, from, to, said] of [
+    ['TASKS.md', /(T-0012 [^\n]*); urgency: soon;/, '$1; urg: soon;', /TASKS\.md T-0012: urg is the name an older Format gave urgency/],
+    ['TASKS.md', /(T-0012 [^\n]*)\}/, '$1; asg: 2026-09-29 10:15}', /TASKS\.md T-0012: asg is the name an older Format gave received-datetime/],
+    ['TASKS.md', /\n  - origin: /, '\n  - src: ', /a src: line is the name an older Format gave origin/],
+    ['DONE.md', /\n  - source-key: /, '\n  - ref: ', /DONE\.md T-\d+: a ref: line is the name an older Format gave source-key/],
+    ['TASKS.md', /changed: due-date;/, 'changed: due;', /changed: due, the name an older Format gave due-date/],
+    ['PEOPLE.md', /(P-0005); company: /, '$1; co: ', /PEOPLE\.md P-0005: co is the name an older Format gave company/],
+    ['PEOPLE.md', /\n  - history: \{changed-date: (\d{4}-\d\d-\d\d); changed: title\}\n    /, '\n  - hist: $1 | Job title: ', /PEOPLE\.md P-\d+: a hist: line is the name an older Format gave history/],
+    ['SYSTEMS.md', /(SYS-0001[^}]*); status: /, '$1; st: ', /SYSTEMS\.md SYS-0001: st is the name an older Format gave status/],
+    ['SOURCES.md', /- page-cap:/, '- page_cap:', /SOURCES\.md ## defaults: page_cap is the name an older Format gave it/],
+    ['RELATIONSHIPS.md', /^(- T-\d+ ~ T-\d+) \{kind: related\}$/m, '$1 | related', /RELATIONSHIPS\.md: "- T-\d+ ~ T-\d+ \| related" is in the shape of an older Format/],
+    ['IGNORED.md', /\n- (mail\|[^\n{]*) \{ignored-date: (\d{4}-\d\d-\d\d); reason: ([^}]*)\}/, '\n$1 | $2 | $3', /IGNORED\.md: "mail\|[^"]*" is in the shape of an older Format/],
+    ['ASK-AGENT.md', /\n- (T-\d+) \{requested-datetime: ([^}]*)\}\n    /, '\n- $1 | $2 | ', /ASK-AGENT\.md: "- T-\d+ \| \d{4}-\d\d-\d\d[^"]*" is in the shape of an older Format/],
+    ['ASK-AGENT-LOG.md', /\n- (T-\d+) \{requested-datetime: ([^;]*); actioned-datetime: ([^}]*)\}\n  - request: /, '\n- $3 | $1 | queued $2 | ', /ASK-AGENT-LOG\.md: "- \d{4}-\d\d-\d\d \d\d:\d\d \| T-\d+ \| queued [^"]*" is in the shape of an older Format/],
+  ]) {
+    for (const [k, v] of Object.entries(pristine)) fs.writeFileSync(path.join(d, k), v);
+    const had = read(d, f);
+    plant(f, from, to);
+    assert.notEqual(read(d, f), had, `the test plants something in ${f}: ${from}`);
+    const c = run(d, ['check']);
+    assert.equal(c.code, 1, `${f} ${to}: ${c.out}`);
+    assert.ok(c.json.errors.some(e => said.test(e)), `${said}: ${c.json.errors.join(' | ')}`);
+  }
+});
+
+const prio = (o = {}) => ({ change: 'priority', person: 'P-0005', why: 'Sent four actionable messages this week.', 'received-datetime': '2026-10-12T08:14:00Z', ...o });
+
+test('propose writes a Priority person under "## Changes", and check passes', () => {
+  const d = noChanges(folder());
+  const r = run(d, ['propose', 'teams-chat'], [prio()]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(changeLines(d), ['## Changes', '- Make Bethan Rhys (P-0005) a Priority person {source: teams-chat; received-datetime: 2026-10-12 09:14}', '  - why: Sent four actionable messages this week.']);
+  const c = run(d, ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.deepEqual(c.json.warnings.filter(w => /INBOX/.test(w)), []);
+});
+
+test('propose skips a Priority person already one, or said No to less than 28 days ago, and proposes them again after', () => {
+  const d = noChanges(folder());
+  fs.appendFileSync(path.join(d, 'IGNORED.md'), '- priority|P-0005 {ignored-date: 2026-09-20; reason: the user said no}\n');
+  const r = run(d, ['propose', 'teams-chat'], [prio(), prio({ person: 'P-0007' })]);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.json.proposed, []);
+  assert.match(r.json.skipped[0].why, /said no to Bethan Rhys \(P-0005\) as a Priority person less than 28 days ago/);
+  assert.match(r.json.skipped[1].why, /already a Priority person/);
+  const later = run(d, ['propose', 'teams-chat'], [prio()], '2026-10-18T10:00:00Z');
+  assert.equal(later.code, 0, later.out);
+  assert.deepEqual(later.json.proposed, ['- Make Bethan Rhys (P-0005) a Priority person {source: teams-chat; received-datetime: 2026-10-12 09:14}']);
+  assert.match(run(d, ['propose', 'teams-chat'], [prio()], '2026-10-18T10:00:00Z').json.skipped[0].why, /already proposed/);
+});
+
+test('propose refuses a Priority person who is the user or not in PEOPLE.md', () => {
+  const d = folder();
+  assert.match(run(d, ['propose', 'teams-chat'], [prio({ person: 'P-0001' })]).json.error, /P-0001 is the user/);
+  assert.match(run(d, ['propose', 'teams-chat'], [prio({ person: 'P-0999' })]).json.error, /P-id of someone in PEOPLE\.md/);
+});
+
+// The Migration that brought in field changes and Priority person Proposals, found by what it says it does.
+const PRIORITY_SCRIPT = (() => {
+  const dir = path.join(REPO, 'migrations');
+  const n = fs.readdirSync(dir).find(x => fs.existsSync(path.join(dir, x, 'migrate.mjs')) && /^\/\/ A Skill now applies a change to an Item's or a Person's field itself/.test(fs.readFileSync(path.join(dir, x, 'migrate.mjs'), 'utf8')));
+  return path.join(dir, n || 'next', 'migrate.mjs');
+})();
+const migratePriority = (d, ...args) => spawnSync(process.execPath, [PRIORITY_SCRIPT, d, ...args], { encoding: 'utf8' });
+
+test('the field changes Migration\'s script imports only Node\'s built-in modules', () => {
+  const src = fs.readFileSync(PRIORITY_SCRIPT, 'utf8');
+  const from = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g)].map(m => m[1] || m[2] || m[3]);
+  assert.ok(from.length);
+  assert.deepEqual(from.filter(s => !s.startsWith('node:')), []);
+});
+
+test('the field changes Migration previews and changes nothing; --write rewords the INBOX.md and IGNORED.md headers, keeping line endings; again, it changes nothing', () => {
+  const d = folder();
+  for (const f of Object.keys(NEW_HEADS_2)) fs.writeFileSync(path.join(d, f), withHead(read(d, f).replace(/\r\n/g, '\n'), NEW_HEADS_2[f]).replace(/\n/g, f === 'INBOX.md' ? '\r\n' : '\n'));
+  const before = snapshot(d), p = migratePriority(d);
+  assert.equal(p.status, 0, p.stderr);
+  assert.match(p.stdout, /Would change:\nINBOX\.md\n  header comment reworded\nIGNORED\.md\n  header comment reworded/);
+  assert.deepEqual(snapshot(d), before);
+  const w = migratePriority(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  // the headers as this Migration leaves them; a later one rewords them again
+  const now = {
+    'INBOX.md': NEW_HEADS_2['INBOX.md'].replace('a new person or a new email address,', 'a new person, a new email address or a Priority person,'),
+    'IGNORED.md': NEW_HEADS_2['IGNORED.md'].replace('or person|<address>.', 'or person|<address>; a No to a Priority person is kept as priority|<P-id>, and pauses them for 28 days only.'),
+  };
+  for (const f of Object.keys(NEW_HEADS_2)) assert.equal(read(d, f).replace(/\r\n/g, '\n').split('\n')[1], now[f]);
+  assert.doesNotMatch(read(d, 'INBOX.md'), /[^\r]\n/);
+  assert.doesNotMatch(read(d, 'IGNORED.md'), /\r/);
+  const after = snapshot(d), again = migratePriority(d, '--write');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Nothing to change/);
+  assert.deepEqual(snapshot(d), after);
 });

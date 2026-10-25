@@ -24,44 +24,45 @@ Microsoft 365 connector: `chat_message_search`, `teams_list_channel_messages` an
 
 ## Block
 
-`## teams-chat`, a stream source: `watermark`, `overlap`, `mention_query` (optional), `mention_read_cap` (read budget for the mention filter, default 8), `scan_own_commitments`, `scan_sent_asks`, `waiting_min_age`, `waiting_max_age`, `waiting_checked_through`, `waiting_check_cap`, `watch_channels` (lines `teamId | channelId | label`), `candidate_channels`, `exclude_chat` (chat-ID prefixes), `exclude_text` (a regular expression), `chat_labels` (lines `label (chat prefix)`), `last_run`, `last_result`; optional `page_cap`, `split`, `gap` and `fixture`.
+`## teams-chat`, a stream source: `watermark`, `overlap`, `mention-query` (optional), `mention-read-cap` (read budget for the mention filter, default 8), `scan-own-commitments`, `scan-sent-asks`, `waiting-min-age`, `waiting-max-age`, `waiting-checked-through`, `waiting-check-cap`, `watch-channels` (lines `teamId | channelId | label`), `candidate-channels`, `exclude-chat` (chat-ID prefixes), `exclude-text` (a regular expression), `chat-labels` (lines `label (chat prefix)`), `last-run`, `last-result`; optional `page-cap`, `split`, `gap` and `fixture`.
 
 ## Passes
 
 For each of `windows`, run A to D1 together with `afterDateTime` and `beforeDateTime` set to the window, `limit: 25` unless stated.
 
-- **A, mentions:** `query` = `mention_query`, or the state's `mention_terms` joined with `OR`.
-- **B, priority people:** for each entry in the state's `priority_people`: `query: "*"`, `sender: <their address, else name>`, following pages as in the other passes.
+- **A, mentions:** `query` = `mention-query`, or the state's `mention_terms` joined with `OR`.
+- **B, priority people:** for each entry in the state's `priority-people`: `query: "*"`, `sender: <their address, else name>`, following pages as in the other passes.
 - **C, files:** `query: "*"`, `hasAttachment: true`.
-- **D1, commitments** (when `scan_own_commitments` is true): `sender: <the user's address>`, `query: "I'll" OR "I will" OR "will send" OR "let me"`.
-- **D2, asks** (when `scan_sent_asks` is true), for each of `ask_windows`, oldest first, finishing each day before the next: `sender: <the user's address>`, `query: "can you" OR "could you" OR "please" OR "let me know" OR "when can" OR "by end of"`. Send them, and D1's results, to `discern match` with `pass: "ask"`, then keep concrete requests to someone else. Check replies against one shared pool rather than one search per ask: `query: "*"` with `afterDateTime` at the oldest ask's `createdDateTime`, up to 5 pages. An ask is answered when the pool holds a later message in the same `chatId` from someone else; an answered ask only counts under `answered`, and neither it nor its reply becomes an item or an update. Asks past `waiting_check_cap`, or older than the pool reached before it ran out of pages, are not yet checked.
-- **E, watched channels:** for each `watch_channels` line, `teams_list_channel_messages(teamId, channelId, limit: 20)`. These come by latest activity with no date filter: follow `cursor` until a page holds only messages whose `lastModifiedDateTime` is before the state's `cutoff`. For each top-level message changed since `cutoff`, read its replies once (`parentMessageId`, `limit: 20`) and treat each reply as a message. `bodyPreview` is HTML of up to 1,000 characters, so strip the tags; read the full body (`bodyTruncated: true`) only for posts that may be worth a proposal. Drop the user's own posts and system events (`messageType` other than `message`, or no `from`).
+- **D1, commitments** (when `scan-own-commitments` is true): `sender: <the user's address>`, `query: "I'll" OR "I will" OR "will send" OR "let me"`.
+- **D2, asks** (when `scan-sent-asks` is true), for each of `ask_windows`, oldest first, finishing each day before the next: `sender: <the user's address>`, `query: "can you" OR "could you" OR "please" OR "let me know" OR "when can" OR "by end of"`. Send them, and D1's results, to `discern match` with `pass: "ask"`, then keep concrete requests to someone else. Check replies against one shared pool rather than one search per ask: `query: "*"` with `afterDateTime` at the oldest ask's `createdDateTime`, up to 5 pages. An ask is answered when the pool holds a later message in the same `chatId` from someone else; an answered ask only counts under `answered`, and neither it nor its reply becomes an item or an update. Asks past `waiting-check-cap`, or older than the pool reached before it ran out of pages, are not yet checked.
+- **E, watched channels:** for each `watch-channels` line, `teams_list_channel_messages(teamId, channelId, limit: 20)`. These come by latest activity with no date filter: follow `cursor` until a page holds only messages whose `lastModifiedDateTime` is before the state's `cutoff`. For each top-level message changed since `cutoff`, read its replies once (`parentMessageId`, `limit: 20`) and treat each reply as a message. `bodyPreview` is HTML of up to 1,000 characters, so strip the tags; read the full body (`bodyTruncated: true`) only for posts that may be worth a proposal. Drop the user's own posts and system events (`messageType` other than `message`, or no `from`).
 
-Channels listed in `candidate_channels` aren't scanned. When posts in one of them keep turning up in pass A, propose watching it.
+Channels listed in `candidate-channels` aren't scanned. When posts in one of them keep turning up in pass A, propose watching it.
 
 ## Filters
 
-- **Mention filter** (pass A only), in order: drop messages from the user's addresses. In group chats, meeting chats and channels, keep a message only if its text has the user's first name or a handle (any case). When a summary ends in "..." and lacks them, read the full text once, oldest message first, within `mention_read_cap`; once the budget is spent, capture the rest from their summaries and count them under "Not yet checked". Keep every inbound 1:1 message.
-- After merging all passes by message `id`: drop pure acknowledgements ("thanks", "ok", an emoji), chats matching `exclude_chat`, text matching `exclude_text`, and the user's own messages outside D1 and D2.
+- **Mention filter** (pass A only), in order: drop messages from the user's addresses. In group chats, meeting chats and channels, keep a message only if its text has the user's first name or a handle (any case). When a summary ends in "..." and lacks them, read the full text once, oldest message first, within `mention-read-cap`; once the budget is spent, capture the rest from their summaries and count them under "Not yet checked". Keep every inbound 1:1 message.
+- After merging all passes by message `id`: drop pure acknowledgements ("thanks", "ok", an emoji), chats matching `exclude-chat`, text matching `exclude-text`, and the user's own messages outside D1 and D2.
 - A personal, religious or social chat is out of scope. When the whole chat is personal, `discern ignore` its whole-chat source key `teams|<chat20>|*` with `"container": true` and the reason "personal". Don't log single noise messages.
 
 ## Source keys
 
-`teams` scheme. A source key is `teams|<chat20>|<message id>`, where chat20 is the chat ID without its `19:` prefix, cut to 20 characters; `match` returns it, so copy source keys from there. Each `discern match` candidate: `{"key": <id>, "scheme": "teams", "pass": <"ask" for D1 and D2, else "inbound">, "chat": <chatId>, "message": <id>, "sender": <from.email>, "sender_name": <from.displayName>, "when": <createdDateTime>}`, plus on the ask pass `"recipient_name"`: the name the ask addresses ("Gus, can you…"), or in a 1:1 chat the other person, so `match` returns the `who` for a waiting item; for channel posts `chat` is the channel ID. Add `subject` and `meeting_date` for a meeting with a known date. On a `related` outcome, judge whether the message is about the same work as that item: if so, propose an update; if not, assess it as new.
+`teams` scheme. A source key is `teams|<chat20>|<message id>`, where chat20 is the chat ID without its `19:` prefix, cut to 20 characters; `match` returns it, so copy source keys from there. Each `discern match` candidate: `{"key": <id>, "scheme": "teams", "pass": <"ask" for D1 and D2, else "inbound">, "chat": <chatId>, "message": <id>, "sender": <from.email>, "sender-name": <from.displayName>, "when": <createdDateTime>}`, plus on the ask pass `"recipient-name"`: the name the ask addresses ("Gus, can you…"), or in a 1:1 chat the other person, so `match` returns the `who` for a waiting item; for channel posts `chat` is the channel ID. Add `subject` and `meeting-date` for a meeting with a known date. On a `related` outcome, judge whether the message is about the same work as that item: if so, follow the action for news on it; if not, assess it as new.
 
 ## Assess cues
 
 - Worth a proposal: direct asks to the user ("could you", "please", a question), files they are expected to read or use (pass C, or a URL in the text), scheduling asks, due dates, decisions needing their input, and posts in watched channels that ask the team for something.
-- Information-only messages from priority people that teach something lasting (a process, a system, who owns what): `ty:FYI` or `ty:Process`, `urg:fyi` or `later`.
+- Information-only messages from priority people that teach something lasting (a process, a system, who owns what): `type: fyi` or `type: process`, `urgency: fyi` or `later`.
 - Several messages in one chat on one topic make one item, with every source key.
-- Someone not in `priority_people` who sent two or more actionable messages this run: propose adding them, under "People and settings proposed".
+- Someone not in `priority-people` who sent two or more actionable messages this run: propose them with `discern propose` (`"change": "priority"`), naming the person in the report's "Settings proposed" line.
 
 ## Item specifics
 
-- `src`: `Teams <label> — <sender>, <d Mon>`. The label comes from `chat_labels` when the chat matches, else the channel's name or subject, else "1:1". For asks: `Teams <label> — <user> asked <person>, <d Mon>`.
+- `origin`: `Teams <label> — <sender>, <d Mon>`. The label comes from `chat-labels` when the chat matches, else the channel's name or subject, else "1:1". For asks: `Teams <label> — <user> asked <person>, <d Mon>`.
 - `links`: `[Teams message](<webUrl>)`, plus any document link in the text.
-- `received`: `createdDateTime`.
-- `who` on an ask: the person asked, from the text, else from someone else's message in the same chat this run. Still unclear: leave `who` out and note "addressee unclear".
+- `received-datetime`: `createdDateTime`.
+- `who` on an ask: the person asked, from the text, else from someone else's message in the same chat this run. Still unclear: leave `who` out and say "Addressee unclear." in the description.
+- **Comments** are by `teams`: `discern comment <id> --author teams`, as `match`'s actions give them.
 
 ## Known limits
 

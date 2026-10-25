@@ -21,7 +21,7 @@ How the GTD steps map onto Discerny:
 | GTD step | In Discerny |
 |---|---|
 | Capture | Source skills read your mail, chat or other sources and propose new items into `INBOX.md` |
-| Clarify | You clarify each proposal in the UI's inbox: correct it if need be, then accept or dismiss it |
+| Clarify | You clarify each proposal in the UI's inbox: correct a new item if need be, then accept or dismiss it; answer Yes or No to a proposed relationship, person, email address or Priority person; acknowledge the news a skill added, or undo a change it made to a Due date, status or person |
 | Organise | Items carry a type, urgency, person, project and tags; people, projects and systems have their own records, with relationships between them |
 | Reflect | Weekly review page |
 | Engage | Today, Next actions, Waiting for and Upcoming views, and an All items page that groups, sorts and searches everything open |
@@ -89,13 +89,13 @@ You can have more than one data folder, for example one to try things out in. Sw
 | File | What it is |
 |---|---|
 | `TASKS.md` | Your open items: tasks, meetings, processes, documents and FYIs |
-| `INBOX.md` | Proposals for new items from source skills, waiting for you to clarify them |
+| `INBOX.md` | Proposals from source skills, waiting for you to clarify them: new items, then changes such as a relationship, a new person or a Priority person |
 | `DONE.md` | Completed items |
 | `PEOPLE.md`, `PROJECTS.md`, `SYSTEMS.md` | One record each for the people, projects and systems you deal with |
 | `RELATIONSHIPS.md` | Relationships between items and records, such as which task concerns which system |
 | `REFERENCE.md` | Web addresses, people's details and other things you look up often |
 | `ASK-AGENT.md`, `ASK-AGENT-LOG.md` | The agent queue: requests waiting for your agent, and a record of what it did with them |
-| `SOURCES.md`, `IGNORED.md` | Bookkeeping for source skills: shared settings such as your time zone, how far each source has been read, and what was ignored or dismissed, so it's never proposed again |
+| `SOURCES.md`, `IGNORED.md`, `DISMISSED.md` | Bookkeeping for source skills: shared settings such as your time zone, how far each source has been read, what was ignored, so it's never proposed again, and what you dismissed, so the same message isn't proposed twice |
 | `REFRESH-LOG.md` | A record of each source-skill run, created on the first run |
 | `drafts/` | Messages your agent drafted for you. They are never sent |
 
@@ -182,8 +182,8 @@ Read AGENTS.md in my Discerny app folder, especially "Rules for every edit" and
 "Writing a skill for Discerny".
 
 Then write a skill called discern-<name> that <what it does, for example
-"finds every item with st:Waiting that is more than 7 days old and writes a
-polite chaser for each one in drafts/">.
+"finds every item with status: waiting that is more than 7 days old and
+writes a polite chaser for each one in drafts/">.
 
 It should change only <which files>, and never send anything. Keep the skill
 short: it should read AGENTS.md each time it runs rather than copying the
