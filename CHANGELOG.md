@@ -5,6 +5,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 ## Unreleased
 
 - The installed app's icon now has a transparent background, so it no longer shows as a pale square on a dark taskbar.
+- The installed app's taskbar icon is now larger and clearer, showing just the binoculars.
 
 ## 0.3.0.8 (2026-10-25)
 
