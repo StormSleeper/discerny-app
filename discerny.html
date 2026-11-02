@@ -429,7 +429,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.1.4'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.3.1.5'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -3677,12 +3677,71 @@ function forceClear(id) { forced.add(id); }
 
 /* ===================== links ===================== */
 // A Link is the page's hash after "#/": a View's Link name, or a Record's ID for its page, then "/" and the ID of
-// the Item open in the Side panel, if the User opened one. Link names
+// the Item open in the Side panel, if the User opened one, then the View's state after "?" as key=value pairs. Link names
 // last across versions, so they are kept apart from the code's own View names by this two-way table.
 var LINK_VIEW = { today: 'today', inbox: 'inbox', 'next-actions': 'next', 'waiting-for': 'waiting', upcoming: 'upcoming', fyi: 'fyi', 'all-items': 'all', done: 'done', projects: 'projects', people: 'people', systems: 'systems', 'weekly-review': 'review', agent: 'claude' };
 var VIEW_LINK = {};
 Object.keys(LINK_VIEW).forEach(function (k) { VIEW_LINK[LINK_VIEW[k]] = k; });
 var RECORD_VIEW = { P: 'person', PRJ: 'project', SYS: 'system' };
+// A View's state in its Link: search or filter text, and grouping, each key written only when it differs from its default,
+// so a Link without one opens with the default. Where a key has a vals table, Link values map to the code's own like Link names.
+// Scroll position and how many done Items are loaded stay out.
+function stateKey(get, set, def, vals) { return { get: get, set: set, def: def, vals: vals || null }; }
+var ENT_Q = stateKey(function () { return S.eq; }, function (v) { S.eq = v; forceClear('ent-q'); }, '');
+var LINK_STATE = {
+  next: { group: stateKey(function () { return S.group; }, function (v) { S.group = v; }, 'project', { project: 'project', kind: 'kind', 'one-list': 'none' }) },
+  all: {
+    q: stateKey(function () { return S.wq; }, function (v) { S.wq = v; forceClear('wb-q'); }, ''),
+    group: stateKey(function () { return S.wb.group; }, function (v) { S.wb.group = v; }, 'urg', { urgency: 'urg', type: 'type', person: 'person', project: 'project', tag: 'tag' }),
+    sort: stateKey(function () { return S.wb.sort; }, function (v) { S.wb.sort = v; }, 'urg', { urgency: 'urg', 'due-date': 'due', newest: 'new', oldest: 'old' }),
+    tag: stateKey(function () { return S.wb.tag; }, function (v) { S.wb.tag = v; }, '')
+  },
+  people: {
+    q: stateKey(function () { return S.pq; }, function (v) { S.pq = v; forceClear('people-q'); }, ''),
+    show: stateKey(function () { return S.pf; }, function (v) { S.pf = v; }, 'all', { all: 'all', internal: 'internal', external: 'external', 'missing-details': 'gaps', left: 'left' }),
+    group: stateKey(function () { return S.pgroup; }, function (v) { S.pgroup = v; }, 'none', { none: 'none', organisation: 'co', department: 'dept', group: 'grp' })
+  },
+  projects: { q: ENT_Q },
+  systems: { q: ENT_Q }
+};
+// the Side panel's tab, written beside an Item the Link names
+var TAB_LINK = { details: 'details', relationships: 'links', agent: 'claude' };
+function linkValue(vals, v) { return Object.keys(vals).filter(function (k) { return vals[k] === v; })[0]; }
+function linkQuery() {
+  var keys = LINK_STATE[S.view] || {}, out = [];
+  Object.keys(keys).forEach(function (k) {
+    var d = keys[k], v = d.get();
+    if (v === d.def) return;
+    if (d.vals) v = linkValue(d.vals, v);
+    if (v) out.push(k + '=' + encodeURIComponent(v));
+  });
+  if (linkItem() && S.tab !== 'details') out.push('tab=' + linkValue(TAB_LINK, S.tab));
+  return out.length ? '?' + out.join('&') : '';
+}
+// the hash's state as [[key, value]], in the order written
+function stateOfHash(h) {
+  var s = String(h || ''), at = s.indexOf('?');
+  if (at < 0) return [];
+  var dec = function (x) { try { return decodeURIComponent(x); } catch (e) { return x; } };
+  return s.slice(at + 1).split('&').filter(Boolean).map(function (p) {
+    var e = p.indexOf('=');
+    return e < 0 ? [dec(p), ''] : [dec(p.slice(0, e)), dec(p.slice(e + 1))];
+  });
+}
+// sets the View's state from the Link, a key it leaves out to its default, and names what this version doesn't know.
+// -> the Side panel's tab for the Item the Link names
+function openState(pairs, withItem) {
+  var keys = LINK_STATE[S.view] || {}, own = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); }, tab = 'details', bad = [];
+  Object.keys(keys).forEach(function (k) { keys[k].set(keys[k].def); });
+  pairs.forEach(function (p) {
+    var k = p[0], v = p[1], d = own(keys, k) ? keys[k] : null;
+    if (k === 'tab' && withItem && own(TAB_LINK, v)) tab = TAB_LINK[v];
+    else if (d && (!d.vals || own(d.vals, v))) d.set(d.vals ? d.vals[v] : v);
+    else bad.push(k + (v ? '=' + v : ''));
+  });
+  if (bad.length) toastShow('This version doesn’t know ' + bad.join(', ') + ' in this Link, so it opened without ' + (bad.length > 1 ? 'them.' : 'it.'));
+  return tab;
+}
 // linkPush: the next hash write adds a history entry; hashOwn: the hash the UI wrote last, whose hashchange it ignores;
 // autoOpen: the Item the Inbox opened by itself, which the Link leaves out
 var linkPush = false, hashOwn = '', landing = false, autoOpen = null;
@@ -3694,19 +3753,21 @@ function linkNow() {
 }
 function linkOfHash(h) {
   var s = String(h || '').replace(/^#\/?/, '');
+  s = s.split('?')[0];
   try { s = decodeURIComponent(s); } catch (e) { /* keep it as typed */ }
-  return s.split('?')[0].trim();
+  return s.trim();
 }
-function openLink(link) {
-  var parts = link.split('/'), it = (parts[1] || '').toUpperCase(), bare = parts[0].toUpperCase();
+function openLink(link, state) {
+  var parts = link.split('/'), it = (parts[1] || '').toUpperCase(), bare = parts[0].toUpperCase(), tab;
   if (!it && kindOf(bare) === 'T' && /^T-\d+$/.test(bare)) {
-    if (whereOf(bare)) { go(homeView(item(bare))); select(bare); }
-    else { go('today'); toastShow(bare + ' isn’t in this Data folder, so here’s Today.'); }
+    if (whereOf(bare)) { go(homeView(item(bare))); tab = openState(state, true); select(bare, { tab: tab }); }
+    else { go('today'); toastShow(bare + ' isn’t in this Data folder, so here’s Today.'); openState(state, true); }
     return;
   }
   openView(parts[0]);
+  tab = openState(state, !!it);
   if (!it) return;
-  if (whereOf(it)) select(it);
+  if (whereOf(it)) select(it, { tab: tab });
   else toastShow(it + ' isn’t in this Data folder.');
 }
 function openView(link) {
@@ -3724,10 +3785,10 @@ function openView(link) {
 // goes to the Link in the hash; the browser has already made its history entry, so this replaces rather than adds one
 function land() {
   landing = true;
-  try { openLink(linkOfHash(location.hash)); } finally { landing = false; }
+  try { openLink(linkOfHash(location.hash), stateOfHash(location.hash)); } finally { landing = false; }
 }
 function syncLink() {
-  var h = '#/' + linkNow(), push = linkPush;
+  var h = '#/' + linkNow() + linkQuery(), push = linkPush;
   linkPush = false; hashOwn = h;
   if (location.hash === h) return;
   if (push) location.hash = h; else location.replace(h);
