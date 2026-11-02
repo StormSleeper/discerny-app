@@ -10,6 +10,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - The address now names the Item open in the side panel too, so you can bookmark or reload an Item and Back closes it, and pasting an Item's ID into the address opens it where it belongs.
 - A filtered, searched or grouped View, or an Item on its Relationships or Agent tab, keeps that in its Link, so a bookmark or a reload brings it back as it was.
 - A Link to a merged Item now opens the Item it was merged into, and a Link to an Item no longer on its View still opens there, with a notice and a button to where it belongs now.
+- Copy link, in each View's header and the Side panel's, copies a short Link to where you are, so you can keep a place or share it, even in the installed app.
 
 ## 0.3.0.8 (2026-10-25)
 
