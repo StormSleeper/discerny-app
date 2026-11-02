@@ -429,7 +429,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.1.3'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.3.1.4'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -2086,7 +2086,15 @@ function listName(i) {
   if (i.meta.type === 'fyi') return 'FYI';
   return 'Next actions';
 }
-function homeView(i) { return { Inbox: 'inbox', Done: 'done', 'Waiting for': 'waiting', Upcoming: 'upcoming', FYI: 'fyi', 'Next actions': 'next' }[listName(i)]; }
+// the View a bare Item ID opens on: a Meeting or FYI that is also waiting goes to its own View
+function homeView(i) {
+  var w = whereOf(i.id);
+  if (w === 'inbox') return 'inbox';
+  if (w === 'done') return 'done';
+  if (i.meta.type === 'meeting') return 'upcoming';
+  if (i.meta.type === 'fyi') return 'fyi';
+  return isWaiting(i) ? 'waiting' : 'next';
+}
 function srcKind(i) {
   var s = srcOf(i)[0] || '';
   if (/^Email .* sent to /.test(s)) return 'an email you sent';
@@ -3654,7 +3662,8 @@ function afterRender() {
   }
   var n = S.ready && S.m ? inboxCount() : 0, h1 = document.getElementById('page-title');
   if (S.ready && S.m) syncLink();
-  var title = (S.ready && h1 ? h1.textContent + ' · ' : '') + 'Discerny' + (n ? ' (' + n + ' in inbox)' : '');
+  var it = S.ready && S.m ? linkItem() : null;
+  var title = (it ? item(it).title + ' · ' : '') + (S.ready && h1 ? h1.textContent + ' · ' : '') + 'Discerny' + (n ? ' (' + n + ' in inbox)' : '');
   if (document.title !== title) document.title = title;
 }
 function focusLater(sel) {
@@ -3667,21 +3676,40 @@ function focusLater(sel) {
 function forceClear(id) { forced.add(id); }
 
 /* ===================== links ===================== */
-// A Link is the page's hash after "#/": a View's Link name, or a Record's ID for its page. Link names
+// A Link is the page's hash after "#/": a View's Link name, or a Record's ID for its page, then "/" and the ID of
+// the Item open in the Side panel, if the User opened one. Link names
 // last across versions, so they are kept apart from the code's own View names by this two-way table.
 var LINK_VIEW = { today: 'today', inbox: 'inbox', 'next-actions': 'next', 'waiting-for': 'waiting', upcoming: 'upcoming', fyi: 'fyi', 'all-items': 'all', done: 'done', projects: 'projects', people: 'people', systems: 'systems', 'weekly-review': 'review', agent: 'claude' };
 var VIEW_LINK = {};
 Object.keys(LINK_VIEW).forEach(function (k) { VIEW_LINK[LINK_VIEW[k]] = k; });
 var RECORD_VIEW = { P: 'person', PRJ: 'project', SYS: 'system' };
-// linkPush: the next hash write adds a history entry; hashOwn: the hash the UI wrote last, whose hashchange it ignores
-var linkPush = false, hashOwn = '', landing = false;
-function linkNow() { return S.entity || VIEW_LINK[S.view] || 'today'; }
+// linkPush: the next hash write adds a history entry; hashOwn: the hash the UI wrote last, whose hashchange it ignores;
+// autoOpen: the Item the Inbox opened by itself, which the Link leaves out
+var linkPush = false, hashOwn = '', landing = false, autoOpen = null;
+// the Item the Link and the document title name: one open in the Side panel that the User opened
+function linkItem() { return S.panel && S.sel && kindOf(S.sel) === 'T' && S.sel !== autoOpen && item(S.sel) ? S.sel : null; }
+function linkNow() {
+  var v = S.entity || VIEW_LINK[S.view] || 'today', it = linkItem();
+  return it ? v + '/' + it : v;
+}
 function linkOfHash(h) {
   var s = String(h || '').replace(/^#\/?/, '');
   try { s = decodeURIComponent(s); } catch (e) { /* keep it as typed */ }
   return s.split('?')[0].trim();
 }
 function openLink(link) {
+  var parts = link.split('/'), it = (parts[1] || '').toUpperCase(), bare = parts[0].toUpperCase();
+  if (!it && kindOf(bare) === 'T' && /^T-\d+$/.test(bare)) {
+    if (whereOf(bare)) { go(homeView(item(bare))); select(bare); }
+    else { go('today'); toastShow(bare + ' isn’t in this Data folder, so here’s Today.'); }
+    return;
+  }
+  openView(parts[0]);
+  if (!it) return;
+  if (whereOf(it)) select(it);
+  else toastShow(it + ' isn’t in this Data folder.');
+}
+function openView(link) {
   if (!link) { go('today'); return; }
   var v = LINK_VIEW[link.toLowerCase()];
   if (v) { go(v); return; }
@@ -3712,7 +3740,8 @@ function go(view, entity) {
   S.view = view; S.entity = entity || null;
   S.panel = false; S.sel = null; S.cur = null; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.confirm = null; S.adding = null; S.linkQ = ''; S.tab = 'details'; S.editAsk = null; S.dialog = null;
   if (changed) { S.eq = ''; S.pq = ''; S.pf = 'all'; S.doneLimit = 60; }
-  if (view === 'inbox' && !isDrawer()) { var l = inboxList(); if (l.length) { S.sel = l[0].id; S.panel = true; S.cur = l[0].id; } }
+  autoOpen = null;
+  if (view === 'inbox' && !isDrawer()) { var l = inboxList(); if (l.length) { S.sel = autoOpen = l[0].id; S.panel = true; S.cur = l[0].id; } }
   if (changed) { var m = document.getElementById('main'); if (m) m.scrollTop = 0; S.scrolled = false; }
   focusLater('#page-title');
 }
@@ -3726,10 +3755,11 @@ function goAny(id) {
 function select(id, o) {
   o = o || {};
   if (S.sel !== id) {
+    if (!landing && !o.move && kindOf(id) === 'T') linkPush = true;
     S.tab = o.tab || 'details';
     S.subDraft = ''; S.cmtDraft = ''; S.cmtEdit = null; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.mergeQ = ''; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
   } else if (o.tab) S.tab = o.tab;
-  S.sel = id; S.panel = true;
+  S.sel = id; S.panel = true; autoOpen = null;
   if (kindOf(id) === 'T') S.cur = id;
   S.fresh.delete(id);
   if (o.focus === false) render();
@@ -3757,7 +3787,7 @@ function moveCursor(step) {
   S.scrollRow = rows[k];
   var rowEl = document.querySelector('.main [data-row="' + rows[k] + '"]');
   if (rowEl && rowEl.scrollIntoView) rowEl.scrollIntoView({ block: 'nearest' });
-  if (S.panel && S.sel && kindOf(S.sel) === 'T') { select(rows[k], { focus: '.main [data-row="' + rows[k] + '"] .t' }); return; }
+  if (S.panel && S.sel && kindOf(S.sel) === 'T') { select(rows[k], { move: true, focus: '.main [data-row="' + rows[k] + '"] .t' }); return; }
   focusLater('.main [data-row="' + rows[k] + '"] .t');
 }
 function targetId() {
@@ -3786,14 +3816,14 @@ function toggleDone(id, viaKey) {
   } else return;
   if (viaKey) {
     S.cur = nb;
-    if (S.panel && S.sel === id) { if (nb) { select(nb, { focus: '.main [data-row="' + nb + '"] .t' }); return; } S.panel = false; S.sel = null; }
+    if (S.panel && S.sel === id) { if (nb) { select(nb, { move: true, focus: '.main [data-row="' + nb + '"] .t' }); return; } S.panel = false; S.sel = null; }
     if (nb) focusLater('.main [data-row="' + nb + '"] .t');
   }
 }
 function nextInbox(id) { var l = inboxList(), k = l.map(function (x) { return x.id; }).indexOf(id), rest = l.filter(function (x) { return x.id !== id; }); return rest.length ? rest[Math.min(Math.max(k, 0), rest.length - 1)].id : null; }
 function afterTriage(id, nextSel) {
   if (S.view === 'inbox') {
-    if (nextSel) { select(nextSel, { focus: S.panel ? '#panel-top' : '.main [data-row="' + nextSel + '"] .t' }); return; }
+    if (nextSel) { select(nextSel, { move: true, focus: S.panel ? '#panel-top' : '.main [data-row="' + nextSel + '"] .t' }); return; }
     S.panel = false; S.sel = null; S.cur = null; focusLater('#page-title');
     return;
   }
@@ -3857,7 +3887,7 @@ function mergeItems(sid, did) {
   forceClear('f-mergeq');
   commit(OPS.merge(sid, did, nowStamp(), st), { toast: 'Merged ' + did + ' into ' + sid + '. ' + did + ' now finds ' + sid + '.', undo: OPS.unmerge(sid, did, st) });
   if (triage) { afterTriage(did, nx); return; }
-  if (S.sel === did) select(sid);
+  if (S.sel === did) select(sid, { move: true });
 }
 // Answers to change Proposals. Each says what it did, with an undo; a No is for good.
 function relYes(line) {

@@ -7,6 +7,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - The installed app's icon now has a transparent background, so it no longer shows as a pale square on a dark taskbar.
 - The installed app's taskbar icon is now larger and clearer, showing just the binoculars.
 - The address now follows the View you're on, so bookmarks, Back and Forward, new tabs and reload bring you back to it, and the browser tab names the page.
+- The address now names the Item open in the side panel too, so you can bookmark or reload an Item and Back closes it, and pasting an Item's ID into the address opens it where it belongs.
 
 ## 0.3.0.8 (2026-10-25)
 
