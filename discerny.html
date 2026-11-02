@@ -429,7 +429,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.1.2'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.3.1.3'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -3641,7 +3641,6 @@ function renderNow() {
   }
   afterRender();
 }
-var VIEW_TITLE = { today: 'Today', inbox: 'Inbox', next: 'Next actions', waiting: 'Waiting for', upcoming: 'Upcoming', fyi: 'FYI', projects: 'Projects', project: 'Project', people: 'People', person: 'Person', systems: 'Systems', system: 'System', review: 'Weekly review', done: 'Done', claude: 'Agent' };
 function afterRender() {
   if (S.focusSel) {
     var el = document.querySelector(S.focusSel);
@@ -3653,8 +3652,9 @@ function afterRender() {
     S.scrollRow = null;
     if (r && r.scrollIntoView) r.scrollIntoView({ block: 'nearest' });
   }
-  var n = S.ready && S.m ? inboxCount() : 0;
-  var title = (S.ready ? VIEW_TITLE[S.view] + ' · ' : '') + 'Discerny' + (n ? ' (' + n + ' in inbox)' : '');
+  var n = S.ready && S.m ? inboxCount() : 0, h1 = document.getElementById('page-title');
+  if (S.ready && S.m) syncLink();
+  var title = (S.ready && h1 ? h1.textContent + ' · ' : '') + 'Discerny' + (n ? ' (' + n + ' in inbox)' : '');
   if (document.title !== title) document.title = title;
 }
 function focusLater(sel) {
@@ -3666,9 +3666,49 @@ function focusLater(sel) {
 }
 function forceClear(id) { forced.add(id); }
 
+/* ===================== links ===================== */
+// A Link is the page's hash after "#/": a View's Link name, or a Record's ID for its page. Link names
+// last across versions, so they are kept apart from the code's own View names by this two-way table.
+var LINK_VIEW = { today: 'today', inbox: 'inbox', 'next-actions': 'next', 'waiting-for': 'waiting', upcoming: 'upcoming', fyi: 'fyi', 'all-items': 'all', done: 'done', projects: 'projects', people: 'people', systems: 'systems', 'weekly-review': 'review', agent: 'claude' };
+var VIEW_LINK = {};
+Object.keys(LINK_VIEW).forEach(function (k) { VIEW_LINK[LINK_VIEW[k]] = k; });
+var RECORD_VIEW = { P: 'person', PRJ: 'project', SYS: 'system' };
+// linkPush: the next hash write adds a history entry; hashOwn: the hash the UI wrote last, whose hashchange it ignores
+var linkPush = false, hashOwn = '', landing = false;
+function linkNow() { return S.entity || VIEW_LINK[S.view] || 'today'; }
+function linkOfHash(h) {
+  var s = String(h || '').replace(/^#\/?/, '');
+  try { s = decodeURIComponent(s); } catch (e) { /* keep it as typed */ }
+  return s.split('?')[0].trim();
+}
+function openLink(link) {
+  if (!link) { go('today'); return; }
+  var v = LINK_VIEW[link.toLowerCase()];
+  if (v) { go(v); return; }
+  var id = link.toUpperCase(), rv = RECORD_VIEW[kindOf(id)];
+  if (rv && /^[A-Z]+-\d+$/.test(id)) {
+    if (exists(id)) go(rv, id);
+    else { go('today'); toastShow(id + ' isn’t in this Data folder, so here’s Today.'); }
+    return;
+  }
+  go('today'); toastShow('There’s no View called “' + link + '”, so here’s Today.');
+}
+// goes to the Link in the hash; the browser has already made its history entry, so this replaces rather than adds one
+function land() {
+  landing = true;
+  try { openLink(linkOfHash(location.hash)); } finally { landing = false; }
+}
+function syncLink() {
+  var h = '#/' + linkNow(), push = linkPush;
+  linkPush = false; hashOwn = h;
+  if (location.hash === h) return;
+  if (push) location.hash = h; else location.replace(h);
+}
+
 /* ===================== navigation and selection ===================== */
 function go(view, entity) {
   var changed = S.view !== view || S.entity !== (entity || null);
+  if (changed && !landing) linkPush = true;
   S.view = view; S.entity = entity || null;
   S.panel = false; S.sel = null; S.cur = null; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.confirm = null; S.adding = null; S.linkQ = ''; S.tab = 'details'; S.editAsk = null; S.dialog = null;
   if (changed) { S.eq = ''; S.pq = ''; S.pf = 'all'; S.doneLimit = 60; }
@@ -4409,7 +4449,7 @@ function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && (ev.key === 'k' || ev.key === 'K')) { ev.preventDefault(); if (S.dialog === 'palette') closeDialog(); else openPalette(); return; }
   if (ev.key === 'Escape') { handleEsc(ev); return; }
   if (S.dialog) { if (ev.key === 'Tab') trapTab(ev); return; }
-  if (t && t.getAttribute && t.getAttribute('role') === 'tab' && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft')) {
+  if (t && t.getAttribute && t.getAttribute('role') === 'tab' && !ev.altKey && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft')) {
     ev.preventDefault();
     var tabs = ['details', 'links', 'claude'], k = tabs.indexOf(S.tab) + (ev.key === 'ArrowRight' ? 1 : -1);
     S.tab = tabs[(k + 3) % 3]; S.linkQ = '';
@@ -4503,7 +4543,7 @@ async function openFolder() {
     S.gate = isPermErr(e) ? { mode: srv ? 'srvdown' : 'reconnect', msg: '' } : { mode: 'error', msg: errText(e) }; render(); return;
   }
   S.ready = true;
-  if (S.view === 'inbox') go('inbox');
+  land();
   startTimers();
   focusLater('#page-title');
   if (Q.jobs.length) kick();
@@ -4538,6 +4578,8 @@ async function boot() {
     if (s !== S.scrolled) { S.scrolled = s; var h = m.querySelector('.head'); if (h) h.classList.toggle('scrolled', s); }
   }, true);
   window.addEventListener('resize', render);
+  // Back, Forward, an edited address or a bookmark; before the folder is read, openFolder lands on the Link instead
+  window.addEventListener('hashchange', function () { if (S.ready && S.m && location.hash !== hashOwn) land(); });
   window.addEventListener('beforeunload', function (ev) { if (Q.jobs.some(function (j) { return !j.sync; })) { ev.preventDefault(); ev.returnValue = ''; } });
   // Served by node tools/discern.mjs serve: the server reads and writes the folder, so no picker or permission.
   if (location.protocol === 'http:' && (await serverInfo())) { openFolder(); return; }
