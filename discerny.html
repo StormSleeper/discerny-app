@@ -429,7 +429,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.1.5'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.3.1.6'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -3255,6 +3255,7 @@ function panelTask(i) {
   var h = panelHead(id, (inbox ? 'Proposal · ' : '') + (TYPE_WORD[i.meta.type || 'task'] || i.meta.type) + ' · ' + listName(i), false);
   if (inbox) h += '<div class="note" data-k="note-inbox">Proposed by the agent from ' + esc(srcKind(i)) + (got ? ' on ' + esc(fmtDT(got)) : '') + '. Correct anything below, then accept or dismiss.</div>';
   if (done) h += '<div class="note ok" data-k="note-done" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">Done on ' + esc(i.meta['done-date'] ? fmt(i.meta['done-date']) : 'an earlier date') + '.</span>' + bt('Reopen', 'reopen', { id: id, cls: 'sm' }) + '</div>';
+  if (offView === id) h += '<div class="note warn" data-k="note-off-view" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">' + id + ' isn’t on this View.</span>' + bt('Go to ' + navName(homeView(i)), 'home-view', { id: id, cls: 'sm' }) + '</div>';
   h += '<label class="sr" for="f-title">Title</label><textarea id="f-title" class="title-in" rows="2" data-ch="title" data-kd="title" data-id="' + id + '">' + esc(i.title) + '</textarea>';
   if (!done) h += '<div class="pills" data-k="row-status"><div class="seg" data-k="seg-status" role="group" aria-label="Status">' + STATUS.map(function (x) { return '<button type="button" data-act="status" data-id="' + id + '" data-v="' + esc(x) + '"' + pressed((i.meta.status || '') === x) + '>' + esc(STATUS_LABEL[x]) + '</button>'; }).join('') + '</div>' + doneBtn(i, '') + '</div>';
   h += vTabs(id, rels.length + deps.length, asks.length);
@@ -3395,6 +3396,7 @@ var NAV = [
   ['Knowledge base', [['projects', 'Projects'], ['people', 'People'], ['systems', 'Systems']]],
   ['Reflect', [['review', 'Weekly review'], ['done', 'Done'], ['claude', 'Agent']]]
 ];
+function navName(v) { return NAV.reduce(function (a, g) { return a.concat(g[1]); }, []).filter(function (n) { return n[0] === v; })[0][1]; }
 var NAV_COUNTS = { today: 1, inbox: 1, next: 1, waiting: 1, fyi: 1, review: 1, claude: 1 };
 function navOn(k) { var v = S.view; return v === k || (k === 'projects' && v === 'project') || (k === 'people' && v === 'person') || (k === 'systems' && v === 'system'); }
 function saveState() {
@@ -3660,6 +3662,7 @@ function afterRender() {
     S.scrollRow = null;
     if (r && r.scrollIntoView) r.scrollIntoView({ block: 'nearest' });
   }
+  if (offView && document.querySelector('.main [data-row="' + offView + '"]')) { offView = null; render(); }
   var n = S.ready && S.m ? inboxCount() : 0, h1 = document.getElementById('page-title');
   if (S.ready && S.m) syncLink();
   var it = S.ready && S.m ? linkItem() : null;
@@ -3743,8 +3746,8 @@ function openState(pairs, withItem) {
   return tab;
 }
 // linkPush: the next hash write adds a history entry; hashOwn: the hash the UI wrote last, whose hashchange it ignores;
-// autoOpen: the Item the Inbox opened by itself, which the Link leaves out
-var linkPush = false, hashOwn = '', landing = false, autoOpen = null;
+// autoOpen: the Item the Inbox opened by itself, which the Link leaves out; offView: the Item a Link opened on a View it isn't on
+var linkPush = false, hashOwn = '', landing = false, autoOpen = null, offView = null;
 // the Item the Link and the document title name: one open in the Side panel that the User opened
 function linkItem() { return S.panel && S.sel && kindOf(S.sel) === 'T' && S.sel !== autoOpen && item(S.sel) ? S.sel : null; }
 function linkNow() {
@@ -3757,30 +3760,47 @@ function linkOfHash(h) {
   try { s = decodeURIComponent(s); } catch (e) { /* keep it as typed */ }
   return s.trim();
 }
+// the Item an ID in a Link names now: itself, or the Item it was merged into, found by its Comment, and says so
+function linkTarget(id) {
+  if (whereOf(id)) return id;
+  var said = 'Merged ' + id + ' into this.', s = allItems().filter(function (i) { return commentsOf(i).some(function (c) { return c.v.trim() === said; }); })[0];
+  if (s) toastShow(id + ' was merged into ' + s.id + ', so here’s ' + s.id + '.');
+  return s ? s.id : null;
+}
+// a View's own rows hold what is on it. The Item's home View counts whatever it shows: Done loads only some of its Items.
+function onThisView(id) {
+  var b = viewFor().body;
+  return S.view === homeView(item(id)) || b.indexOf('data-row="' + id + '"') >= 0 || b.indexOf('data-k="ack-' + id + '"') >= 0;
+}
 function openLink(link, state) {
-  var parts = link.split('/'), it = (parts[1] || '').toUpperCase(), bare = parts[0].toUpperCase(), tab;
+  var parts = link.split('/'), it = (parts[1] || '').toUpperCase(), bare = parts[0].toUpperCase(), tab, to;
   if (!it && kindOf(bare) === 'T' && /^T-\d+$/.test(bare)) {
-    if (whereOf(bare)) { go(homeView(item(bare))); tab = openState(state, true); select(bare, { tab: tab }); }
+    to = linkTarget(bare);
+    if (to) { go(homeView(item(to))); tab = openState(state, true); select(to, { tab: tab }); }
     else { go('today'); toastShow(bare + ' isn’t in this Data folder, so here’s Today.'); openState(state, true); }
     return;
   }
-  openView(parts[0]);
+  var named = openView(parts[0]);
   tab = openState(state, !!it);
   if (!it) return;
-  if (whereOf(it)) select(it, { tab: tab });
-  else toastShow(it + ' isn’t in this Data folder.');
+  to = linkTarget(it);
+  if (!to) { toastShow(it + ' isn’t in this Data folder.'); return; }
+  select(to, { tab: tab });
+  if (named && !onThisView(to)) offView = to;
 }
+// -> whether the View the Link names is the one that opened
 function openView(link) {
-  if (!link) { go('today'); return; }
+  if (!link) { go('today'); return false; }
   var v = LINK_VIEW[link.toLowerCase()];
-  if (v) { go(v); return; }
+  if (v) { go(v); return true; }
   var id = link.toUpperCase(), rv = RECORD_VIEW[kindOf(id)];
   if (rv && /^[A-Z]+-\d+$/.test(id)) {
-    if (exists(id)) go(rv, id);
-    else { go('today'); toastShow(id + ' isn’t in this Data folder, so here’s Today.'); }
-    return;
+    if (exists(id)) { go(rv, id); return true; }
+    go('today'); toastShow(id + ' isn’t in this Data folder, so here’s Today.');
+    return false;
   }
   go('today'); toastShow('There’s no View called “' + link + '”, so here’s Today.');
+  return false;
 }
 // goes to the Link in the hash; the browser has already made its history entry, so this replaces rather than adds one
 function land() {
@@ -3801,7 +3821,7 @@ function go(view, entity) {
   S.view = view; S.entity = entity || null;
   S.panel = false; S.sel = null; S.cur = null; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.confirm = null; S.adding = null; S.linkQ = ''; S.tab = 'details'; S.editAsk = null; S.dialog = null;
   if (changed) { S.eq = ''; S.pq = ''; S.pf = 'all'; S.doneLimit = 60; }
-  autoOpen = null;
+  autoOpen = null; offView = null;
   if (view === 'inbox' && !isDrawer()) { var l = inboxList(); if (l.length) { S.sel = autoOpen = l[0].id; S.panel = true; S.cur = l[0].id; } }
   if (changed) { var m = document.getElementById('main'); if (m) m.scrollTop = 0; S.scrolled = false; }
   focusLater('#page-title');
@@ -3817,6 +3837,7 @@ function select(id, o) {
   o = o || {};
   if (S.sel !== id) {
     if (!landing && !o.move && kindOf(id) === 'T') linkPush = true;
+    offView = null;
     S.tab = o.tab || 'details';
     S.subDraft = ''; S.cmtDraft = ''; S.cmtEdit = null; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.mergeQ = ''; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
   } else if (o.tab) S.tab = o.tab;
@@ -4166,6 +4187,7 @@ var ACT = {
   open: function (el) { var id = did(el); if (kindOf(id) === 'T') { if (S.panel && S.sel === id && !isDrawer()) { focusLater('#panel-top'); return; } select(id); } else goAny(id); },
   any: function (el) { goAny(did(el)); },
   'any-page': function (el) { goAny(did(el)); },
+  'home-view': function (el) { var id = did(el); go(homeView(item(id))); select(id); },
   person: function (el) { if (did(el)) go('person', did(el)); },
   ent: function (el) { goAny(did(el)); },
   close: function () { closePanel(); },
