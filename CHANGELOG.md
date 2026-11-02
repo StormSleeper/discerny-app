@@ -11,6 +11,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - A filtered, searched or grouped View, or an Item on its Relationships or Agent tab, keeps that in its Link, so a bookmark or a reload brings it back as it was.
 - A Link to a merged Item now opens the Item it was merged into, and a Link to an Item no longer on its View still opens there, with a notice and a button to where it belongs now.
 - Copy link, in each View's header and the Side panel's, copies a short Link to where you are, so you can keep a place or share it, even in the installed app.
+- A notice that an Item isn't on the Inbox now goes away as soon as a new Comment brings the Item there.
 
 ## 0.3.0.8 (2026-10-25)
 

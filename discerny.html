@@ -429,7 +429,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.1.7'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.3.1.8'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -3664,7 +3664,7 @@ function afterRender() {
     S.scrollRow = null;
     if (r && r.scrollIntoView) r.scrollIntoView({ block: 'nearest' });
   }
-  if (offView && document.querySelector('.main [data-row="' + offView + '"]')) { offView = null; render(); }
+  if (offView && document.querySelector('.main [data-row="' + offView + '"], .main [data-k="ack-' + offView + '"]')) { offView = null; render(); }
   var n = S.ready && S.m ? inboxCount() : 0, h1 = document.getElementById('page-title');
   if (S.ready && S.m) syncLink();
   var it = S.ready && S.m ? linkItem() : null;
