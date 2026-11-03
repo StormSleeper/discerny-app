@@ -82,6 +82,28 @@ Serve the page when you want a browser other than Chrome or Edge, or when your a
 
 You can have more than one data folder, for example one to try things out in. Switch the UI with *Change folder*, and your agent with `node tools/discern.mjs connect <folder>` in the app folder, which records it as `data_folder` in `config.toml` there; `node tools/discern.mjs connect` on its own shows which folder is connected.
 
+## Links
+
+Every view in the UI, and every item you open in the side panel, has a short Link. The UI keeps it in the address, after `#/`, so bookmarks, reloads and new tabs bring you back to the same place, whether you opened the page as a file or served it.
+
+| Link | Opens |
+|---|---|
+| `today`, `next-actions`, `waiting-for` | That view, named as you see it |
+| `PRJ-0003`, `P-0007`, `SYS-0002` | That project's, person's or system's page |
+| `T-0142` | That item, on the view it belongs on |
+| `waiting-for/T-0142` | That item, on that view |
+| `next-actions?group=kind` | That view as you had set it up: its search or filter text, its grouping, and the side panel's tab |
+
+**Copy link**, in the header of each view and of the side panel, copies the Link to where you are. It's the short Link, so you can paste it into a note, a chat or your agent.
+
+**Pasting into Ctrl K** goes straight there. Paste an ID, a Link or a whole address, from either way of opening the UI or from another computer, and the first result is "Go to …": press Enter. Anything else you type searches as usual. When your agent points you at something, it gives you an ID or a Link to paste here.
+
+**Back and Forward** in the browser retrace the views you moved between and the items you opened. Moving through items with J and K, or closing the side panel, adds no step, so one Back still takes you off the view.
+
+**The installed app** has no address bar, but works the same: Copy link and Ctrl K keep and return to places, and Alt+← and Alt+→, or your mouse's side buttons, go Back and Forward.
+
+A Link's view and item keep working in later versions of the app. If the item has been merged, it opens the item it was merged into and says so. If the ID isn't in your data folder, it says that. If the item is no longer on the view the Link names, it opens anyway, with a notice and a button to where it belongs now. A Link opens in whichever data folder is connected, and is never written into your files.
+
 ## What's in the folders
 
 ### Your data folder

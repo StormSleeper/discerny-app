@@ -74,6 +74,10 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 - When you are unsure what the user meant, ask. If no one is there to answer, leave the item as it is and say why.
 - Times without a time zone are the user's local time: the `timezone` in the `## defaults` block of `SOURCES.md`. State in `SOURCES.md` is UTC.
 
+## Pointing the user at something
+
+When you point the user at an item or record, give its ID, or `View/ID` if the view matters (`T-0142`, `waiting-for/T-0142`). Never give a full address: it holds a folder or port that may only be right on one machine. The user can paste either into Ctrl K in the UI to go there.
+
 ## Item format (TASKS.md, INBOX.md, DONE.md)
 
 ```

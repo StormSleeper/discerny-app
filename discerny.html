@@ -429,7 +429,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.1.8'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.3.1.9'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -2428,8 +2428,11 @@ function search(qs) {
   if (ents.length) groups.push({ title: 'Projects and systems', items: ents.slice(0, 5), more: ents.length - 5, lab: ents[0].lab });
   var c = cmds.filter(function (x) { return has(x.label); });
   if (c.length) groups.push({ title: 'Commands', items: c, lab: true });
-  /* whichever group matched on its name or title comes first */
-  return groups.map(function (g, k) { return { g: g, k: k }; }).sort(function (a, b) { return (b.g.lab - a.g.lab) || (a.k - b.k); }).map(function (x) { return x.g; });
+  /* whichever group matched on its name or title comes first, after a Link */
+  groups = groups.map(function (g, k) { return { g: g, k: k }; }).sort(function (a, b) { return (b.g.lab - a.g.lab) || (a.k - b.k); }).map(function (x) { return x.g; });
+  var link = linkResult(qs);
+  if (link) groups.unshift({ title: 'Link', items: [link] });
+  return groups;
 }
 function flatResults(groups) { var out = []; groups.forEach(function (g) { g.items.forEach(function (it) { out.push(it); }); }); return out; }
 
@@ -3762,12 +3765,33 @@ function linkOfHash(h) {
   try { s = decodeURIComponent(s); } catch (e) { /* keep it as typed */ }
   return s.trim();
 }
-// the Item an ID in a Link names now: itself, or the Item it was merged into, found by its Comment, and says so
+// the Item an ID was merged into, found by its Comment
+function mergedInto(id) {
+  var said = 'Merged ' + id + ' into this.', s = allItems().filter(function (i) { return commentsOf(i).some(function (c) { return c.v.trim() === said; }); })[0];
+  return s ? s.id : null;
+}
+// the Item an ID in a Link names now: itself, or the Item it was merged into, and says so
 function linkTarget(id) {
   if (whereOf(id)) return id;
-  var said = 'Merged ' + id + ' into this.', s = allItems().filter(function (i) { return commentsOf(i).some(function (c) { return c.v.trim() === said; }); })[0];
-  if (s) toastShow(id + ' was merged into ' + s.id + ', so here’s ' + s.id + '.');
-  return s ? s.id : null;
+  var to = mergedInto(id);
+  if (to) toastShow(id + ' was merged into ' + to + ', so here’s ' + to + '.');
+  return to;
+}
+// "Go to …" for text in Ctrl K that is a Link, or a whole address holding one, when all it names is here; otherwise null.
+// A Link with a missing ID opens from the address with a message, but here it stays a search: it may be an ID half typed.
+function linkResult(text) {
+  var s = String(text || '').trim(), at = s.indexOf('#/');
+  if (at >= 0) s = s.slice(at + 2).trim();
+  var parts = linkOfHash(s).split('/'), head = parts[0], id = head.toUpperCase(), it = (parts[1] || '').toUpperCase(), sub;
+  if (parts.length > 2) return null;
+  var itemSub = function (i) { var to = whereOf(i) ? i : mergedInto(i); return to && labelOf(to); };
+  if (!it && /^T-\d+$/.test(id)) sub = itemSub(id);
+  else {
+    var isView = Object.prototype.hasOwnProperty.call(LINK_VIEW, head.toLowerCase()), isRec = RECORD_VIEW[kindOf(id)] && /^[A-Z]+-\d+$/.test(id) && exists(id);
+    if (!isView && !isRec) return null;
+    sub = it ? itemSub(it) : isRec ? labelOf(id) : 'View';
+  }
+  return sub ? { label: 'Go to ' + s, sub: sub, id: '', act: 'link', arg: s } : null;
 }
 // a View's own rows hold what is on it. The Item's home View counts whatever it shows: Done loads only some of its Items.
 function onThisView(id) {
@@ -4152,6 +4176,7 @@ function runResult(it) {
   S.dialog = null; S.dlgReturn = null;
   if (it.act === 'go') { if (it.arg === 'people-gaps') { go('people'); S.pf = 'gaps'; } else go(it.arg); return; }
   if (it.act === 'open') { select(it.arg); return; }
+  if (it.act === 'link') { openLink(linkOfHash(it.arg), stateOfHash(it.arg)); return; }
   if (it.act === 'all') { S.wq = it.arg; forceClear('wb-q'); go('all'); return; }
   if (it.act === 'person' && it.arg) { go('person', it.arg); return; }
   if (it.act === 'ent') { goAny(it.arg); return; }
