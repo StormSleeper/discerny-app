@@ -13,6 +13,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - Copy link, in each View's header and the Side panel's, copies a short Link to where you are, so you can keep a place or share it, even in the installed app.
 - A notice that an Item isn't on the Inbox now goes away as soon as a new Comment brings the Item there.
 - Paste an ID, a Link or a whole address into Ctrl K to go straight there, and the README now explains Links.
+- Items you find with Ctrl K now open on the View they belong to, and an ID that isn't in your Data folder is named instead of showing "No matches".
 
 ## 0.3.0.8 (2026-10-25)
 

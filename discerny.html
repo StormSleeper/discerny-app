@@ -429,7 +429,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.1.9'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.3.1.10'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -3484,7 +3484,7 @@ function vPalette() {
       return '<div class="res" role="option" id="pal-i-' + n + '" aria-selected="' + (n === idx) + '" data-act="pal-pick" data-i="' + n + '"><span class="grow"><span>' + esc(it.label) + '</span><span class="sub">' + esc(it.sub) + '</span></span>' + (it.id ? '<span class="id">' + esc(it.id) + '</span>' : '') + '</div>';
     }).join('') + '</div>';
   }).join('');
-  if (!flat.length) body = '<div class="empty" style="padding:12px">No matches.</div>';
+  if (!flat.length) { var gone = missingId(S.palQ); body = '<div class="empty" style="padding:12px">' + (gone ? esc(gone) + ' isn’t in this Data folder.' : 'No matches.') + '</div>'; }
   return '<div class="dlg-scrim" data-k="dlg-pal" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-label="Search and commands"><div class="dlg-h">' + ic('search') +
     '<label class="sr" for="pal-q">Search tasks, people, projects and systems</label><input id="pal-q" class="in" type="text" autocomplete="off" spellcheck="false" data-in="palQ" data-kd="pal" value="' + esc(S.palQ) + '" placeholder="Search everything, or type a command" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list"' + (flat.length ? ' aria-activedescendant="pal-i-' + idx + '"' : '') + '>' +
     bt('Esc', 'dlg-close', { cls: 'sm', attrs: ' aria-label="Close search"' }) + '</div><div class="dlg-b" id="pal-list" role="listbox" aria-label="Results">' + body + '</div>' +
@@ -3777,11 +3777,21 @@ function linkTarget(id) {
   if (to) toastShow(id + ' was merged into ' + to + ', so here’s ' + to + '.');
   return to;
 }
-// "Go to …" for text in Ctrl K that is a Link, or a whole address holding one, when all it names is here; otherwise null.
-// A Link with a missing ID opens from the address with a message, but here it stays a search: it may be an ID half typed.
-function linkResult(text) {
+function idShaped(s) { return /^(T|P|PRJ|SYS)-\d+$/.test(s); }
+// the Link in text in Ctrl K: the text itself, or what follows the #/ of a whole address
+function linkText(text) {
   var s = String(text || '').trim(), at = s.indexOf('#/');
-  if (at >= 0) s = s.slice(at + 2).trim();
+  return at >= 0 ? s.slice(at + 2).trim() : s;
+}
+// the ID to name when Ctrl K finds nothing for an ID, or a whole address holding one; otherwise null
+function missingId(text) {
+  var id = linkOfHash(linkText(text)).toUpperCase();
+  return idShaped(id) ? id : null;
+}
+// "Go to …" for text in Ctrl K that is a Link, or a whole address holding one, when the View it names is here; otherwise null.
+// A bare ID with nothing behind it stays a search: it may be an ID half typed.
+function linkResult(text) {
+  var s = linkText(text);
   var parts = linkOfHash(s).split('/'), head = parts[0], id = head.toUpperCase(), it = (parts[1] || '').toUpperCase(), sub;
   if (parts.length > 2) return null;
   var itemSub = function (i) { var to = whereOf(i) ? i : mergedInto(i); return to && labelOf(to); };
@@ -3789,7 +3799,7 @@ function linkResult(text) {
   else {
     var isView = Object.prototype.hasOwnProperty.call(LINK_VIEW, head.toLowerCase()), isRec = RECORD_VIEW[kindOf(id)] && /^[A-Z]+-\d+$/.test(id) && exists(id);
     if (!isView && !isRec) return null;
-    sub = it ? itemSub(it) : isRec ? labelOf(id) : 'View';
+    sub = it ? itemSub(it) || (idShaped(it) && !exists(it) && it + ' isn’t in this Data folder') : isRec ? labelOf(id) : 'View';
   }
   return sub ? { label: 'Go to ' + s, sub: sub, id: '', act: 'link', arg: s } : null;
 }
@@ -4175,7 +4185,7 @@ function runResult(it) {
   if (!it) return;
   S.dialog = null; S.dlgReturn = null;
   if (it.act === 'go') { if (it.arg === 'people-gaps') { go('people'); S.pf = 'gaps'; } else go(it.arg); return; }
-  if (it.act === 'open') { select(it.arg); return; }
+  if (it.act === 'open') { openLink(it.arg, []); return; }
   if (it.act === 'link') { openLink(linkOfHash(it.arg), stateOfHash(it.arg)); return; }
   if (it.act === 'all') { S.wq = it.arg; forceClear('wb-q'); go('all'); return; }
   if (it.act === 'person' && it.arg) { go('person', it.arg); return; }

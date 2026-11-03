@@ -96,7 +96,7 @@ Every view in the UI, and every item you open in the side panel, has a short Lin
 
 **Copy link**, in the header of each view and of the side panel, copies the Link to where you are. It's the short Link, so you can paste it into a note, a chat or your agent.
 
-**Pasting into Ctrl K** goes straight there. Paste an ID, a Link or a whole address, from either way of opening the UI or from another computer, and the first result is "Go to …": press Enter. Anything else you type searches as usual. When your agent points you at something, it gives you an ID or a Link to paste here.
+**Pasting into Ctrl K** goes straight there. Paste an ID, a Link or a whole address, from either way of opening the UI or from another computer, and the first result is "Go to …": press Enter. If the View is here but the ID isn’t, "Go to" opens the View and names the ID; an ID on its own that isn’t here says so. Anything else you type searches as usual, and an Item you find opens on the View it belongs to. When your agent points you at something, it gives you an ID or a Link to paste here.
 
 **Back and Forward** in the browser retrace the views you moved between and the items you opened. Moving through items with J and K, or closing the side panel, adds no step, so one Back still takes you off the view.
 
