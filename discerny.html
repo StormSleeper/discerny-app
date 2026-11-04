@@ -341,7 +341,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .ecard .lines .k{color:var(--muted)}
 .ecard .path{font-size:12.5px;color:var(--muted)}
 .tbl{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow-x:auto;container-type:inline-size}
-.tr{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,2fr) minmax(0,1.4fr) 92px;gap:12px;padding:9px 14px;border-top:1px solid var(--line-3);align-items:center}
+.btn[aria-disabled="true"]{cursor:not-allowed;color:var(--muted)}
+.tr{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,2fr) minmax(0,1.4fr) 150px;gap:12px;padding:9px 14px;border-top:1px solid var(--line-3);align-items:center}
 .tr.th{border-top:0;font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .tr .nm{border:0;background:none;padding:0;text-align:left;font-weight:600;font-size:14.5px;color:var(--ink)}
 .tr .nm:hover{text-decoration:underline;text-underline-offset:2px}
@@ -429,7 +430,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.1.10'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.3.1.11'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -753,6 +754,22 @@ function setPriority(text,id,on){
     if(!on)has.reverse().forEach(function(k){ls.splice(k,1);});}
   else{var ids=csv(v);if(on&&ids.indexOf(id)<0)ids.push(id);if(!on)ids=ids.filter(function(x){return x!==id;});ls[at]='- priority-people:'+(ids.length?' '+ids.join(', '):'');}
   return ls.join(eol);}
+// SOURCES.md: the IDs in priority-people in "## defaults", on its one line or as a list under it
+function priorityIds(text){
+  var ls=String(text||'').split(/\r?\n/),d=false,out=[],i;
+  for(i=0;i<ls.length;i++){
+    if(/^## /.test(ls[i])){if(d)break;d=/^## defaults\s*$/.test(ls[i]);continue;}
+    if(!d||!/^- priority-people:/.test(ls[i]))continue;
+    out=csv(ls[i].replace(/^- priority-people:\s*/,''));
+    if(!out.length)for(i++;i<ls.length&&/^ {2,}- /.test(ls[i]);i++)out.push(ls[i].replace(/^ {2,}- /,'').trim());
+    break;}
+  return out;}
+// Where a Person stands: 'user' never counts, 'manager' (the User's) always does, listed or not; everyone else is 'on' or 'off' priority-people
+function priorityStatus(people,ids,p){
+  if(p.meta.id===USER_ID)return 'user';
+  var me=people.filter(function(x){return x.meta.id===USER_ID;})[0];
+  if(me&&me.meta.manager&&me.meta.manager===p.name)return 'manager';
+  return ids.indexOf(p.meta.id)>=0?'on':'off';}
 // versions compare part by part, a missing part counting as 0; 'next' (an unlanded Migration) is newer than any
 function versionCmp(a,b){if(a===b)return 0;if(a==='next')return 1;if(b==='next')return -1;
   var x=String(a).split('.'),y=String(b).split('.');
@@ -1317,6 +1334,39 @@ var OPS = {
     return op('Undo Priority person', ['inbox', 'settings'], function (M) {
       putChange(M.inbox, c.lines);
       if (st.had === false) M.settings.text = setPriority(M.settings.text, rid(c.id), false);
+    });
+  },
+  // Promote by hand, which also answers a Priority person Proposal waiting for them. st keeps what the undo must put back;
+  // each run overwrites it, so what stays is what the last run, the save, found in the files.
+  promote: function (id, st) {
+    return op('Promote ' + id, ['inbox', 'settings'], function (M) {
+      var t = setPriority(M.settings.text, rid(id), true), cs = changesOf(M.inbox.post).filter(function (c) { return c.type === 'priority' && rid(c.id) === rid(id); });
+      st.had = t === M.settings.text;
+      M.settings.text = t;
+      st.lines = cs.map(function (c) { return c.lines; });
+      cs.forEach(function (c) { dropChange(M.inbox, c.line); });
+    });
+  },
+  unpromote: function (id, st) {
+    return op('Undo promote ' + id, ['inbox', 'settings'], function (M) {
+      (st.lines || []).forEach(function (l) { putChange(M.inbox, l); });
+      if (st.had === false) M.settings.text = setPriority(M.settings.text, rid(id), false);
+    });
+  },
+  // Demote by hand starts a Priority pause, with the line a No writes. addLines won't repeat a line, so st.added says whether this one is ours to undo.
+  demote: function (id, line, st) {
+    return op('Demote ' + id, ['settings', 'ignored'], function (M) {
+      var t = setPriority(M.settings.text, rid(id), false), g = addLines(M.ignored.text, [line]);
+      st.had = t !== M.settings.text;
+      st.added = g !== M.ignored.text;
+      M.settings.text = t;
+      M.ignored.text = g;
+    });
+  },
+  undemote: function (id, line, st) {
+    return op('Undo demote ' + id, ['settings', 'ignored'], function (M) {
+      if (st.had) M.settings.text = setPriority(M.settings.text, rid(id), true);
+      if (st.added) M.ignored.text = dropLines(M.ignored.text, [line]);
     });
   },
   addSub: function (id, text) {
@@ -2153,6 +2203,17 @@ function todayItems() {
 /* ===================== people, projects and systems ===================== */
 function isExt(p) { return p.meta.external === 'yes'; }
 function isMe(p) { return p.meta.id === USER_ID; }
+function prioOf(p) { return priorityStatus(S.m.people.people, priorityIds(S.m.settings.text), p); }
+function isPrio(p) { var s = prioOf(p); return s === 'on' || s === 'manager'; }
+function prioMark(p) { return isPrio(p) ? badge('Priority', 'flag prio-m') : ''; }
+// The Promote or Demote button: locked on the User's manager, and absent on the User, on anyone with no ID and on someone who has left, unless they're still listed
+function prioToggle(p, cls) {
+  var s = prioOf(p), c = (cls ? cls + ' ' : '') + 'prio-t';
+  if (s === 'manager') return '<button type="button" class="btn ' + c + '" aria-disabled="true" aria-label="' + esc(p.name + ' is your manager, and always counts as a Priority person') + '" title="Your manager always counts as a Priority person">' + ic('lock', 's') + 'Always</button>';
+  if (s === 'user' || !p.meta.id || (s === 'off' && p.meta.status === 'left')) return '';
+  var label = s === 'on' ? 'Demote ' + p.name + ', so they are no longer a Priority person' : 'Promote ' + p.name + ' to a Priority person';
+  return bt(s === 'on' ? 'Demote' : 'Promote', s === 'on' ? 'demote' : 'promote', { id: p.meta.id, cls: c, attrs: ' aria-label="' + esc(label) + '" title="' + esc(label) + '"' });
+}
 function gaps(p) {
   if (p.meta.status === 'left') return [];
   var need = isExt(p) ? ['company', 'title'] : ['company', 'department', 'title', 'manager'];
@@ -2451,6 +2512,7 @@ function opts(list, cur) {
 }
 function pressed(on) { return ' aria-pressed="' + (on ? 'true' : 'false') + '"'; }
 var ICONS = {
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   today: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/>',
   next: '<path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17M11 6h10M11 12h10M11 18h10"/>',
@@ -2932,7 +2994,7 @@ function viewPerson(id) {
   }
   var reports = S.m.people.people.filter(function (x) { return x.meta.manager === p.name && x.meta.status !== 'left'; });
   var owns = systemsOwnedBy(p), g = gaps(p);
-  var pills = (isExt(p) ? badge('External', 'info') : '') + (p.meta.status === 'left' ? badge('Left') : '') +
+  var pills = prioMark(p) + (isExt(p) ? badge('External', 'info') : '') + (p.meta.status === 'left' ? badge('Left') : '') +
     (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : (p.meta.status === 'left' ? '' : badge('Details complete', 'ok'))) + (p.grp ? badge(p.grp, 'soft') : '') + '<span class="sp">' + copyId(id) + '</span>';
   var facts = fact('Organisation', [fv([p.meta.company, p.meta.department].filter(Boolean).join(' › ') || 'Not set')]) +
     fact('Reports to', chain.length ? chain : [fv(isExt(p) ? 'External' : 'Not set')]) +
@@ -2962,7 +3024,7 @@ function viewPerson(id) {
   if (mentioned.length) b += vSec('pmn', 'Mentioned in', rowsOf(mentioned), { hint: 'name appears in notes or sub-tasks' });
   var dn = theirs.filter(function (i) { return whereOf(i.id) === 'done'; });
   if (dn.length) b += vSec('pd', 'Done with ' + first, rowsOf(dn, { hidePerson: true }));
-  var tools = entTools(id) + (p.meta.status === 'left' ? '' : bt('Mark details checked', 'check-person', { id: id, icon: 'check' }));
+  var tools = prioToggle(p) + entTools(id) + (p.meta.status === 'left' ? '' : bt('Mark details checked', 'check-person', { id: id, icon: 'check' }));
   return { title: name + (isMe(p) ? ' (you)' : ''), sub: [p.meta.title, [p.meta.company, p.meta.department].filter(Boolean).join(' › ')].filter(Boolean).join(' · '), crumb: ['People', 'people'], tools: tools, body: box + '<div class="list">' + b + '</div>' };
 }
 // a history line as the page shows it: "Mon 6 Oct 2026: Job title: Buyer → Senior buyer"
@@ -3031,10 +3093,11 @@ function viewSystems() {
 }
 function viewPeople() {
   var all = S.m.people.people, act = activePeople();
-  var defs = [['all', 'All', act.length], ['internal', 'Internal', act.filter(function (p) { return !isExt(p); }).length], ['external', 'External', act.filter(isExt).length], ['gaps', 'Missing details', act.filter(function (p) { return gaps(p).length; }).length], ['left', 'Left', all.filter(function (p) { return p.meta.status === 'left'; }).length]];
+  var defs = [['all', 'All', act.length], ['internal', 'Internal', act.filter(function (p) { return !isExt(p); }).length], ['external', 'External', act.filter(isExt).length], ['priority', 'Priority', act.filter(isPrio).length], ['gaps', 'Missing details', act.filter(function (p) { return gaps(p).length; }).length], ['left', 'Left', all.filter(function (p) { return p.meta.status === 'left'; }).length]];
   var list = S.pf === 'left' ? all.filter(function (p) { return p.meta.status === 'left'; }) : act;
   if (S.pf === 'internal') list = list.filter(function (p) { return !isExt(p); });
   if (S.pf === 'external') list = list.filter(isExt);
+  if (S.pf === 'priority') list = list.filter(isPrio);
   if (S.pf === 'gaps') list = list.filter(function (p) { return gaps(p).length; });
   var q = S.pq.trim().toLowerCase();
   if (q) list = list.filter(function (p) { return (p.name + ' ' + Object.keys(p.meta).map(function (k) { return p.meta[k]; }).join(' ') + ' ' + p.grp + ' ' + wordsOf(p)).toLowerCase().indexOf(q) >= 0; });
@@ -3046,10 +3109,10 @@ function viewPeople() {
     '<label class="fl" for="add-grp">Group<input id="add-grp" class="in" type="text" list="dl-pgrp" autocomplete="off" data-in="addGrp" value="' + esc(S.addGrp) + '" placeholder="Other"></label><button type="submit" class="btn primary">Add person</button>' + bt('Cancel', 'add-cancel', { cls: 'quiet' }) + '</form>';
   var row = function (p) {
     var g = gaps(p), pid = p.meta.id || '';
-    return '<div class="tr" role="listitem" data-k="p-' + esc(pid || p.name) + '"><div><button type="button" class="nm" data-act="person" data-id="' + esc(pid) + '"' + (pid ? '' : ' disabled') + '>' + esc(p.name + (isMe(p) ? ' (you)' : '')) + '</button><div class="hint">' + esc(p.meta.title || 'No job title') + '</div></div>' +
+    return '<div class="tr" role="listitem" data-k="p-' + esc(pid || p.name) + '"><div><button type="button" class="nm" data-act="person" data-id="' + esc(pid) + '"' + (pid ? '' : ' disabled') + '>' + esc(p.name + (isMe(p) ? ' (you)' : '')) + '</button>' + (isPrio(p) ? ' ' + prioMark(p) : '') + '<div class="hint">' + esc(p.meta.title || 'No job title') + '</div></div>' +
       '<div class="c2">' + esc([p.meta.company, p.meta.department].filter(Boolean).join(' › ') || 'Not set') + (isExt(p) ? ' ' + badge('External', 'info') : '') + '</div>' +
       '<div class="c3">' + esc(p.meta.manager || (isExt(p) ? 'External' : 'Not set')) + '</div>' +
-      '<div class="r">' + (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : '') + (p.meta.status === 'left' ? badge('Left') : '') + '<span class="hint">' + personOpenCount(p) + ' open</span></div></div>';
+      '<div class="r">' + (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : '') + (p.meta.status === 'left' ? badge('Left') : '') + '<span class="hint">' + personOpenCount(p) + ' open</span>' + prioToggle(p, 'sm') + '</div></div>';
   };
   var sorted = list.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
   var body = '';
@@ -3706,7 +3769,7 @@ var LINK_STATE = {
   },
   people: {
     q: stateKey(function () { return S.pq; }, function (v) { S.pq = v; forceClear('people-q'); }, ''),
-    show: stateKey(function () { return S.pf; }, function (v) { S.pf = v; }, 'all', { all: 'all', internal: 'internal', external: 'external', 'missing-details': 'gaps', left: 'left' }),
+    show: stateKey(function () { return S.pf; }, function (v) { S.pf = v; }, 'all', { all: 'all', internal: 'internal', external: 'external', priority: 'priority', 'missing-details': 'gaps', left: 'left' }),
     group: stateKey(function () { return S.pgroup; }, function (v) { S.pgroup = v; }, 'none', { none: 'none', organisation: 'co', department: 'dept', group: 'grp' })
   },
   projects: { q: ENT_Q },
@@ -4029,6 +4092,17 @@ function prioYes(line) {
   if (!c || c.type !== 'priority' || !personById(c.id)) return;
   commit(OPS.prioYes(c, st), { toast: c.name + ' is a Priority person now.', undo: OPS.prioUnyes(c, st) });
 }
+function promotePerson(id) {
+  var p = personById(id), st = {};
+  if (!p || prioOf(p) !== 'off') return;
+  commit(OPS.promote(id, st), { toast: p.name + ' is a Priority person now.', undo: OPS.unpromote(id, st) });
+}
+function demotePerson(id) {
+  var p = personById(id), st = {};
+  if (!p || prioOf(p) !== 'on') return;
+  var line = noLine({ type: 'priority', id: rid(id) });
+  commit(OPS.demote(id, line, st), { toast: p.name + ' is no longer a Priority person, and won’t be proposed as one for ' + PRIORITY_PAUSE + ' days.', undo: OPS.undemote(id, line, st) });
+}
 // Undo on a Skill's latest change to a field puts back the value from before its first unacknowledged change, and acknowledges them all
 function undoChange(id, field) {
   var x = recOf(id), u = x ? undosOf(x).filter(function (y) { return y.field === field; })[0] : null;
@@ -4341,6 +4415,13 @@ var ACT = {
   'wb-tag': function (el) { var t = dvv(el); setWb({ tag: S.wb.tag === t ? '' : t }); if (S.view !== 'all') go('all'); },
   'qa-more': function () { S.qaMore = !S.qaMore; render(); if (S.qaMore) focusLater('#qa-urg'); },
   pf: function (el) { S.pf = dvv(el); render(); },
+  promote: function (el) { promotePerson(did(el)); },
+  // Under the Priority filter a Demote takes the row away, so focus moves to the next one
+  demote: function (el) {
+    var tr = S.pf === 'priority' ? el.closest('.tr') : null, rows = tr ? Array.prototype.slice.call(document.querySelectorAll('.main .tr[data-k^="p-"]')) : [], k = rows.indexOf(tr), nb = rows[k + 1] || rows[k - 1];
+    demotePerson(did(el));
+    if (nb) focusLater('.main .tr[data-k="' + nb.getAttribute('data-k') + '"] .nm');
+  },
   'add-open': function (el) { S.adding = dvv(el); S.addName = ''; S.addGrp = ''; S.addType = ''; focusLater('#add-name'); },
   'add-cancel': function () { S.adding = null; render(); },
   'review-reset': function () { lsSet('discerny-review', JSON.stringify({ week: isoWeek(todayStr()), done: {} })); render(); },

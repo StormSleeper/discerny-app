@@ -136,6 +136,8 @@ A Link's view and item keep working in later versions of the app. If the item ha
 
 `discerny.html` is the UI: Today, Inbox, Next actions, Waiting for, Upcoming, FYI, All items, Projects, People, Systems, Weekly review, Done and an Agent page, with search (Ctrl K), undo and dark mode.
 
+You choose your Priority people, whose messages source skills always capture. Promote or Demote anyone on the People page or their record, and filter People to see who's on the list. Your manager always counts. Skills can propose adding someone, but never removing them, and they won't propose someone again for 28 days after you demote them or say No.
+
 ### Version
 
 The UI shows the app's version on the folder page, and `node tools/discern.mjs --version` prints it. A version has four numbers, `MAJOR.MINOR.PATCH.BUILD`:

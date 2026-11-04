@@ -75,9 +75,9 @@ A Meeting item records when and where a Meeting happens and who attends; the wor
 - `"change": "relationship"`: `ids`, its two ends, and optionally `kind`, which the helper checks against the kinds the ends allow. Both must exist, so propose a new item's Relationships after `discern add` has given it its ID.
 - `"change": "person"`: `name`, `email`, and optionally `company`, `title` and `items` (the open or inbox items they are on, whose `who` an Add fills in).
 - `"change": "email"`: `email` and `person`, the P-id of someone in `PEOPLE.md`.
-- `"change": "priority"`: `person`, the P-id of someone to add to `priority-people`. Propose only additions, never removals.
+- `"change": "priority"`: `person`, the P-id of someone to add to `priority-people`. Propose only additions, never removals: the user promotes and demotes by hand in the UI.
 
-It checks every Proposal before writing any. One already made (related already, the address already someone's, or the person a Priority person already), already waiting in the inbox, or one the user said No to is skipped, not written, and listed in `skipped` with why. A No is for good, except to a Priority person, which pauses that person for 28 days. `--dry-run` shows the lines without writing them.
+It checks every Proposal before writing any. One already made (related already, the address already someone's, or the person a Priority person already), already waiting in the inbox, or one the user said No to is skipped, not written, and listed in `skipped` with why. A No is for good, except to a Priority person, which pauses that person for 28 days, as the user demoting them by hand does. `--dry-run` shows the lines without writing them.
 
 ## Field changes
 

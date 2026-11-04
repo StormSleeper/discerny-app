@@ -11,7 +11,7 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 function loadCore() {
   const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
   const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-  const names = ['parse', 'serialize', 'pParse', 'pSerialize', 'eParse', 'eSerialize', 'changesOf', 'changeKey', 'setPriority', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue',
+  const names = ['parse', 'serialize', 'pParse', 'pSerialize', 'eParse', 'eSerialize', 'changesOf', 'changeKey', 'setPriority', 'priorityIds', 'priorityStatus', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue',
     'REL_HEAD', 'ASK_HEAD', 'DIS_HEAD', 'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK',
     'serItem', 'canMerge', 'mergeItem', 'mergeRefs', 'fieldChange', 'changeUndo', 'priorityPaused', 'dueOf', 'setDue', 'receivedOf',
     'aParse', 'aLine', 'logParse', 'rParse', 'relLine', 'ignoredOf', 'ignoredLine', 'addHistory'];
@@ -404,6 +404,30 @@ test('changesOf reads each kind of change Proposal, its fields, either spacing, 
   assert.deepEqual(cs.map(c => c.lines.length), [2, 2, 2]);
   assert.deepEqual(cs.map(C.changeKey), ['rel|T-0007|T-0032', 'person|jo@acme.com', 'person|jo.b@acme.com']);
   assert.equal(C.changesOf(['## Changes', '- Rename T-0001 {source: x}'])[0].type, '');
+});
+
+test('priorityIds reads priority-people from "## defaults", on one line or as a list, and from nowhere else', () => {
+  assert.deepEqual(C.priorityIds('## defaults\n- timezone: Europe/London\n- priority-people: P-0007, P-0010\n- page-cap: 10\n\n## outlook-mail\n- priority-people: P-0099\n'), ['P-0007', 'P-0010']);
+  assert.deepEqual(C.priorityIds('## defaults\r\n- priority-people:\r\n  - P-0007\r\n  - P-0012\r\n- page-cap: 10\r\n'), ['P-0007', 'P-0012']);
+  assert.deepEqual(C.priorityIds('## defaults\n- priority-people:\n- page-cap: 10\n'), []);
+  assert.deepEqual(C.priorityIds('## outlook-mail\n- priority-people: P-0099\n'), []);
+  assert.deepEqual(C.priorityIds(''), []);
+  const src = '## defaults\n- priority-people: P-0007\n';
+  assert.deepEqual(C.priorityIds(C.setPriority(src, 'P-0012', true)), ['P-0007', 'P-0012']);
+  assert.deepEqual(C.priorityIds(C.setPriority(src, 'P-0007', false)), []);
+});
+
+test('priorityStatus says who is the User, who is their manager and always counts, and who else is on or off', () => {
+  const people = C.pParse('# People\n## G\n- Una User {id: P-0001; manager: Mia Manager}\n- Mia Manager {id: P-0002}\n- Pat Priority {id: P-0003}\n- Nat Normal {id: P-0004}\n').people;
+  const of = id => people.find(p => p.meta.id === id);
+  assert.equal(C.priorityStatus(people, ['P-0003'], of('P-0001')), 'user');
+  assert.equal(C.priorityStatus(people, ['P-0003'], of('P-0002')), 'manager');
+  assert.equal(C.priorityStatus(people, ['P-0002'], of('P-0002')), 'manager', 'listed or not, the manager is locked');
+  assert.equal(C.priorityStatus(people, ['P-0003'], of('P-0003')), 'on');
+  assert.equal(C.priorityStatus(people, ['P-0003'], of('P-0004')), 'off');
+  assert.equal(C.priorityStatus(people, ['P-0001'], of('P-0001')), 'user', 'the User is never a Priority person');
+  const noBoss = C.pParse('# People\n## G\n- Una User {id: P-0001}\n- Nat Normal {id: P-0004}\n').people;
+  assert.equal(C.priorityStatus(noBoss, [], noBoss[1]), 'off');
 });
 
 test('setPriority adds a Person to priority-people in "## defaults" and takes them out, leaving every other line as it was', () => {

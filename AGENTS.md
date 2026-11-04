@@ -200,7 +200,7 @@ The user answers each in the UI, Yes or No, and the UI removes the line:
 - **Relationship**: Yes writes the line to `RELATIONSHIPS.md`, with the kind its two ends allow. While either end is a new item still in the inbox, the question is asked on that item, and dismissing the item drops it.
 - **New person**: Add makes the record (a new `P-####`, `emails`, `company` and `title` as proposed) and sets `who` on the listed items that have none; Add as Priority person also adds the ID to `priority-people`. Either can also add an open Task to set up an introduction meeting, related to those items.
 - **New email**: Yes adds the address to the person's `emails`, with a `history` line.
-- **Priority person**: Yes adds the ID to `priority-people` in `SOURCES.md`. Only additions are proposed, never removals, and never someone who is one already.
+- **Priority person**: Yes adds the ID to `priority-people` in `SOURCES.md`. Only additions are proposed, never removals, and never someone who is one already. The user can also promote and demote someone by hand, on the UI's People page or the person's record: a Promote answers any Proposal waiting for that person, and a Demote logs the same line as a No, so it pauses them too. The user's manager always counts, so the UI doesn't let them be demoted. Removing someone is only ever the user's choice: skills still never propose it.
 - **No** logs the change in `IGNORED.md` (see below), and the helper never proposes it again; a No to a Priority person only pauses them, for 28 days from the date it logs.
 
 Source skills write these lines only through `discern propose`; never edit them by hand.
@@ -284,7 +284,7 @@ Keys are written with hyphens. Times in `SOURCES.md` are UTC ISO 8601 and their 
 - mail|Toy fair preview {ignored-date: 2026-10-25; reason: not actionable}
 ```
 
-A No to a proposed change is kept as `rel|<id>|<id>` for a Relationship, matching the pair in either order and whatever its kind, `person|<address>` for a new person or email address, or `priority|<P-id>` for a Priority person, which pauses that person for 28 days from its `ignored-date`.
+A No to a proposed change is kept as `rel|<id>|<id>` for a Relationship, matching the pair in either order and whatever its kind, `person|<address>` for a new person or email address, or `priority|<P-id>` for a Priority person, which pauses that person for 28 days from its `ignored-date`. A Demote writes that same line. A person can have several, and the pause runs from the newest.
 
 `DISMISSED.md` lines follow the field names in `SOURCE-SKILLS.md`, with the source key as the line's text and the braces parsed from the final ` {`:
 

@@ -14,6 +14,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - A notice that an Item isn't on the Inbox now goes away as soon as a new Comment brings the Item there.
 - Paste an ID, a Link or a whole address into Ctrl K to go straight there, and the README now explains Links.
 - Items you find with Ctrl K now open on the View they belong to, and an ID that isn't in your Data folder is named instead of showing "No matches".
+- Promote or Demote anyone as a Priority person from the People page or their record, and filter People to see who's on the list.
 
 ## 0.3.0.8 (2026-10-25)
 

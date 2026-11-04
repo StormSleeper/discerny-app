@@ -2366,6 +2366,16 @@ test('propose skips a Priority person already one, or said No to less than 28 da
   assert.match(run(d, ['propose', 'teams-chat'], [prio()], '2026-10-18T10:00:00Z').json.skipped[0].why, /already proposed/);
 });
 
+test('two priority lines for one Person pass check, and the pause runs from the newest', () => {
+  const d = noChanges(folder());
+  fs.appendFileSync(path.join(d, 'IGNORED.md'), '- priority|P-0005 {ignored-date: 2026-06-01; reason: the user said no}\n- priority|P-0005 {ignored-date: 2026-09-20; reason: the user said no}\n');
+  const c = run(d, ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.deepEqual(c.json.warnings.filter(w => /IGNORED/.test(w)), []);
+  assert.match(run(d, ['propose', 'teams-chat'], [prio()]).json.skipped[0].why, /less than 28 days ago/);
+  assert.equal(run(d, ['propose', 'teams-chat'], [prio()], '2026-10-18T10:00:00Z').json.proposed.length, 1);
+});
+
 test('propose refuses a Priority person who is the user or not in PEOPLE.md', () => {
   const d = folder();
   assert.match(run(d, ['propose', 'teams-chat'], [prio({ person: 'P-0001' })]).json.error, /P-0001 is the user/);
