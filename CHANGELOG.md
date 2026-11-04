@@ -2,30 +2,46 @@
 
 What's changed in Discerny, newest first. Each line is one build. A dated section is a release, which you get by pulling `main`. The Unreleased section holds builds on `dev` that haven't been released yet. See the Version section of the README for what the numbers mean.
 
-## Unreleased
+## 0.4.0.11 (2026-11-04)
 
-- The installed app's icon now has a transparent background, so it no longer shows as a pale square on a dark taskbar.
-- The installed app's taskbar icon is now larger and clearer, showing just the binoculars.
-- The address now follows the View you're on, so bookmarks, Back and Forward, new tabs and reload bring you back to it, and the browser tab names the page.
-- The address now names the Item open in the side panel too, so you can bookmark or reload an Item and Back closes it, and pasting an Item's ID into the address opens it where it belongs.
-- A filtered, searched or grouped View, or an Item on its Relationships or Agent tab, keeps that in its Link, so a bookmark or a reload brings it back as it was.
-- A Link to a merged Item now opens the Item it was merged into, and a Link to an Item no longer on its View still opens there, with a notice and a button to where it belongs now.
-- Copy link, in each View's header and the Side panel's, copies a short Link to where you are, so you can keep a place or share it, even in the installed app.
-- A notice that an Item isn't on the Inbox now goes away as soon as a new Comment brings the Item there.
-- Paste an ID, a Link or a whole address into Ctrl K to go straight there, and the README now explains Links.
-- Items you find with Ctrl K now open on the View they belong to, and an ID that isn't in your Data folder is named instead of showing "No matches".
+### Interaction score and Priority people
+
+- Discerny now keeps a log of your dealings with people in a new file in your Data folder, `INTERACTIONS.md`, and works out an Interaction score from it.
+- Sort the People page by Interaction score, and see each person's score and what makes it up on their record.
+- Review your Priority people with two new filters: "High score, not Priority" and "Priority, low score".
 - Promote or Demote anyone as a Priority person from the People page or their record, and filter People to see who's on the list.
-- Set how long someone isn't proposed as a Priority person after a No or a Demote in a new file in your data folder, SETTINGS.toml: a mistake in it is reported and costs you only that setting's default.
-- Discerny now keeps a log of your dealings with people in a new file, INTERACTIONS.md, and an Upgrade builds a first one from your existing items, showing you what it will write first.
-- Sort People by Interaction score, see each person's score and what makes it up on their record, and review your Priority people with the new "High score, not Priority" and "Priority, low score" filters.
-- New `discern score --report` shows what is driving Interaction scores and how they compare with your Yes, No, Promote and Demote decisions, so you can tune `SETTINGS.toml` or ask your agent to suggest changes.
-- The server now refuses a request to overwrite DISCERNY.md, the file that records your folder's Format, so only an Upgrade can change it.
-- Adding someone to People from an item's Person field now counts towards their Interaction score for that item, and Undo takes it back.
-- Choosing the person on a prep or invite item while it waits in the Inbox now counts towards their Interaction score once you accept it, as it does if you choose them afterwards.
-- In a narrow window, the People page's rows now line up, and a long Missing badge no longer squeezes the name.
-- The helper's usage text now says where its commands are described: SOURCE-SKILLS.md for the ones source skills use, and AGENTS.md for connect, new, serve, upgrade, interaction and score.
-- Going Back, or editing the address, no longer sometimes does nothing when the page happens to be redrawing at that moment.
-- Sorted by Interaction score in a very narrow window, names no longer run over the score, which now sits on its own line.
+- A new file, `SETTINGS.toml`, sets how long someone isn't proposed as a Priority person after a No or a Demote, and how the score counts. A mistake in it is reported, and only that setting falls back to its default.
+- `discern score --report` shows what is driving the scores and how they compare with your Yes, No, Promote and Demote decisions, so you can tune `SETTINGS.toml` or ask your Agent to suggest changes.
+
+### Links
+
+- The address now follows the View you're on and the Item open in the Side panel, so bookmarks, Back and Forward, new tabs and reload bring you back there. The browser tab names the page.
+- A filtered, searched or grouped View, or an Item on its Relationships or Agent tab, keeps that in its Link.
+- Copy link, in each View's header and in the Side panel, copies a short Link to where you are, even in the installed app.
+- A Link to a merged Item opens the Item it was merged into. A Link to an Item no longer on that View still opens there, with a notice and a button to where it belongs now.
+- Paste an ID, a Link or a whole address into Ctrl K to go straight there. The README now explains Links.
+- Items you find with Ctrl K open on the View they belong to, and an ID that isn't in your Data folder is named instead of showing "No matches".
+
+### Smaller changes
+
+- The installed app's icon now has a transparent background and shows just the binoculars, so it's larger and clearer on a dark taskbar.
+- The server refuses a request to overwrite `DISCERNY.md`, so only an Upgrade can change a folder's Format.
+- The helper's usage text now says where each command is described.
+- Going Back or editing the address no longer sometimes does nothing when the page happens to be redrawing.
+- In a narrow window, the People page's rows line up, a long Missing badge no longer squeezes the name, and names no longer run over the score.
+
+### Upgrading
+
+Each Data folder needs the Upgrade.
+
+- `node tools/discern.mjs upgrade` lists what will change.
+- `--write` backs the folder up first, then applies it.
+- The discern-upgrade Skill runs any steps that need an Agent. This Release has none.
+
+What each Migration changes:
+
+- **0.4.0.1:** adds `SETTINGS.toml` with every default written out, and rewords the header of `IGNORED.md`. No data lines change.
+- **0.4.0.2:** builds a first `INTERACTIONS.md` from your existing Items, Relationships and Priority people, with each line marked as inferred. It also adds `interaction` to Proposals waiting in the Inbox and `sender` to Comments still to acknowledge.
 
 ## 0.3.0.8 (2026-10-25)
 
