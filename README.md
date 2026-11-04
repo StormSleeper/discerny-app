@@ -148,6 +148,10 @@ Two filters on the People page use the score to suggest changes to your Priority
 
 The half-life, weights, top share and minimum are in `SETTINGS.toml`. A change applies when you reload the page, and the log isn't rewritten: the score is worked out from it each time, so it's never stored.
 
+To see how those settings are working for you, run `node tools/discern.mjs score --report`. It prints, as JSON, each kind of entry's share of all scores, the people with the highest scores and what makes up each one, and how the scores logged with your Yes and Promote decisions compare with those logged with your No and Demote decisions. It needs at least 5 of each to compare, and says so until then. Decisions recorded when the log began, and any with no score, are left out, and it says how many. With `--exclude-inferred`, it works out the scores without the entries an Upgrade inferred. It also shows the settings it used, and any invalid one as `discern check` would report it.
+
+The report stays on your machine: it changes no file, sends nothing anywhere, and Discerny never tunes the settings itself. Use it to change `SETTINGS.toml` yourself, or ask your agent to suggest changes, which it makes only if you ask. An agent you ask reads the report as it reads your other files.
+
 ### Version
 
 The UI shows the app's version on the folder page, and `node tools/discern.mjs --version` prints it. A version has four numbers, `MAJOR.MINOR.PATCH.BUILD`:

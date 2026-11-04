@@ -56,7 +56,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | File | Holds | Agent reads |
 |---|---|---|
 | `SOURCE-SKILLS.md` | The protocol every source skill follows | when running or writing a source skill |
-| `tools/discern.mjs` | The helper: `connect` and `new` for the data folder, `serve` to open the UI in a browser, `upgrade` for one in an older Format, `interaction` to record an Interaction, and the IDs, times, source key matching and writes source skills need | run it; never read it |
+| `tools/discern.mjs` | The helper: `connect` and `new` for the data folder, `serve` to open the UI in a browser, `upgrade` for one in an older Format, `interaction` to record an Interaction, `score --report` to see what's driving Interaction scores, and the IDs, times, source key matching and writes source skills need | run it; never read it |
 | `migrations/` | One folder per Format change, which `discern upgrade` runs. Its `README.md` says how to write one | when an Upgrade stops at a Migration's `INSTRUCTIONS.md`, or when changing the Format |
 | `tools/evals/` | Recorded connector responses and expected results for testing the skills | only when testing a skill |
 | `.claude/skills/` | The `discern-*` skills for Claude | when running one |
@@ -314,6 +314,8 @@ done = 1
 - `pause-days` sets the Priority pause. `half-life-days` and `[weights]` set how the Interaction score counts (see "Interactions"). `high-percent` and `min-people` set the two review filters on the UI's People page. Scored people are those with at least one Interaction, leaving out the user and anyone marked as left. "High score, not Priority" is the top `high-percent` of them who aren't Priority people. "Priority, low score" is the Priority people below their median, including anyone with no Interactions and never the user's manager. With fewer than `min-people` scored people, both say there isn't enough history yet.
 - The UI never writes this file, and reads it when it opens the folder, so a change applies on the next reload. The helper reads it on every command.
 - It's the user's to edit. Change it only when they ask you to, and never to get past a `discern check` error they haven't seen.
+
+**Agents:** when the user asks about scoring, such as why someone scores as they do or whether the weights suit them, run `discern score --report`, and with `--exclude-inferred` to work the scores out without the events an Upgrade inferred. It prints JSON and changes no file: each kind's share of all scores, the highest-scoring people with their breakdowns, the breakdowns logged with `yes` and `promote` decisions against those logged with `no` and `demote`, and the settings it used, with any invalid one as `discern check` would report it. `start` decisions and those with no breakdown are left out of the comparison, and it says how many. Use it to suggest changes to `SETTINGS.toml`, and change that file only when the user asks. When the report says there are too few decisions to compare, tell them that rather than drawing a conclusion. The report stays on the user's machine, so never send it anywhere or copy it into a draft.
 
 ## Sources, runs and refresh
 

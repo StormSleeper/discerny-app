@@ -3041,3 +3041,147 @@ test('the log Migration on a copy of the Example: check passes, nothing is credi
   const c = run(d, ['check']);
   assert.equal(c.code, 0, c.out);
 });
+
+// ---------------------------------------------------------------- discern score --report
+const scoreLog = (lines) => { const d = clean(); fs.appendFileSync(path.join(d, LOG), lines.join('\n') + '\n'); return d; };
+const report = (d, ...flags) => {
+  const r = run(d, ['score', '--report', ...flags]);
+  assert.equal(r.code, 0, r.out);
+  return r.json;
+};
+// Events on the tests' today, and one 30 days old, which is one half-life by default.
+const SCORED_LOG = ['- 2026-10-12 P-0003 message T-0001', '- 2026-10-12 P-0003 reply T-0002', '- 2026-09-12 P-0004 message T-0003', '- 2026-10-12 P-0004 comment T-0003'];
+
+test('score --report gives each kind\'s share of all scores, and the People with the highest scores and their breakdowns', () => {
+  const r = report(scoreLog(SCORED_LOG));
+  assert.equal(r.date, '2026-10-12');
+  assert.deepEqual(r.kinds, {
+    message: { total: 3, percent: 50 }, comment: { total: 2, percent: 33.3 }, linked: { total: 0, percent: 0 },
+    reply: { total: 1, percent: 16.7 }, done: { total: 0, percent: 0 },
+  });
+  assert.equal(r['scored-people'], 2);
+  assert.deepEqual(r.people.map(p => [p.id, p.name, p.score, p.priority]), [['P-0003', 'Meera Ilangovan', 3, 'off'], ['P-0004', 'Tomasz Kowalczyk', 3, 'off']], 'a tie goes by name');
+  assert.deepEqual(r.people[1].breakdown, { message: 1, comment: 2, linked: 0, reply: 0, done: 0 });
+  assert.equal(r.people[0].explanation, '1 message, 1 reply, mostly this week');
+});
+
+test('score --report leaves out the User, anyone who has left and anyone not in PEOPLE.md, and lists at most ten People', () => {
+  const d = scoreLog(['- 2026-10-12 P-0001 message T-0001', '- 2026-10-12 P-0099 message T-0001', '- 2026-10-12 P-0003 linked T-0001',
+    ...[4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map(n => `- 2026-10-12 P-00${String(n).padStart(2, '0')} done T-0001`)]);
+  fs.writeFileSync(path.join(d, 'PEOPLE.md'), read(d, 'PEOPLE.md').replace(/\{id: P-0004;/, '{id: P-0004; status: left;'));
+  const r = report(d);
+  assert.equal(r.kinds.message.total, 0);
+  assert.equal(r['scored-people'], 12, 'P-0004 has left');
+  assert.equal(r.people.length, 10);
+  assert.equal(r.people[0].id, 'P-0003', 'the highest first');
+  assert.ok(!r.people.some(p => ['P-0001', 'P-0004', 'P-0099'].includes(p.id)));
+});
+
+test('score --report changes no file, and reports the settings it used', () => {
+  const d = scoreLog(SCORED_LOG);
+  fs.writeFileSync(path.join(d, 'SETTINGS.toml'), '[score]\nhalf-life-days = 7\n[weights]\nreply = 5\n');
+  const before = snapshot(d), r = report(d);
+  assert.deepEqual(snapshot(d), before);
+  assert.deepEqual(r.settings.values.score, { 'half-life-days': 7, 'high-percent': 20, 'min-people': 10 });
+  assert.equal(r.settings.values.weights.reply, 5);
+  assert.equal(r.kinds.reply.total, 5, 'and works the scores out with them');
+  assert.deepEqual([r.settings.errors, r.settings.warnings], [[], []]);
+});
+
+test('score without --report says how to use it, and a folder in another Format is refused', () => {
+  const r = run(folder(), ['score']);
+  assert.equal(r.code, 1);
+  assert.match(r.json.error, /discern score --report/);
+  assert.equal(gate(folderInFormat('0.2.0.1'), ['score', '--report']).code, 2);
+});
+
+const decided = (decision, score, message, comment, linked, person = 'P-0003') =>
+  `- 2026-10-01 ${person} decision ${decision} {score: ${score}; message: ${message}; comment: ${comment}; linked: ${linked}; reply: 0; done: 0; half-life-days: 30}`;
+const FIVE_FOR = [decided('promote', 10, 6, 2, 2), decided('promote', 10, 6, 2, 2), decided('promote', 10, 6, 2, 2), decided('yes', 6, 4, 1, 1), decided('yes', 6, 4, 1, 1)];
+const FIVE_AGAINST = [decided('no', 2, 0.5, 1, 0.5), decided('no', 2, 0.5, 1, 0.5), decided('no', 2, 0.5, 1, 0.5), decided('demote', 2, 0.5, 1, 0.5), decided('demote', 2, 0.5, 1, 0.5)];
+
+test('score --report compares the breakdowns logged with yes and promote against those logged with no and demote', () => {
+  const c = report(scoreLog([...FIVE_FOR, ...FIVE_AGAINST])).comparison;
+  assert.equal(c.enough, true);
+  assert.deepEqual(c['yes-or-promote'], { decisions: 5, score: 8.4, breakdown: { message: 5.2, comment: 1.6, linked: 1.6, reply: 0, done: 0 } });
+  assert.deepEqual(c['no-or-demote'], { decisions: 5, score: 2, breakdown: { message: 0.5, comment: 1, linked: 0.5, reply: 0, done: 0 } });
+  assert.deepEqual(c.difference, { score: 6.4, breakdown: { message: 4.7, comment: 0.6, linked: 1.1, reply: 0, done: 0 } });
+  assert.deepEqual(c['half-life-days'], [30]);
+  assert.match(c.says, /average score of 8\.4 at a yes or promote against 2 at a no or demote/);
+  assert.match(c.says, /message differs most: 5\.2 against 0\.5/);
+});
+
+test('score --report leaves start decisions and those with no breakdown out of the comparison, and says how many', () => {
+  const c = report(scoreLog([...FIVE_FOR, ...FIVE_AGAINST,
+    decided('start', 50, 50, 0, 0), '- 2026-10-01 P-0004 decision start', '- 2026-10-01 P-0004 decision no', '- 2026-10-01 P-0005 decision no {inferred: yes}', '- 2026-10-01 P-0005 decision yes {score: 3; message: 3}'])).comparison;
+  assert.deepEqual(c['left-out'], { start: 2, 'no-breakdown': 3 });
+  assert.equal(c['yes-or-promote'].score, 8.4, 'the comparison is as it was without them');
+  assert.equal(c['no-or-demote'].score, 2);
+  assert.match(c.says, /Left out: 2 start, 3 with no breakdown/);
+});
+
+test('score --report says there are too few decisions to compare, and draws no conclusion', () => {
+  for (const log of [[], FIVE_FOR, [...FIVE_FOR, ...FIVE_AGAINST.slice(1)]]) {
+    const c = report(scoreLog([...SCORED_LOG, ...log])).comparison;
+    assert.equal(c.enough, false, log.length + ' decisions');
+    assert.equal(c['needs-each'], 5);
+    assert.match(c.says, /Too few decisions to compare/);
+    assert.deepEqual(Object.keys(c['yes-or-promote']), ['decisions']);
+    assert.deepEqual(Object.keys(c['no-or-demote']), ['decisions']);
+    assert.equal(c.difference, undefined);
+    assert.equal(c['yes-or-promote'].decisions, log.length ? 5 : 0);
+  }
+  const none = report(scoreLog(SCORED_LOG));
+  assert.deepEqual(none.comparison['left-out'], { start: 0, 'no-breakdown': 0 });
+  assert.equal(none.kinds.message.total, 3, 'the rest of the report still stands');
+});
+
+test('score --report on the Example\'s log, which has only start decisions', () => {
+  const c = report(folder()).comparison;
+  assert.equal(c.enough, false);
+  assert.deepEqual(c['left-out'], { start: 2, 'no-breakdown': 0 });
+});
+
+test('score --report --exclude-inferred works the scores out from non-inferred events only', () => {
+  const d = scoreLog(['- 2026-10-12 P-0003 message T-0001 {inferred: yes}', '- 2026-10-12 P-0003 reply T-0002', '- 2026-10-12 P-0004 linked T-0003 {inferred: yes}', ...FIVE_FOR, ...FIVE_AGAINST]);
+  const all = report(d);
+  assert.equal(all['exclude-inferred'], false);
+  assert.deepEqual(all.events, { counted: 3, inferred: 2 });
+  assert.equal(all['scored-people'], 2);
+  assert.equal(all.comparison.note, undefined);
+  const r = report(d, '--exclude-inferred');
+  assert.equal(r['exclude-inferred'], true);
+  assert.deepEqual(r.events, { counted: 1, inferred: 2 });
+  assert.deepEqual([r.kinds.message.total, r.kinds.linked.total, r.kinds.reply.total, r.kinds.reply.percent], [0, 0, 1, 100]);
+  assert.equal(r['scored-people'], 1, 'someone with only inferred events has no score');
+  assert.deepEqual(r.people.map(p => [p.id, p.score, p.explanation]), [['P-0003', 1, '1 reply, this week']]);
+  assert.deepEqual(r.comparison['yes-or-promote'], all.comparison['yes-or-promote'], 'a decision keeps the breakdown it logged');
+  assert.match(r.comparison.note, /as logged/);
+});
+
+test('score --report --exclude-inferred with every event inferred, and every weight 0, gives zeros and no one', () => {
+  const d = scoreLog(['- 2026-10-12 P-0003 message T-0001 {inferred: yes}']);
+  const r = report(d, '--exclude-inferred');
+  assert.deepEqual([r['scored-people'], r.people, r.kinds.message], [0, [], { total: 0, percent: 0 }]);
+  fs.writeFileSync(path.join(d, 'SETTINGS.toml'), '[weights]\nmessage = 0\n');
+  const z = report(d);
+  assert.deepEqual([z['scored-people'], z.kinds.message], [1, { total: 0, percent: 0 }]);
+});
+
+test('score --report shows an invalid setting as check does, using the default, and a line it can\'t read in the log', () => {
+  const d = scoreLog([...SCORED_LOG, '- 2026-13-40 P-0003 message T-0001', 'not a line of the log']);
+  fs.writeFileSync(path.join(d, 'SETTINGS.toml'), '[score]\nhalf-life-days = 0\nsideways = 3\n');
+  const c = run(d, ['check']), r = report(d);
+  assert.equal(c.code, 1, 'check fails on it, but the report still runs');
+  const fromSettings = (l) => l.filter(m => m.startsWith('SETTINGS.toml'));
+  assert.equal(r.settings.errors.length, 1);
+  assert.match(r.settings.errors[0], /SETTINGS\.toml line 2: half-life-days must be/);
+  assert.deepEqual(r.settings.errors, fromSettings(c.json.errors));
+  assert.equal(r.settings.warnings.length, 1);
+  assert.deepEqual(r.settings.warnings, fromSettings(c.json.warnings));
+  assert.equal(r.settings.values.score['half-life-days'], 30);
+  assert.equal(r.kinds.message.total, 3);
+  assert.equal(r['log-problems'].length, 2);
+  assert.deepEqual(r['log-problems'], c.json.errors.filter(m => m.startsWith('INTERACTIONS.md')));
+  assert.equal(r.events.counted, 4, 'the line with no real date counts for nothing');
+});

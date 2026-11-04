@@ -18,6 +18,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - Set how long someone isn't proposed as a Priority person after a No or a Demote in a new file in your data folder, SETTINGS.toml: a mistake in it is reported and costs you only that setting's default.
 - Discerny now keeps a log of your dealings with people in a new file, INTERACTIONS.md, and an Upgrade builds a first one from your existing items, showing you what it will write first.
 - Sort People by Interaction score, see each person's score and what makes it up on their record, and review your Priority people with the new "High score, not Priority" and "Priority, low score" filters.
+- New `discern score --report` shows what is driving Interaction scores and how they compare with your Yes, No, Promote and Demote decisions, so you can tune `SETTINGS.toml` or ask your agent to suggest changes.
 
 ## 0.3.0.8 (2026-10-25)
 

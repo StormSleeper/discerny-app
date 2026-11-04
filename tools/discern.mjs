@@ -6,7 +6,7 @@
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
 //   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
-// Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, comment, change, interaction, ref, commit, log, check, upgrade, serve.
+// Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, comment, change, interaction, score, ref, commit, log, check, upgrade, serve.
 // Input for match, add, propose, meetings, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
@@ -32,7 +32,7 @@ const DAY = 864e5, HOUR = 36e5;
 
 // ---------------------------------------------------------------- arguments and output
 const argv = process.argv.slice(2);
-const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '', port: '4790', author: '', ack: false, field: null, to: null, suggests: '', sender: null, replyTo: null, kind: '', person: null };
+const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '', port: '4790', author: '', ack: false, field: null, to: null, suggests: '', sender: null, replyTo: null, kind: '', person: null, report: false, excludeInferred: false };
 const ARGS = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -53,6 +53,8 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--reply-to') OPT.replyTo = argv[++i] ?? '';
   else if (a === '--kind') OPT.kind = argv[++i] || '';
   else if (a === '--person') OPT.person = argv[++i] ?? '';
+  else if (a === '--report') OPT.report = true;
+  else if (a === '--exclude-inferred') OPT.excludeInferred = true;
   else ARGS.push(a);
 }
 // ---------------------------------------------------------------- the shared parser from the UI
@@ -64,7 +66,8 @@ function loadCore() {
   const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'eParse', 'TYPES', 'URG_ORDER', 'STATUS', 'PRIORITIES', 'FILES', 'WATCH',
     'CHANGES_HEAD', 'changesOf', 'changeKey', 'relLine', 'REL_RE', 'NOTE_RE', 'LOG_RE', 'serSub', 'placeSub', 'ITEM_RANK', 'PERSON_RANK', 'ENT_RANK', 'setDesc', 'addComment', 'USER_ID',
     'pSerItem', 'commentsOf', 'CHANGE_FIELDS', 'fieldChange', 'priorityPaused', 'dueOf', 'setDue', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings', 'SETTINGS_FILE',
-    'INTERACTIONS_FILE', 'INTER_HEAD', 'PROPOSAL_INTERACTIONS', 'addInteractions', 'checkInteractions', 'creditById', 'creditByName', 'linkedEvents'];
+    'INTERACTIONS_FILE', 'INTER_HEAD', 'PROPOSAL_INTERACTIONS', 'addInteractions', 'checkInteractions', 'creditById', 'creditByName', 'linkedEvents',
+    'INTER_KINDS', 'interactionsOf', 'interactionScores', 'scoreExplanation', 'scoreable', 'priorityIds', 'priorityStatus', 'tenths', 'realDay'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
   catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
@@ -785,6 +788,75 @@ CMD.interaction = function () {
   out(added.length ? { id, kind, person, date, recorded: true } : { id, kind, person, recorded: false, why: `${person} already has ${kind} on ${id}: there's one per Person per Item` });
 };
 
+// What's driving the scores, and how that compares with the user's own decisions, for them to tune SETTINGS.toml by or to ask an Agent about.
+// It reads the files and writes nothing, and nothing leaves the machine.
+const REPORT_PEOPLE = 10, REPORT_NEEDS_EACH = 5;
+const byKind = (f) => Object.fromEntries(C.INTER_KINDS.map(k => [k, f(k)]));
+// A decision's logged score and breakdown as numbers, or null without all of them: a No an Upgrade inferred has none.
+function loggedBreakdown(e) {
+  const num = (v) => /^\d+(\.\d+)?$/.test(v ?? '') ? Number(v) : NaN, score = num(e.fields.score), breakdown = byKind(k => num(e.fields[k]));
+  return Number.isNaN(score) || Object.values(breakdown).some(Number.isNaN) ? null : { score, breakdown };
+}
+// The yes and promote decisions against the no and demote ones, using what each logged at that moment. Too few says so and gives no averages.
+function compareDecisions(log) {
+  const yes = [], no = [], leftOut = { start: 0, 'no-breakdown': 0 }, halves = new Set();
+  log.filter(e => e.kind === 'decision').forEach(e => {
+    if (e.decision === 'start') { leftOut.start++; return; }
+    const side = ['yes', 'promote'].includes(e.decision) ? yes : ['no', 'demote'].includes(e.decision) ? no : null;
+    if (!side) return;
+    const logged = loggedBreakdown(e);
+    if (!logged) { leftOut['no-breakdown']++; return; }
+    side.push(logged);
+    if (/^\d+$/.test(e.fields['half-life-days'] ?? '')) halves.add(Number(e.fields['half-life-days']));
+  });
+  const skipped = leftOut.start + leftOut['no-breakdown'] ? ` Left out: ${leftOut.start} start, ${leftOut['no-breakdown']} with no breakdown.` : '';
+  const c = { enough: yes.length >= REPORT_NEEDS_EACH && no.length >= REPORT_NEEDS_EACH, 'needs-each': REPORT_NEEDS_EACH, 'left-out': leftOut };
+  if (!c.enough) {
+    c['yes-or-promote'] = { decisions: yes.length };
+    c['no-or-demote'] = { decisions: no.length };
+    c.says = `Too few decisions to compare: ${yes.length} yes or promote and ${no.length} no or demote, and it takes ${REPORT_NEEDS_EACH} of each.${skipped}`;
+    return c;
+  }
+  const mean = (side, pick) => side.reduce((n, d) => n + pick(d), 0) / side.length;
+  const summary = (side) => ({ decisions: side.length, score: C.tenths(mean(side, d => d.score)), breakdown: byKind(k => C.tenths(mean(side, d => d.breakdown[k]))) });
+  const hi = summary(yes), lo = summary(no), gap = (x, y) => C.tenths(x - y);
+  c['yes-or-promote'] = hi;
+  c['no-or-demote'] = lo;
+  c.difference = { score: gap(mean(yes, d => d.score), mean(no, d => d.score)), breakdown: byKind(k => gap(mean(yes, d => d.breakdown[k]), mean(no, d => d.breakdown[k]))) };
+  c['half-life-days'] = [...halves].sort((x, y) => x - y);
+  const most = C.INTER_KINDS.reduce((m, k) => Math.abs(c.difference.breakdown[k]) > Math.abs(c.difference.breakdown[m]) ? k : m);
+  c.says = `An average score of ${hi.score} at a yes or promote against ${lo.score} at a no or demote.`
+    + (c.difference.breakdown[most] ? ` ${most} differs most: ${hi.breakdown[most]} against ${lo.breakdown[most]}.` : '') + skipped;
+  return c;
+}
+CMD.score = function () {
+  if (!OPT.report) fail('usage: discern score --report [--exclude-inferred]');
+  const set = settings(), { values } = set, P = people(), ids = C.priorityIds(read('SOURCES.md')), today = local(nowDate(), timezone()).slice(0, 10), text = read(C.INTERACTIONS_FILE);
+  const log = C.interactionsOf(text), inferred = (e) => e.fields.inferred === 'yes', used = OPT.excludeInferred ? log.filter(e => !inferred(e)) : log;
+  const scores = C.interactionScores(used, values, today), scoreable = new Set(P.filter(C.scoreable).map(p => p.meta.id));
+  // what the scores are made of: an event, for someone who gets a score, with a date it can count from
+  const event = (e) => C.INTER_KINDS.includes(e.kind) && C.realDay(e.date) && scoreable.has(e.person);
+  const scored = P.filter(p => C.scoreable(p) && scores[p.meta.id]).map(p => ({ p, score: scores[p.meta.id] }));
+  const sum = (k) => scored.reduce((n, s) => n + s.score.shares[k], 0), all = C.INTER_KINDS.reduce((n, k) => n + sum(k), 0);
+  scored.sort((a, b) => Math.abs(b.score.total - a.score.total) > 1e-9 ? b.score.total - a.score.total : a.p.name.localeCompare(b.p.name));
+  const comparison = compareDecisions(log);
+  if (OPT.excludeInferred) comparison.note = "Each decision's breakdown is as logged at that moment, so it still holds any inferred events that counted then.";
+  out({
+    date: today,
+    'exclude-inferred': OPT.excludeInferred,
+    settings: { values, errors: set.errors.map(e => e.message), warnings: set.warnings.map(w => w.message) },
+    'log-problems': C.checkInteractions(text).map(e => e.message),
+    events: { counted: used.filter(event).length, inferred: log.filter(e => event(e) && inferred(e)).length },
+    'scored-people': scored.length,
+    kinds: byKind(k => ({ total: C.tenths(sum(k)), percent: all ? C.tenths(sum(k) / all * 100) : 0 })),
+    people: scored.slice(0, REPORT_PEOPLE).map(({ p, score }) => ({
+      id: p.meta.id, name: p.name, priority: C.priorityStatus(P, ids, p), score: C.tenths(score.total),
+      breakdown: byKind(k => C.tenths(score.shares[k])), explanation: C.scoreExplanation(used, p.meta.id, values, today),
+    })),
+    comparison,
+  });
+};
+
 // A Skill applies news that changes one of an Item's or a Person's fields itself, with a Comment to acknowledge naming the field,
 // its old value and its new one, so the user sees it in the Inbox and can Undo it. A Person's change gets a history line too.
 // The fields are CHANGE_FIELDS; the rest are the user's own judgement and organising, and closing an Item stays the user's.
@@ -1455,7 +1527,7 @@ if (cmd === '--version' || cmd === 'version') {
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|comment|change|interaction|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|comment|change|interaction|score|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
 // serve starts with no usable folder when it can switch to one, so the page can offer Change folder.
