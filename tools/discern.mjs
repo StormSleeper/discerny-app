@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // discern.mjs: the deterministic half of every Discerny source skill (see SOURCE-SKILLS.md).
-// Node 18 or later, no dependencies. It reuses the file parser in discerny.html (the block between
-// //<core> and //</core>), so the UI and this helper can never disagree about the format.
+// Node 18 or later, no dependencies. It reuses the UI's file parser, ui/core.js, so the UI and this
+// helper can never disagree about the format.
 //
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
-//   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
+//   node tools/discern.mjs --version   prints the app's version (VERSION in ui/core.js)
 //
 // Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, comment, change, interaction, score, ref, commit, log, check, upgrade, serve.
 // SOURCE-SKILLS.md describes the commands source skills use; AGENTS.md describes connect, new, serve, upgrade, interaction and score.
@@ -60,18 +60,16 @@ for (let i = 0; i < argv.length; i++) {
 }
 // ---------------------------------------------------------------- the shared parser from the UI
 function loadCore() {
-  const p = path.join(REPO, 'discerny.html');
-  const html = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
-  const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-  if (a < 0 || b < a) fail('no //<core> ... //</core> block found in discerny.html next to tools/');
+  const p = path.join(REPO, 'ui', 'core.js');
+  if (!fs.existsSync(p)) fail('no ui/core.js found next to tools/');
   const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'eParse', 'TYPES', 'URG_ORDER', 'STATUS', 'PRIORITIES', 'FILES', 'WATCH',
     'CHANGES_HEAD', 'changesOf', 'changeKey', 'relLine', 'REL_RE', 'NOTE_RE', 'LOG_RE', 'serSub', 'placeSub', 'ITEM_RANK', 'PERSON_RANK', 'ENT_RANK', 'setDesc', 'addComment', 'USER_ID',
     'pSerItem', 'commentsOf', 'CHANGE_FIELDS', 'fieldChange', 'priorityPaused', 'dueOf', 'setDue', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings', 'SETTINGS_FILE',
     'INTERACTIONS_FILE', 'INTER_HEAD', 'PROPOSAL_INTERACTIONS', 'addInteractions', 'checkInteractions', 'creditById', 'creditByName', 'linkedEvents',
     'INTER_KINDS', 'interactionsOf', 'interactionScores', 'scoreExplanation', 'scoreable', 'priorityIds', 'priorityStatus', 'tenths', 'realDay'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
-  try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
-  catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
+  try { return new Function(`'use strict';\n${fs.readFileSync(p, 'utf8')}\n;return ${ret};`)(); }
+  catch (e) { fail(`ui/core.js did not load: ${e.message}`); }
 }
 const C = loadCore();
 
@@ -1457,6 +1455,14 @@ CMD.serve = function () {
       if (!fs.existsSync(f)) return send(res, 404, 'not found');
       res.writeHead(200, { 'Content-Type': icon[2] === 'png' ? 'image/png' : 'image/x-icon', 'Cache-Control': 'max-age=3600' });
       return res.end(fs.readFileSync(f));
+    }
+    // The UI's own scripts and stylesheet, whatever the folder's state, as the gate needs them too: a strict name, so
+    // nothing outside ui/ can be reached. No max-age, so a new page never runs with old scripts.
+    const ui = /^\/ui\/([a-z-]+\.(js|css))$/.exec(req.url);
+    if (req.method === 'GET' && ui) {
+      const f = path.join(REPO, 'ui', ui[1]);
+      if (!fs.existsSync(f)) return send(res, 404, 'not found');
+      return send(res, 200, fs.readFileSync(f, 'utf8'), { 'Content-Type': `text/${ui[2] === 'js' ? 'javascript' : 'css'}; charset=utf-8` });
     }
     // The web manifest, for installing the UI as an app; like the icons, it doesn't need a folder.
     if (req.method === 'GET' && req.url === '/manifest.webmanifest') return send(res, 200, fs.readFileSync(path.join(REPO, 'manifest.webmanifest'), 'utf8'), { 'Content-Type': 'application/manifest+json' });

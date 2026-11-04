@@ -18,7 +18,8 @@ const DATES = path.join('tools', 'refresh-dates.mjs');
 // BASE is the Example as committed, upgraded to the app's Format, which every other test starts from.
 const OLD = pinned(committed(shortCodes()));
 const BASE = upgraded(pinned(committed()));
-const FORMAT = /var FORMAT='([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'))[1];
+const CORE_FILE = path.join(REPO, 'ui', 'core.js');
+const FORMAT = /var FORMAT='([^']+)'/.exec(fs.readFileSync(CORE_FILE, 'utf8'))[1];
 
 // The example folder doubles as a data folder the app can be connected to, so using the app
 // changes it. The tests expect exact results (next IDs, inbox contents), so they read it as of
@@ -93,11 +94,11 @@ function run(dir, args, input, now = NOW, cli = CLI) {
 }
 const read = (d, f) => fs.readFileSync(path.join(d, f), 'utf8');
 
-test('--version prints the version from discerny.html', () => {
+test('--version prints the version from ui/core.js', () => {
   const r = spawnSync(process.execPath, [CLI, '--version'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout);
-  const m = /var VERSION='([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'));
-  assert.ok(m, 'discerny.html declares VERSION');
+  const m = /var VERSION='([^']+)'/.exec(fs.readFileSync(CORE_FILE, 'utf8'));
+  assert.ok(m, 'ui/core.js declares VERSION');
   assert.equal(r.stdout.trim(), m[1]);
 });
 
@@ -875,13 +876,14 @@ function app(format) {
   fs.mkdirSync(path.join(a, 'tools'));
   fs.copyFileSync(CLI, path.join(a, 'tools', 'discern.mjs'));
   fs.copyFileSync(path.join(REPO, 'discerny.html'), path.join(a, 'discerny.html'));
+  fs.cpSync(path.join(REPO, 'ui'), path.join(a, 'ui'), { recursive: true });
   fs.cpSync(path.join(REPO, 'new_discerny_repo'), path.join(a, 'new_discerny_repo'), { recursive: true });
   if (format) setFormat(a, format);
   return a;
 }
 function setFormat(a, format) {
-  const html = path.join(a, 'discerny.html');
-  fs.writeFileSync(html, fs.readFileSync(html, 'utf8').replace(/var FORMAT='[^']*'/, `var FORMAT='${format}'`));
+  const core = path.join(a, 'ui', 'core.js');
+  fs.writeFileSync(core, fs.readFileSync(core, 'utf8').replace(/var FORMAT='[^']*'/, `var FORMAT='${format}'`));
 }
 function runApp(a, args, env = {}) {
   const r = spawnSync(process.execPath, [path.join(a, 'tools', 'discern.mjs'), ...args, '--now', NOW], { encoding: 'utf8', env: { ...process.env, DISCERNY_DIR: '', ...env } });
@@ -890,13 +892,13 @@ function runApp(a, args, env = {}) {
   return { code: r.status, json, out: r.stdout };
 }
 
-test('the helper reads its parser from discerny.html only', () => {
+test('the helper reads its parser from ui/core.js only', () => {
   const a = app();
-  fs.renameSync(path.join(a, 'discerny.html'), path.join(a, 'discerny-old.html'));
+  fs.renameSync(path.join(a, 'ui', 'core.js'), path.join(a, 'ui', 'core-old.js'));
   const r = runApp(a, ['--version']);
   assert.equal(r.code, 1, r.out);
-  assert.match(r.json.error, /discerny\.html/);
-  assert.doesNotMatch(r.json.error, /discerny-old/);
+  assert.match(r.json.error, /ui\/core\.js/);
+  assert.doesNotMatch(r.json.error, /core-old/);
 });
 
 test('new makes a data folder from the starter and connects to it; connect switches folders', () => {
@@ -1403,7 +1405,7 @@ test('serve prints its URL and folder, and /api/info names the folder and the ap
   assert.equal(said.folder, d);
   const r = await fetch(new URL('api/info', said.url));
   assert.equal(r.status, 200);
-  const version = /var VERSION='([^']+)'/.exec(fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8'))[1];
+  const version = /var VERSION='([^']+)'/.exec(fs.readFileSync(CORE_FILE, 'utf8'))[1];
   const info = await r.json();
   assert.deepEqual({ ...info, session: undefined }, { folder: d, name: path.basename(d), version, session: undefined, canSwitch: false });
   assert.equal(info.problem, undefined);
@@ -1504,6 +1506,59 @@ test('serve gives the icons with no folder usable', async (t) => {
   const said = await serve(t, folderInFormat('0.0.1.5'));
   assert.match(said.problem, /Format/);
   assert.equal((await fetch(new URL('icons/favicon.ico', said.url))).status, 200);
+});
+
+// The scripts and stylesheet the page's own tags name, so each file is covered as soon as the page loads it.
+const pageFiles = () => {
+  const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
+  const names = [...html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"|<link\b[^>]*\brel="stylesheet"[^>]*\bhref="([^"]+)"/g)].map(m => m[1] || m[2]);
+  assert.ok(names.includes('ui/core.js') && names.includes('ui/discerny.css'), names.join());
+  return names;
+};
+async function servesPageFiles(url) {
+  for (const name of pageFiles()) {
+    const r = await raw(url, '/' + name);
+    assert.equal(r.status, 200, name);
+    assert.match(r.headers['content-type'], name.endsWith('.css') ? /^text\/css\b/ : /^text\/javascript\b/, name);
+    assert.doesNotMatch(r.headers['cache-control'] || '', /max-age/, name);
+    assert.equal(r.text, fs.readFileSync(path.join(REPO, name), 'utf8'), name);
+  }
+}
+
+test('serve gives every file the page names, as it is on disk, with a folder', async (t) => {
+  await servesPageFiles((await serve(t, folder())).url);
+});
+
+test('serve gives every file the page names with no folder usable', async (t) => {
+  const refused = await serve(t, folderInFormat('0.0.1.5'));
+  assert.match(refused.problem, /Format/);
+  await servesPageFiles(refused.url);
+  const none = await serve(t, null, { a: app() });
+  assert.equal(none.folder, null);
+  await servesPageFiles(none.url);
+});
+
+test('serve refuses anything else from the app folder, whatever the folder\'s state', async (t) => {
+  const paths = ['/ui/../config.toml', '/ui/..%2fconfig.toml', '/ui/%2e%2e%2fconfig.toml', '/ui/..%5cconfig.toml', '/ui/Core.js', '/UI/core.js', '/ui/core.JS', '/ui/core.js/', '/ui/core.js?x', '/ui/core.txt', '/ui/missing.js', '/ui/', '/ui/sub/core.js',
+    '/tools/discern.mjs', '/AGENTS.md', '/config.toml', '/discerny.html'];
+  const open = await serve(t, folder()), unusable = await serve(t, folderInFormat('0.0.1.5'));
+  for (const [url, headers] of [[open.url, {}], [open.url, { 'X-Discerny-Session': open.session }], [unusable.url, {}]]) {
+    for (const p of paths) {
+      const r = await raw(url, p, { headers });
+      assert.ok(r.status >= 400, `${p} ${r.status}`);
+      assert.equal(r.headers['content-type'].startsWith('text/plain'), true, p);
+    }
+  }
+});
+
+test('serve keeps its Host and Origin checks for the UI\'s files, and never writes them', async (t) => {
+  const { url } = await serve(t, folder()), port = new URL(url).port;
+  assert.equal((await raw(url, '/ui/core.js', { headers: { Host: `evil.example:${port}` } })).status, 403);
+  const before = fs.readFileSync(CORE_FILE, 'utf8');
+  const put = (headers) => raw(url, '/ui/core.js', { method: 'PUT', headers: { 'Content-Type': 'text/plain', ...headers }, body: 'x' });
+  assert.equal((await put({})).status, 403);
+  assert.ok((await put({ Origin: `http://127.0.0.1:${port}` })).status >= 400);
+  assert.equal(fs.readFileSync(CORE_FILE, 'utf8'), before);
 });
 
 test('serve gives the web manifest as it is on disk, with no folder usable', async (t) => {
@@ -2535,11 +2590,12 @@ test('serve lets the page read DISCERNY.md and refuses to write it', async (t) =
 });
 
 test('nothing in the page writes SETTINGS.toml: it is not among the files the page saves', () => {
-  const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
-  const files = /var FILES = (\{[^}]*\})/.exec(html)[1], watch = /var WATCH = (\[[^\]]*\])/.exec(html)[1];
+  const core = fs.readFileSync(CORE_FILE, 'utf8');
+  const files = /var FILES = (\{[^}]*\})/.exec(core)[1], watch = /var WATCH = (\[[^\]]*\])/.exec(core)[1];
   assert.doesNotMatch(files, /SETTINGS\.toml/);
   assert.doesNotMatch(watch, /SETTINGS\.toml/, 'a change waits for the next reload, so the page does not watch it');
-  assert.doesNotMatch(html, /writeText\(\s*SETTINGS_FILE/);
+  for (const f of ['discerny.html', ...fs.readdirSync(path.join(REPO, 'ui')).map(n => path.join('ui', n))])
+    assert.doesNotMatch(fs.readFileSync(path.join(REPO, f), 'utf8'), /writeText\(\s*SETTINGS_FILE/, f);
 });
 
 // The Migration that brought in SETTINGS.toml, found by what it says it does.
@@ -2656,8 +2712,8 @@ test('new makes INTERACTIONS.md with its header and no lines, the page\'s header
   const text = read(mine, LOG);
   assert.ok(text.trim(), 'never empty');
   assert.deepEqual(logLines(mine), []);
-  const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
-  const head = new Function(html.slice(html.indexOf('var INTER_HEAD='), html.indexOf('var INTER_KINDS=')) + ';return INTER_HEAD;')();
+  const core = fs.readFileSync(CORE_FILE, 'utf8');
+  const head = new Function(core.slice(core.indexOf('var INTER_HEAD='), core.indexOf('var INTER_KINDS=')) + ';return INTER_HEAD;')();
   assert.equal(text.replace(/\r\n/g, '\n'), head.join('\n') + '\n');
   assert.equal(run(mine, ['check']).code, 0);
 });

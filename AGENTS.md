@@ -62,7 +62,8 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `.claude/skills/` | The `discern-*` skills for Claude | when running one |
 | `config.toml` | The app folder's settings. `data_folder` is the path of the connected data folder, written by `discern connect` and `discern new` | when Node is missing |
 | `new_discerny_repo/` | The blank starter files for a new data folder | never, unless asked |
-| `discerny.html` | The UI | never |
+| `discerny.html` | The UI: the page, which loads the files in `ui/` | never |
+| `ui/` | The UI's parts, loaded in order by plain tags with no build step: `core.js`, the parser for the data folder's files, which the helper also uses, and `discerny.css`, the styles | never |
 | `icons/` | The UI's icons | never |
 | `manifest.webmanifest` | What a browser needs to install the served UI as an app | never |
 | `AGENTS.md`, `CLAUDE.md`, `README.md`, `LICENSE` | Instructions and documentation | this file only |
@@ -377,7 +378,7 @@ The Format is the way a data folder is written. Each folder records its Format v
 The Format is defined in these places, and a change to any of them is a change to the Format:
 
 - the format sections of this file, from "Item format" to "Sources, runs and refresh";
-- the `//<core>` block in `discerny.html`, which holds the parser;
+- `ui/core.js`, which holds the parser;
 - the starter folder, `new_discerny_repo/`;
 - `SOURCE-SKILLS.md`, and the `SOURCES.md` keys a skill adds;
 - the helper's writers in `tools/discern.mjs`.
@@ -386,7 +387,7 @@ The Format is defined in these places, and a change to any of them is a change t
 
 ## Testing a change to the UI
 
-When you change `discerny.html`, open it in a browser on a throwaway copy of a data folder and check the change there. A served page writes real files, so the copy is what keeps the user's own data out of the test.
+When you change `discerny.html` or anything in `ui/`, open the page in a browser on a throwaway copy of a data folder and check the change there. A served page writes real files, so the copy is what keeps the user's own data out of the test.
 
 1. Make the copy in a temporary folder. If `discerny-example` sits beside the app folder, copy it (it is the Example, the data folder of a made-up company). Otherwise run `node tools/discern.mjs connect` and note the `folder` it prints, then `node tools/discern.mjs new <tmp>`, which makes a blank folder and connects the app to it.
 2. Start `node tools/discern.mjs serve --dir <tmp> --port 0` in the background. Once listening it prints one line of JSON, `{"url", "folder"}`; check that `folder` is the copy.

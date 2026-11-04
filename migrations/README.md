@@ -6,7 +6,7 @@ A Migration brings a data folder from one Format to the next. This folder holds 
 
 Each Migration is a folder named after the build that introduced it, such as `0.2.0.1`. That build's Format is the one the Migration leaves a folder in. The names give the order, so nothing else lists them.
 
-While you write a Migration on a feature branch, its folder is `next`, and `var FORMAT` in `discerny.html` is `'next'`. `next` counts as newer than any numbered Migration, so `discern upgrade` runs it last. When the branch lands, the release tooling renames `next` to the build's number and sets `FORMAT` to match, in one step. You never need to know the number while you write it.
+While you write a Migration on a feature branch, its folder is `next`, and `var FORMAT` in `ui/core.js` is `'next'`. `next` counts as newer than any numbered Migration, so `discern upgrade` runs it last. When the branch lands, the release tooling renames `next` to the build's number and sets `FORMAT` to match, in one step. You never need to know the number while you write it.
 
 A folder that `next` has upgraded records Format `next`. Every app without that `next` refuses it, so a test copy is never mistaken for real data.
 
@@ -18,7 +18,7 @@ A script, instructions, or both.
 
 `discern upgrade` runs it as `node migrate.mjs <data folder>`, and adds `--write` to apply it.
 
-- It runs on plain Node and imports only Node's built-in modules (`node:fs`, `node:path` and so on). It never loads the app's `//<core>` parser or anything else from the app. The parser will change, and the Migration has to keep working on the Format it was written for.
+- It runs on plain Node and imports only Node's built-in modules (`node:fs`, `node:path` and so on). It never loads the app's parser, `ui/core.js`, or anything else from the app. The parser will change, and the Migration has to keep working on the Format it was written for.
 - Without `--write` it changes nothing. It prints a preview of every change it would make, file by file, clearly enough for the user to say yes to it.
 - With `--write` it makes those changes.
 - It exits non-zero on failure, and says why on stderr. The Upgrade then stops there and keeps the Migrations already recorded.

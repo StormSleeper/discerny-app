@@ -1,4 +1,4 @@
-// Tests for the pure functions in the //<core> block of discerny.html: the logic behind the UI's lists,
+// Tests for the pure functions in ui/core.js: the logic behind the UI's lists,
 // search and quick add, loaded the same way tools/discern.mjs loads the parser.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,15 +10,13 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const EXAMPLE = path.resolve(process.env.DISCERNY_TEST_DATA || path.join(REPO, '..', 'discerny-example'));
 
 function loadCore() {
-  const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
-  const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
   const names = ['parse', 'serialize', 'pParse', 'pSerialize', 'eParse', 'eSerialize', 'changesOf', 'changeKey', 'setPriority', 'priorityIds', 'priorityStatus', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue',
     'REL_HEAD', 'ASK_HEAD', 'DIS_HEAD', 'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK',
     'serItem', 'canMerge', 'mergeItem', 'mergeRefs', 'fieldChange', 'changeUndo', 'priorityPaused', 'dueOf', 'setDue', 'receivedOf',
     'aParse', 'aLine', 'logParse', 'rParse', 'relLine', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings',
     'INTER_HEAD', 'interactionsOf', 'checkInteractions', 'addInteractions', 'dropInteractions', 'removeInteractions', 'restoreInteractions', 'interactionScore', 'interactionScores', 'scoreExplanation', 'scoreable', 'reviewLists', 'decisionLine', 'creditByName', 'creditById', 'acceptEvents', 'whoByUser', 'ackEvents', 'doneEvents', 'linkedEvents'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
-  return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
+  return new Function(`'use strict';\n${fs.readFileSync(path.join(REPO, 'ui', 'core.js'), 'utf8')}\n;return ${ret};`)();
 }
 const C = loadCore();
 
@@ -777,8 +775,8 @@ test('priorityPaused uses the days it is given, and 28 when given none', () => {
 });
 
 test('the Priority pause has no constant of its own: its default is the setting\'s', () => {
-  const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
-  assert.doesNotMatch(html, /PRIORITY_PAUSE/);
+  for (const f of ['discerny.html', ...fs.readdirSync(path.join(REPO, 'ui')).map(n => path.join('ui', n))])
+    assert.doesNotMatch(fs.readFileSync(path.join(REPO, f), 'utf8'), /PRIORITY_PAUSE/, f);
 });
 
 // ---------------------------------------------------------------- The Interaction log
