@@ -2794,6 +2794,24 @@ test('change --sender goes on the Comment of a field change, is left off when un
   assert.deepEqual(logLines(d), [], 'a change counts when it is acknowledged');
 });
 
+test('who-proposed on a Proposal: check accepts it, the helper keeps it, and a Skill\'s change of who moves it on', () => {
+  const d = folder(), inbox = path.join(d, 'INBOX.md');
+  const line = () => read(d, 'INBOX.md').split(/\r?\n/).find(l => l.includes('T-0029 '));
+  fs.writeFileSync(inbox, read(d, 'INBOX.md').replace(/(T-0029 [^\n]*?)interaction: \w+([^\n}]*)\}/, '$1interaction: none$2; who-proposed: Tomasz Kowalczyk}'));
+  const c = run(d, ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.deepEqual(c.json.warnings.filter(w => /who-proposed|T-0029/.test(w)), []);
+  assert.equal(run(d, ['comment', 'T-0029', '--author', 'email', 'News.']).code, 0);
+  assert.match(line(), /who-proposed: Tomasz Kowalczyk/, 'a write through the helper keeps it');
+  const w = run(d, ['change', 'T-0029', '--author', 'email', '--field', 'who', '--to', 'Bethan Rhys', 'Handed over.']);
+  assert.equal(w.code, 0, w.out);
+  assert.match(line(), /who: Bethan Rhys;.*who-proposed: Bethan Rhys/, 'the who a Skill wrote is the newest one');
+  assert.equal(run(d, ['check']).code, 0);
+  const p = run(d, ['change', 'T-0027', '--author', 'email', '--field', 'who', '--to', 'Bethan Rhys', 'Handed over.']);
+  assert.equal(p.code, 0, p.out);
+  assert.doesNotMatch(read(d, 'INBOX.md').split(/\r?\n/).find(l => l.includes('T-0027 ')), /who-proposed/, 'and it is never added by a Skill');
+});
+
 test('interaction records linked or done for a person today, at most once per Person per Item', () => {
   const d = clean();
   const r = run(d, ['interaction', 'T-0001', '--kind', 'linked', '--person', 'Tomasz Kowalczyk']);

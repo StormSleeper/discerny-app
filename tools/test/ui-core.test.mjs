@@ -16,7 +16,7 @@ function loadCore() {
     'REL_HEAD', 'ASK_HEAD', 'DIS_HEAD', 'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK',
     'serItem', 'canMerge', 'mergeItem', 'mergeRefs', 'fieldChange', 'changeUndo', 'priorityPaused', 'dueOf', 'setDue', 'receivedOf',
     'aParse', 'aLine', 'logParse', 'rParse', 'relLine', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings',
-    'INTER_HEAD', 'interactionsOf', 'checkInteractions', 'addInteractions', 'dropInteractions', 'removeInteractions', 'restoreInteractions', 'interactionScore', 'interactionScores', 'scoreExplanation', 'scoreable', 'reviewLists', 'decisionLine', 'creditByName', 'creditById', 'acceptEvents', 'ackEvents', 'doneEvents', 'linkedEvents'];
+    'INTER_HEAD', 'interactionsOf', 'checkInteractions', 'addInteractions', 'dropInteractions', 'removeInteractions', 'restoreInteractions', 'interactionScore', 'interactionScores', 'scoreExplanation', 'scoreable', 'reviewLists', 'decisionLine', 'creditByName', 'creditById', 'acceptEvents', 'whoByUser', 'ackEvents', 'doneEvents', 'linkedEvents'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -1011,6 +1011,38 @@ test('acceptEvents follows the Proposal\'s interaction, credits who as it is now
   assert.equal(C.acceptEvents(oneItem('who: Meera Ilangovan; interaction: message'), PEOPLE_MD, '2026-10-22')[0].date, '2026-10-22', 'undated: today');
   ['interaction: none', '', 'interaction: sideways'].forEach(m => assert.deepEqual(C.acceptEvents(oneItem(`who: Meera Ilangovan; received-date: 2026-10-02; ${m}`), PEOPLE_MD, '2026-10-22'), [], m));
   ['Imogen Hartley', 'Unassigned', 'Nobody Known'].forEach(w => assert.deepEqual(C.acceptEvents(oneItem(`who: ${w}; interaction: message`), PEOPLE_MD, '2026-10-22'), [], w));
+});
+
+test('a none Proposal counts only as linked, today, for a who the User changed in the Inbox', () => {
+  const today = '2026-10-22', accepted = meta => C.acceptEvents(oneItem(`received-date: 2026-10-02; interaction: none; ${meta}`), PEOPLE_MD, today);
+  assert.deepEqual(accepted('who: Meera Ilangovan; who-proposed: Tomasz Kowalczyk'), [{ date: today, person: 'P-0003', kind: 'linked', item: 'T-0041' }]);
+  assert.deepEqual(accepted('who: Meera Ilangovan; who-proposed: -'), [{ date: today, person: 'P-0003', kind: 'linked', item: 'T-0041' }], 'the Skill wrote no who');
+  assert.deepEqual(accepted('who: Meera Ilangovan'), [], 'the who the Skill wrote');
+  assert.deepEqual(accepted('who: Meera Ilangovan; who-proposed: Meera Ilangovan'), [], 'the same who as the Skill wrote');
+  assert.deepEqual(accepted('who-proposed: Meera Ilangovan'), [], 'cleared');
+  ['Imogen Hartley', 'Unassigned', 'Nobody Known'].forEach(w => assert.deepEqual(accepted(`who: ${w}; who-proposed: Meera Ilangovan`), [], w));
+  const message = C.acceptEvents(oneItem('who: Meera Ilangovan; received-date: 2026-10-02; interaction: message; who-proposed: Tomasz Kowalczyk'), PEOPLE_MD, today);
+  assert.deepEqual(message, [{ date: '2026-10-02', person: 'P-0003', kind: 'message', item: 'T-0041' }], 'another interaction is as it was');
+});
+
+test('whoByUser keeps the who the Skill wrote on a none Proposal, from the User\'s first change until they change it back', () => {
+  const set = (it, who) => { const was = it.meta.who || ''; if (who) it.meta.who = who; else delete it.meta.who; C.whoByUser(it, was); return it.meta['who-proposed']; };
+  const prep = oneItem('who: Tomasz Kowalczyk; interaction: none');
+  assert.equal(set(prep, 'Meera Ilangovan'), 'Tomasz Kowalczyk');
+  assert.equal(set(prep, 'Declan Moss'), 'Tomasz Kowalczyk', 'a second change keeps the first who');
+  assert.equal(set(prep, ''), 'Tomasz Kowalczyk', 'and so does clearing it');
+  assert.equal(set(prep, 'Tomasz Kowalczyk'), undefined, 'changing back leaves no trace');
+  assert.equal(C.serItem(prep), C.serItem(oneItem('who: Tomasz Kowalczyk; interaction: none')));
+  const invite = oneItem('interaction: none');
+  assert.equal(set(invite, 'Meera Ilangovan'), '-', 'the Skill wrote no who');
+  assert.equal(set(invite, ''), undefined);
+  assert.equal(set(oneItem('who: Tomasz Kowalczyk; interaction: message'), 'Meera Ilangovan'), undefined, 'only a none Proposal needs it');
+  assert.equal(set(oneItem('who: Tomasz Kowalczyk'), 'Meera Ilangovan'), undefined);
+});
+
+test('who-proposed survives a read and write of the Item, as a field the parser doesn\'t know', () => {
+  const line = '- [ ] T-0041 A thing {who: Meera Ilangovan; interaction: none; who-proposed: -}';
+  assert.equal(C.serItem(C.parse(`# Tasks\n${line}\n`).items[0]), line);
 });
 
 test('ackEvents: news is a comment for its sender, else who; a who change is linked for the new who; calendar, user and agent are nothing', () => {

@@ -21,6 +21,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - New `discern score --report` shows what is driving Interaction scores and how they compare with your Yes, No, Promote and Demote decisions, so you can tune `SETTINGS.toml` or ask your agent to suggest changes.
 - The server now refuses a request to overwrite DISCERNY.md, the file that records your folder's Format, so only an Upgrade can change it.
 - Adding someone to People from an item's Person field now counts towards their Interaction score for that item, and Undo takes it back.
+- Choosing the person on a prep or invite item while it waits in the Inbox now counts towards their Interaction score once you accept it, as it does if you choose them afterwards.
 
 ## 0.3.0.8 (2026-10-25)
 

@@ -435,7 +435,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.4.0.6'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.4.0.7'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.4.0.2'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -1041,9 +1041,17 @@ function decisionLine(date,person,decision,score,half){var f;
 function creditById(people,id){return id&&id!==USER_ID&&people.some(function(p){return p.meta.id===id;})?id:'';}
 function creditByName(people,name){var p=name?people.filter(function(x){return x.name===name;})[0]:null;return p&&/^P-\d+$/.test(p.meta.id||'')&&p.meta.id!==USER_ID?p.meta.id:'';}
 function dayOf(s){var m=/^\d{4}-\d{2}-\d{2}/.exec(String(s||''));return m?m[0]:'';}
-// Accept or Already handled: the Proposal's interaction, credited to who as it is now, dated when the Item reached the User
-function acceptEvents(it,people,today){var k=it.meta.interaction,pid=creditByName(people,it.meta.who);
-  return pid&&k&&k!=='none'&&PROPOSAL_INTERACTIONS.indexOf(k)>=0?[{date:dayOf(receivedOf(it.meta))||today,person:pid,kind:k,item:it.id}]:[];}
+// A none Proposal counts for nothing, unless the User changed its who while it waited. who-proposed keeps the who the Skill wrote, '-' if it wrote none,
+// from the User's first change until they change it back. was is who before this change.
+var WHO_PROPOSED='who-proposed',NO_WHO='-';
+function proposedWho(it){var w=it.meta[WHO_PROPOSED];return w===NO_WHO?'':w;}
+function whoByUser(it,was){if(it.meta.interaction!=='none')return;var from=proposedWho(it);if(from===undefined)from=was;
+  if((it.meta.who||'')===from)delete it.meta[WHO_PROPOSED];else it.meta[WHO_PROPOSED]=from||NO_WHO;}
+// Accept or Already handled: the Proposal's interaction, credited to who as it is now, dated when the Item reached the User.
+// A who the User changed on a none Proposal is linked, as it would have been had they changed it after accepting, so it's dated today.
+function acceptEvents(it,people,today){var k=it.meta.interaction,pid=creditByName(people,it.meta.who),from=proposedWho(it);
+  if(k==='none')return from!==undefined&&from!==(it.meta.who||'')?linkedEvents(pid,it.id,today):[];
+  return pid&&k&&PROPOSAL_INTERACTIONS.indexOf(k)>=0?[{date:dayOf(receivedOf(it.meta))||today,person:pid,kind:k,item:it.id}]:[];}
 // Acknowledging a Comment on an Item: news is a comment, credited to its sender, else who; a change of who is linked, credited to the new one.
 // A Comment from the calendar, the User or an Agent is nothing.
 function ackEvents(it,c,people,today){var f=c.f||{},g=fieldChange(c),date=dayOf(f['added-datetime'])||today,pid;
@@ -1487,7 +1495,8 @@ var OPS = {
       var was = f.it.meta.who || '';
       Object.keys(patch).forEach(function (k) { var v = patch[k] == null ? '' : String(patch[k]).replace(/[{}]/g, '').trim(); if (v === '') delete f.it.meta[k]; else f.it.meta[k] = v; });
       // The User setting or changing who is linked for the new one, and the old one keeps their events. A Proposal counts when it's accepted.
-      if (who && f.k !== 'inbox' && (f.it.meta.who || '') !== was) logEvents(M, null, linkedEvents(creditByName(M.people.people, f.it.meta.who), f.it.id, day));
+      if (who && f.k === 'inbox') whoByUser(f.it, was);
+      else if (who && (f.it.meta.who || '') !== was) logEvents(M, null, linkedEvents(creditByName(M.people.people, f.it.meta.who), f.it.id, day));
     });
   },
   title: function (id, t) { return op('Rename ' + id, ANY, function (M) { var f = fItem(M, id); if (f && t) f.it.title = t; }); },
@@ -1860,10 +1869,12 @@ var OPS = {
       items.forEach(function (x) {
         var f = fItem(M, x);
         if (!f || f.k === 'done' || realWho(f.it)) return;
+        var was = f.it.meta.who || '';
         f.it.meta.who = p.name;
         if (st.whos.indexOf(f.it.id) < 0) st.whos.push(f.it.id);
         // One still in the Inbox counts when it's accepted
-        if (f.k !== 'inbox') logEvents(M, st, linkedEvents(creditById(M.people.people, p.meta.id), f.it.id, o.date));
+        if (f.k === 'inbox') whoByUser(f.it, was);
+        else logEvents(M, st, linkedEvents(creditById(M.people.people, p.meta.id), f.it.id, o.date));
       });
       if (o.priority) M.settings.text = setPriority(M.settings.text, p.meta.id, true);
       if (!at) return;
@@ -1886,7 +1897,7 @@ var OPS = {
         M.people.people = M.people.people.filter(function (x) { return x !== p; });
         pSetNextId(M.people, hw);
       } else if (p) withEmail(p, c.email, false);
-      st.whos.forEach(function (x) { var f = fItem(M, x); if (f && p && f.it.meta.who === p.name) delete f.it.meta.who; });
+      st.whos.forEach(function (x) { var f = fItem(M, x); if (f && p && f.it.meta.who === p.name) { delete f.it.meta.who; if (f.k === 'inbox') whoByUser(f.it, p.name); } });
       if (o.priority && pid) M.settings.text = setPriority(M.settings.text, pid, false);
       if (st.task) { var t = rid(st.task); M.tasks.items = M.tasks.items.filter(function (i) { return !(i.id === t && getSub(i, 'origin').some(function (b) { return /^Added /.test(b.v); })); }); }
       var R = M.rels, n = R.lines.length, drop = st.rels.map(remapLine);

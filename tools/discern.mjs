@@ -898,6 +898,8 @@ CMD.change = function () {
     if (field === 'due-time' && to && !x.meta['due-date']) { noDay = true; return false; }
     if (C.commentsOf(x).some(c => { const g = C.fieldChange(c); return g && g.field === field && g.to === to; })) { skip = `${id} already has a Comment changing ${field} to ${to ? `"${to}"` : 'empty'}: a change applies once`; return false; }
     if (to) x.meta[field] = to; else delete x.meta[field];
+    // The who a Skill writes is never the User's change, so it's what a who the User set is compared with on Accept.
+    if (field === 'who' && x.meta['who-proposed'] !== undefined) x.meta['who-proposed'] = to;
     if (kind === 'P') { C.addHistory(x, today, field, from, to); x.meta['checked-date'] = today; }
     C.addComment(x, { at, author, ack: true, text: why, fields: { changed: field, from, to, ...(sender ? { sender } : {}) } }, rank);
   }, true);

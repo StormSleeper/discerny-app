@@ -104,6 +104,7 @@ When you point the user at an item or record, give its ID, or `View/ID` if the v
 - `projects`: optional, comma-separated `PRJ-####` IDs. `tags`: optional, comma-separated free-text tags; the tag list is whatever the data uses.
 - `received-datetime`: when the item reached the user (message timestamp; `received-date: YYYY-MM-DD` in its place if only the date is known). For an item a skill derives rather than receives, such as a prep item for a meeting, the time it was derived. Set it on every item a source skill creates.
 - `interaction`: on an item a source skill proposes, what it counts as in the Interaction log when the user accepts it: `message`, `reply`, `linked` or `none`. `discern add` requires it, and it stays on the item. An item without it counts for nothing when accepted. See "Interactions".
+- `who-proposed`: on a proposal with `interaction: none`, the `who` the skill wrote (`-` if it wrote none), from when the user changes `who` in the inbox until they change it back. It stays on the item. The UI writes it and `discern change` keeps it in step: never write it yourself.
 - `source-key`: the item's **source key**, a hidden key that ties it to the source thread, message or event it came from, so the same thing is never proposed twice: a scheme, then keys joined by `|`. The UI never shows or edits it, and renaming the item does not affect it. An item may carry several; a meeting with a date also carries a `cal|date|subject` source key so every source recognises it. A source key ending in `|*` stands for a whole chat or thread: on an item it means "related", never "already seen" (the older bare form `teams|chat-prefix` means the same). `SOURCE-SKILLS.md` lists the schemes and how they match.
 - `note:` and `my:` lines are retired: the Description and Comments replaced them. Never write one; `discern check` warns about any left.
 - Field names are whole words. The short codes of older Formats (`ty`, `urg`, `st` and the rest) are not read: an Upgrade renames them, and `discern check` reports any left as an error. Never write one.
@@ -269,6 +270,7 @@ The ID is the item or record the request is about. A request with only a date ha
 | `comment` | News in a Comment to acknowledge on an item | When acknowledged | `added-datetime` | Its `sender`, else the item's `who` |
 | `linked` | A transcript's action item | On Accept or Already handled | `received-datetime` | The item's `who` then |
 | `linked` | A change of `who` a skill made | When acknowledged | `added-datetime` | The new `who` |
+| `linked` | An `interaction: none` item whose `who` the user changed while it waited in the inbox, shown by `who-proposed` | On Accept or Already handled | Today | The item's `who` then |
 | `linked` | The user tying a person to an item by hand: adding an item with a `who`, setting `who`, adding or saying Yes to an `involves` Relationship, adding a proposed new person whose items get `who`, or adding someone to People from the item that names them | When it happens | Today | That person |
 | `done` | An item with a `who` completed | When completed | Today | The item's `who` |
 
