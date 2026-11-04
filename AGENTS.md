@@ -311,7 +311,7 @@ done = 1
 - The values above are the built-in defaults. A missing file or key uses the default, with no notice and no `discern check` error.
 - An invalid value uses the default too. `discern check` reports its line as an error, and the UI shows a notice saying which setting it ignored. Only that line is ignored: the rest still count.
 - `discern check` warns about a key it doesn't know.
-- `pause-days` sets the Priority pause. `half-life-days` and `[weights]` set how the Interaction score counts (see "Interactions"), which for now shows only in what a decision logs: the UI doesn't show the score yet. `high-percent` and `min-people` aren't in use yet.
+- `pause-days` sets the Priority pause. `half-life-days` and `[weights]` set how the Interaction score counts (see "Interactions"). `high-percent` and `min-people` set the two review filters on the UI's People page. Scored people are those with at least one Interaction, leaving out the user and anyone marked as left. "High score, not Priority" is the top `high-percent` of them who aren't Priority people. "Priority, low score" is the Priority people below their median, including anyone with no Interactions and never the user's manager. With fewer than `min-people` scored people, both say there isn't enough history yet.
 - The UI never writes this file, and reads it when it opens the folder, so a change applies on the next reload. The helper reads it on every command.
 - It's the user's to edit. Change it only when they ask you to, and never to get past a `discern check` error they haven't seen.
 

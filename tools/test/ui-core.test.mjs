@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const EXAMPLE = path.resolve(process.env.DISCERNY_TEST_DATA || path.join(REPO, '..', 'discerny-example'));
 
 function loadCore() {
   const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
@@ -15,7 +16,7 @@ function loadCore() {
     'REL_HEAD', 'ASK_HEAD', 'DIS_HEAD', 'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK',
     'serItem', 'canMerge', 'mergeItem', 'mergeRefs', 'fieldChange', 'changeUndo', 'priorityPaused', 'dueOf', 'setDue', 'receivedOf',
     'aParse', 'aLine', 'logParse', 'rParse', 'relLine', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings',
-    'INTER_HEAD', 'interactionsOf', 'checkInteractions', 'addInteractions', 'dropInteractions', 'removeInteractions', 'restoreInteractions', 'interactionScore', 'interactionScores', 'decisionLine', 'creditByName', 'creditById', 'acceptEvents', 'ackEvents', 'doneEvents', 'linkedEvents'];
+    'INTER_HEAD', 'interactionsOf', 'checkInteractions', 'addInteractions', 'dropInteractions', 'removeInteractions', 'restoreInteractions', 'interactionScore', 'interactionScores', 'scoreExplanation', 'scoreable', 'reviewLists', 'decisionLine', 'creditByName', 'creditById', 'acceptEvents', 'ackEvents', 'doneEvents', 'linkedEvents'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -882,6 +883,110 @@ test('interactionScores gives every Person in the log their score', () => {
   const all = C.interactionScores(logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-10-22 P-0004 reply T-0001'), C.readSettings('').values, '2026-10-22');
   assert.equal(all['P-0003'].total, 2);
   assert.equal(all['P-0004'].total, 1);
+});
+
+test('scoreExplanation counts each kind, in order of how much it adds, and says when most of the score comes from', () => {
+  const v = C.readSettings('').values, day = '2026-10-22';
+  const log = logOf(
+    '- 2026-10-20 P-0003 message T-0001', '- 2026-10-10 P-0003 message T-0002', '- 2026-10-05 P-0003 message T-0003', '- 2026-10-01 P-0003 message T-0004',
+    '- 2026-10-12 P-0003 comment T-0001', '- 2026-10-02 P-0003 comment T-0002', '- 2026-09-30 P-0003 linked T-0005', '- 2026-10-22 P-0004 reply T-0009');
+  assert.equal(C.scoreExplanation(log, 'P-0003', v, day), '4 messages, 2 comments, 1 linked, mostly this month');
+});
+
+test('scoreExplanation orders by what a kind adds rather than by how many there are', () => {
+  const v = C.readSettings('').values, day = '2026-10-22';
+  const log = logOf('- 2026-10-22 P-0003 comment T-0001', '- 2026-06-01 P-0003 message T-0002', '- 2026-06-02 P-0003 message T-0003', '- 2026-06-03 P-0003 message T-0004');
+  assert.match(C.scoreExplanation(log, 'P-0003', v, day), /^1 comment, 3 messages, /);
+  const heavy = C.readSettings('[weights]\nreply = 9\n').values, replies = logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-10-22 P-0003 reply T-0002', '- 2026-10-21 P-0003 reply T-0003');
+  assert.match(C.scoreExplanation(replies, 'P-0003', heavy, day), /^2 replies, 1 message, /);
+});
+
+test('scoreExplanation words the time by where most of the score comes from, and a single event says just when', () => {
+  const v = C.readSettings('').values, day = '2026-10-22', say = (...lines) => C.scoreExplanation(logOf(...lines), 'P-0003', v, day);
+  assert.equal(say('- 2026-10-20 P-0003 message T-0001', '- 2026-10-21 P-0003 linked T-0002'), '1 linked, 1 message, mostly this week');
+  assert.equal(say('- 2026-08-20 P-0003 message T-0001', '- 2026-08-21 P-0003 done T-0001'), '1 message, 1 done, mostly the last three months');
+  assert.equal(say('- 2026-03-20 P-0003 message T-0001', '- 2026-03-21 P-0003 message T-0002'), '2 messages, mostly longer ago');
+  assert.equal(say('- 2026-10-01 P-0003 reply T-0001'), '1 reply, this month');
+  assert.equal(say('- 2027-01-01 P-0003 message T-0001', '- 2027-01-02 P-0003 message T-0002'), '2 messages, mostly this week', 'a future date is age 0');
+});
+
+test('scoreExplanation has words for no Interactions, and leaves out what a weight of 0 adds nothing for', () => {
+  const v = C.readSettings('').values, day = '2026-10-22';
+  assert.equal(C.scoreExplanation(logOf('- 2026-10-22 P-0004 message T-0001', '- 2026-10-22 P-0003 decision promote'), 'P-0003', v, day), 'No Interactions yet');
+  const noReply = C.readSettings('[weights]\nreply = 0\n').values;
+  assert.equal(C.scoreExplanation(logOf('- 2026-10-22 P-0003 reply T-0001', '- 2026-10-21 P-0003 message T-0002'), 'P-0003', noReply, day), '1 message, this week');
+  const none = C.readSettings('[weights]\nmessage = 0\n').values;
+  assert.equal(C.scoreExplanation(logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-10-21 P-0003 message T-0002'), 'P-0003', none, day), '2 Interactions, none of them counting under your weights');
+});
+
+// ---- the review filters. P-0001 is the User, and P-0002 their manager.
+const staff = (n, extra = {}) => Array.from({ length: n }, (_, i) => {
+  const id = 'P-' + String(i + 2).padStart(4, '0');
+  return { name: 'Person ' + id, meta: { id, ...(extra[id] || {}) } };
+});
+const team = (n, extra) => [{ name: 'Me', meta: { id: 'P-0001', manager: 'Person P-0002' } }, ...staff(n, extra)];
+// each of ids gets a total: the first the highest
+const totals = (ids) => Object.fromEntries(ids.map((id, i) => [id, { total: ids.length - i, shares: {} }]));
+const tenIds = ['P-0003', 'P-0004', 'P-0005', 'P-0006', 'P-0007', 'P-0008', 'P-0009', 'P-0010', 'P-0011', 'P-0012'];
+
+test('scoreable leaves out the User, anyone who has left and anyone with no ID', () => {
+  assert.equal(C.scoreable({ name: 'Me', meta: { id: 'P-0001' } }), false);
+  assert.equal(C.scoreable({ name: 'Gone', meta: { id: 'P-0009', status: 'left' } }), false);
+  assert.equal(C.scoreable({ name: 'No ID', meta: {} }), false);
+  assert.equal(C.scoreable({ name: 'Here', meta: { id: 'P-0009' } }), true);
+});
+
+test('High score, not Priority is the top high-percent of scored people, rounded up, leaving out Priority people', () => {
+  const v = C.readSettings('').values, r = C.reviewLists(team(12), ['P-0003'], totals(tenIds), v);
+  assert.equal(r.scored, 10);
+  assert.equal(r.enough, true);
+  assert.deepEqual(r.high, ['P-0004'], 'the top 2 of 10, less the Priority person');
+  const pct = C.readSettings('[score]\nhigh-percent = 21\n').values;
+  assert.deepEqual(C.reviewLists(team(12), [], totals(tenIds), pct).high, ['P-0003', 'P-0004', 'P-0005'], '2.1 people rounds up');
+  assert.ok(!C.reviewLists(team(12), [], totals(['P-0002', ...tenIds.slice(1)]), v).high.includes('P-0002'), 'the manager always counts as Priority');
+});
+
+test('High score takes in everyone tied with the last place', () => {
+  const v = C.readSettings('').values, s = totals(tenIds);
+  s['P-0005'] = { total: s['P-0004'].total, shares: {} };
+  assert.deepEqual(C.reviewLists(team(12), [], s, v).high, ['P-0003', 'P-0004', 'P-0005']);
+});
+
+test('Priority, low score is a Priority person below the median, with no Interactions counting, and never the manager', () => {
+  const v = C.readSettings('').values, s = totals(tenIds);
+  const r = C.reviewLists(team(13), ['P-0003', 'P-0011', 'P-0014', 'P-0002'], s, v);
+  assert.deepEqual(r.low, ['P-0011', 'P-0014'], 'below the median, and one with no Interactions; not the manager, listed or not');
+  const managerLow = totals([...tenIds.slice(1), 'P-0002']);
+  assert.ok(!C.reviewLists(team(13), ['P-0002'], managerLow, v).low.includes('P-0002'), 'the lowest score, but the manager');
+  const nine = C.readSettings('[score]\nmin-people = 9\n').values;
+  assert.deepEqual(C.reviewLists(team(13), ['P-0007', 'P-0008'], totals(tenIds.slice(0, 9)), nine).low, ['P-0008'], 'exactly on the median is not below it');
+  const allZero = Object.fromEntries(tenIds.map(id => [id, { total: 0, shares: {} }]));
+  assert.deepEqual(C.reviewLists(team(13), ['P-0014'], allZero, v).low, ['P-0014'], 'no Interactions counts even when the median is 0');
+});
+
+test('the User and anyone who has left are not scored or listed, and someone in the log but not in People is no one', () => {
+  const v = C.readSettings('[score]\nmin-people = 1\n').values, ids = [...tenIds, 'P-0013', 'P-0001', 'P-0099'];
+  const r = C.reviewLists(team(12, { 'P-0003': { status: 'left' }, 'P-0012': { status: 'left' } }), ['P-0003', 'P-0012'], totals(ids), v);
+  assert.equal(r.scored, 9, 'the ten and P-0013, less the two who have left');
+  assert.deepEqual(r.high, ['P-0004', 'P-0005'], 'the top 2 of the nine, with neither those who have left, the User nor someone not in People');
+  assert.ok(!r.low.includes('P-0012'), 'left, and listed in priority-people');
+});
+
+test('fewer than min-people scored means both lists are empty and not enough', () => {
+  const v = C.readSettings('').values, s = totals(tenIds.slice(0, 9));
+  const r = C.reviewLists(team(13), ['P-0011', 'P-0014'], s, v);
+  assert.deepEqual([r.scored, r.needs, r.enough, r.high, r.low], [9, 10, false, [], []]);
+  const fewer = C.readSettings('[score]\nmin-people = 9\n').values;
+  assert.equal(C.reviewLists(team(13), [], s, fewer).enough, true);
+});
+
+test('the Example has at least 10 scored people, and someone in each review filter', { skip: !fs.existsSync(EXAMPLE) && 'no Example beside the app' }, () => {
+  const read = f => fs.readFileSync(path.join(EXAMPLE, f), 'utf8');
+  const people = C.pParse(read('PEOPLE.md')).people, v = C.readSettings(read('SETTINGS.toml')).values;
+  const r = C.reviewLists(people, C.priorityIds(read('SOURCES.md')), C.interactionScores(read('INTERACTIONS.md'), v, '2026-11-04'), v);
+  assert.ok(r.scored >= 10, `${r.scored} scored`);
+  assert.ok(r.high.length, 'someone under High score, not Priority');
+  assert.ok(r.low.length, 'someone under Priority, low score');
 });
 
 test('decisionLine writes the score and each share to one decimal, with the half-life; no score is no braces', () => {

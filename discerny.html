@@ -347,7 +347,12 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .tr .nm{border:0;background:none;padding:0;text-align:left;font-weight:600;font-size:14.5px;color:var(--ink)}
 .tr .nm:hover{text-decoration:underline;text-underline-offset:2px}
 .tr .r{text-align:right;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;align-items:center}
-@container (max-width:640px){.tr{grid-template-columns:minmax(0,1fr) auto}.tr .c2,.tr .c3{display:none}}
+.tbl.by-score .tr{grid-template-columns:minmax(0,2.2fr) minmax(0,2fr) minmax(0,1.4fr) 96px 150px}
+.score{display:flex;align-items:center;gap:8px;font-variant-numeric:tabular-nums;font-size:13px}
+.score-n{min-width:2.4em;text-align:right}
+.score-bar{flex:1;min-width:24px;height:6px;border-radius:999px;background:var(--line);overflow:hidden}
+.score-bar>span{display:block;height:6px;border-radius:999px;background:var(--accent)}
+@container (max-width:640px){.tr{grid-template-columns:minmax(0,1fr) auto}.tbl.by-score .tr{grid-template-columns:minmax(0,1fr) 84px auto}.tr .c2,.tr .c3{display:none}}
 .grp-h{font-size:12.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);padding:12px 14px 6px;border-top:1px solid var(--line)}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px}
 .toolbar .sp{margin-left:auto}
@@ -430,7 +435,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.4.0.2'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.4.0.3'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.4.0.2'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -997,6 +1002,36 @@ function interactionScores(log,values,today){var out={},half=settingOf(values,'s
     s.shares[e.kind]+=n;s.total+=n;});
   return out;}
 function interactionScore(log,id,values,today){return interactionScores(log,values,today)[id]||noScore();}
+// A plain account of a Person's score: each kind that adds anything, the most first, then when most of it comes from.
+// log is as for interactionScores.
+function scoreExplanation(log,id,values,today){var half=settingOf(values,'score','half-life-days'),n={},add={},total=0,count=0,week=0,month=0,quarter=0,seen=0;
+  (typeof log==='string'?interactionsOf(log):log||[]).forEach(function(e){
+    if(e.person!==id||INTER_KINDS.indexOf(e.kind)<0||!realDay(e.date))return;
+    seen++;var w=settingOf(values,'weights',e.kind);if(!w)return;
+    var age=Math.max(daysBetween(e.date,today),0),v=w*Math.pow(0.5,age/half);
+    n[e.kind]=(n[e.kind]||0)+1;add[e.kind]=(add[e.kind]||0)+v;total+=v;count++;
+    if(age<=7)week+=v;if(age<=30)month+=v;if(age<=90)quarter+=v;});
+  if(!seen)return 'No Interactions yet';
+  if(!count)return seen+' Interactions, none of them counting under your weights';
+  var words={message:['message','messages'],reply:['reply','replies'],comment:['comment','comments'],linked:['linked','linked'],done:['done','done']};
+  var parts=Object.keys(n).sort(function(a,b){return add[b]-add[a]||INTER_KINDS.indexOf(a)-INTER_KINDS.indexOf(b);}).map(function(k){return n[k]+' '+words[k][n[k]===1?0:1];});
+  var when=week>total/2?'this week':month>total/2?'this month':quarter>total/2?'the last three months':'longer ago';
+  return parts.join(', ')+', '+(count>1?'mostly ':'')+when;}
+// Who a score is for: everyone with an ID but the User and anyone who has left
+function scoreable(p){return !!p.meta.id&&p.meta.id!==USER_ID&&p.meta.status!=='left';}
+// The review filters. people as in PEOPLE.md, ids priority-people, scores as interactionScores gives them, by P-ID.
+// Scored people are those scoreable with at least one Interaction. Totals closer than a rounding error count as tied.
+// -> {scored, needs, enough, high: [P-id], low: [P-id]}, both lists empty when there aren't enough scored people to compare
+function reviewLists(people,ids,scores,values){var EPS=1e-9,needs=settingOf(values,'score','min-people');
+  var scored=people.filter(function(p){return scoreable(p)&&scores[p.meta.id];}),n=scored.length,out={scored:n,needs:needs,enough:n>=needs,high:[],low:[]};
+  if(!out.enough)return out;
+  var totals=scored.map(function(p){return scores[p.meta.id].total;}).sort(function(a,b){return b-a;});
+  var cut=totals[Math.min(Math.ceil(n*settingOf(values,'score','high-percent')/100),n)-1];
+  var median=n%2?totals[(n-1)/2]:(totals[n/2-1]+totals[n/2])/2;
+  people.forEach(function(p){if(!scoreable(p))return;var s=scores[p.meta.id],st=priorityStatus(people,ids,p);
+    if(st==='off'&&s&&s.total>=cut-EPS)out.high.push(p.meta.id);
+    if(st==='on'&&(!s||s.total<median-EPS))out.low.push(p.meta.id);});
+  return out;}
 function tenths(n){return Math.round(n*10)/10;}
 // A decision's line: with a score, the score and each kind's share at that moment
 function decisionLine(date,person,decision,score,half){var f;
@@ -1135,7 +1170,7 @@ var S = {
   m: null, ver: 0, ready: false, lost: false, moved: false, lastSync: 0, fresh: new Set(), folder: '',
   folderPath: '', folderErr: '', folderSugs: [], folderBusy: false,
   view: 'today', entity: null, sel: null, panel: false, tab: 'details',
-  group: lsGet('discerny-group', 'project'), pf: 'all', pq: '', pgroup: lsGet('discerny-pgroup', 'none'),
+  group: lsGet('discerny-group', 'project'), pf: 'all', pq: '', psort: 'name', pgroup: lsGet('discerny-pgroup', 'none'),
   wb: Object.assign({ group: 'urg', sort: 'urg', tag: '' }, lsJson('discerny-wb', {})), wq: '',
   qa: '', qaType: null, qaMore: false, qaUrg: '', qaDesc: '', palette: false, palQ: '', palI: 0, dialog: null,
   composer: {}, introOn: {}, subDraft: '', cmtDraft: '', cmtEdit: null, cmtEditText: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', linkKind: 'All', linkDone: false, sysQ: '', suggestOn: {},
@@ -2499,6 +2534,28 @@ function isMe(p) { return p.meta.id === USER_ID; }
 function prioOf(p) { return priorityStatus(S.m.people.people, priorityIds(S.m.settings.text), p); }
 function isPrio(p) { var s = prioOf(p); return s === 'on' || s === 'manager'; }
 function prioMark(p) { return isPrio(p) ? badge('Priority', 'flag prio-m') : ''; }
+// The Interaction scores and the review filters, worked out from the log once for each version of the model and each day.
+var SCORED = null;
+function scored() {
+  var today = todayStr();
+  if (SCORED && SCORED.ver === S.ver && SCORED.m === S.m && SCORED.today === today) return SCORED;
+  var events = interactionsOf(S.m.interactions.text), scores = interactionScores(events, SET.values, today), top = 0;
+  S.m.people.people.forEach(function (p) { var s = scores[p.meta.id]; if (s && scoreable(p) && s.total > top) top = s.total; });
+  SCORED = { ver: S.ver, m: S.m, today: today, events: events, scores: scores, top: top, lists: reviewLists(S.m.people.people, priorityIds(S.m.settings.text), scores, SET.values) };
+  return SCORED;
+}
+function scoreOf(p) { var s = scored().scores[p.meta.id]; return s ? s.total : 0; }
+function scoreText(n) { return tenths(n).toFixed(1); }
+// A row's number and bar. The bar is out of the highest score anywhere, so that a filter doesn't change what it means.
+function scoreCell(p) {
+  if (!scoreable(p)) return '<div class="score"></div>';
+  var n = scoreOf(p), top = scored().top, pct = top ? Math.round(n / top * 100) : 0;
+  return '<div class="score"><span class="sr">Interaction score </span><span class="score-n">' + scoreText(n) + '</span><span class="score-bar" aria-hidden="true"><span style="width:' + pct + '%"></span></span></div>';
+}
+function scoreFact(p) {
+  if (!scoreable(p)) return fact('Interaction score', [fv(isMe(p) ? 'Not scored: this is you' : p.meta.status === 'left' ? 'Not scored: they have left' : 'Not scored')]);
+  return fact('Interaction score', [fv(scoreText(scoreOf(p))), '<span class="hint">' + esc(scoreExplanation(scored().events, p.meta.id, SET.values, todayStr())) + '</span>']);
+}
 // The Promote or Demote button: locked on the User's manager, and absent on the User, on anyone with no ID and on someone who has left, unless they're still listed
 function prioToggle(p, cls) {
   var s = prioOf(p), c = (cls ? cls + ' ' : '') + 'prio-t';
@@ -3293,7 +3350,7 @@ function viewPerson(id) {
     fact('Reports to', chain.length ? chain : [fv(isExt(p) ? 'External' : 'Not set')]) +
     fact('Direct reports', reports.length ? reports.map(function (x) { return fv(x.name, x.meta.id ? 'person' : '', x.meta.id); }) : [fv('None')]) +
     fact('Owns', owns.length ? owns.map(function (x) { return fv(x.name, 'ent', x.meta.id); }) : [fv('No systems')]) +
-    fact('Last checked', [fv(p.meta['checked-date'] ? fmtY(p.meta['checked-date']) : 'Never')]);
+    fact('Last checked', [fv(p.meta['checked-date'] ? fmtY(p.meta['checked-date']) : 'Never')]) + scoreFact(p);
   var hist = getSub(p, 'history');
   var box = '<div class="entity" data-k="entity"><div class="pills">' + pills + '</div>' + vDescText(p) +
     '<div class="facts">' + facts + '</div>' + vAsksBox(id) +
@@ -3386,17 +3443,21 @@ function viewSystems() {
 }
 function viewPeople() {
   var all = S.m.people.people, act = activePeople();
-  var defs = [['all', 'All', act.length], ['internal', 'Internal', act.filter(function (p) { return !isExt(p); }).length], ['external', 'External', act.filter(isExt).length], ['priority', 'Priority', act.filter(isPrio).length], ['gaps', 'Missing details', act.filter(function (p) { return gaps(p).length; }).length], ['left', 'Left', all.filter(function (p) { return p.meta.status === 'left'; }).length]];
+  var review = scored().lists, bySc = S.psort === 'score';
+  var defs = [['all', 'All', act.length], ['internal', 'Internal', act.filter(function (p) { return !isExt(p); }).length], ['external', 'External', act.filter(isExt).length], ['priority', 'Priority', act.filter(isPrio).length], ['high', 'High score, not Priority', review.high.length], ['low', 'Priority, low score', review.low.length], ['gaps', 'Missing details', act.filter(function (p) { return gaps(p).length; }).length], ['left', 'Left', all.filter(function (p) { return p.meta.status === 'left'; }).length]];
   var list = S.pf === 'left' ? all.filter(function (p) { return p.meta.status === 'left'; }) : act;
   if (S.pf === 'internal') list = list.filter(function (p) { return !isExt(p); });
   if (S.pf === 'external') list = list.filter(isExt);
   if (S.pf === 'priority') list = list.filter(isPrio);
+  if (S.pf === 'high') list = list.filter(function (p) { return review.high.indexOf(p.meta.id) >= 0; });
+  if (S.pf === 'low') list = list.filter(function (p) { return review.low.indexOf(p.meta.id) >= 0; });
   if (S.pf === 'gaps') list = list.filter(function (p) { return gaps(p).length; });
   var q = S.pq.trim().toLowerCase();
   if (q) list = list.filter(function (p) { return (p.name + ' ' + Object.keys(p.meta).map(function (k) { return p.meta[k]; }).join(' ') + ' ' + p.grp + ' ' + wordsOf(p)).toLowerCase().indexOf(q) >= 0; });
   var tb = '<div class="toolbar" data-k="toolbar"><div class="pills" role="group" aria-label="Filter people">' + defs.map(function (f) { return '<button type="button" class="chipbtn" data-act="pf" data-v="' + f[0] + '"' + pressed(S.pf === f[0]) + '>' + f[1] + ' ' + f[2] + '</button>'; }).join('') + '</div>' +
     '<label class="sr" for="people-q">Search people</label><input id="people-q" class="in" type="search" autocomplete="off" data-in="pq" value="' + esc(S.pq) + '" placeholder="Search name, role, organisation…">' +
     '<label class="sr" for="people-g">Group people by</label><select id="people-g" class="in" data-ch="pgroup">' + opts([['none', 'No grouping'], ['co', 'By organisation'], ['dept', 'By department'], ['grp', 'By group']], S.pgroup) + '</select>' +
+    '<label class="sr" for="people-s">Sort people by</label><select id="people-s" class="in" data-ch="psort">' + opts([['name', 'Sort by: Name'], ['score', 'Sort by: Interaction score']], S.psort) + '</select>' +
     '<span class="sp"></span>' + (S.adding === 'P' ? '' : bt('Add person', 'add-open', { v: 'P', cls: 'primary', icon: 'plus' })) + '</div>';
   if (S.adding === 'P') tb += '<form class="addform" data-sub="add-person" data-k="addform"><label class="fl" for="add-name">Full name<input id="add-name" class="in" type="text" autocomplete="off" data-in="addName" value="' + esc(S.addName) + '" required></label>' +
     '<label class="fl" for="add-grp">Group<input id="add-grp" class="in" type="text" list="dl-pgrp" autocomplete="off" data-in="addGrp" value="' + esc(S.addGrp) + '" placeholder="Other"></label><button type="submit" class="btn primary">Add person</button>' + bt('Cancel', 'add-cancel', { cls: 'quiet' }) + '</form>';
@@ -3404,10 +3465,12 @@ function viewPeople() {
     var g = gaps(p), pid = p.meta.id || '';
     return '<div class="tr" role="listitem" data-k="p-' + esc(pid || p.name) + '"><div><button type="button" class="nm" data-act="person" data-id="' + esc(pid) + '"' + (pid ? '' : ' disabled') + '>' + esc(p.name + (isMe(p) ? ' (you)' : '')) + '</button>' + (isPrio(p) ? ' ' + prioMark(p) : '') + '<div class="hint">' + esc(p.meta.title || 'No job title') + '</div></div>' +
       '<div class="c2">' + esc([p.meta.company, p.meta.department].filter(Boolean).join(' › ') || 'Not set') + (isExt(p) ? ' ' + badge('External', 'info') : '') + '</div>' +
-      '<div class="c3">' + esc(p.meta.manager || (isExt(p) ? 'External' : 'Not set')) + '</div>' +
+      '<div class="c3">' + esc(p.meta.manager || (isExt(p) ? 'External' : 'Not set')) + '</div>' + (bySc ? scoreCell(p) : '') +
       '<div class="r">' + (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : '') + (p.meta.status === 'left' ? badge('Left') : '') + '<span class="hint">' + personOpenCount(p) + ' open</span>' + prioToggle(p, 'sm') + '</div></div>';
   };
-  var sorted = list.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+  // By score, the User and anyone who has left come last, having no score
+  var rank = function (p) { return scoreable(p) ? scoreOf(p) : -1; };
+  var sorted = list.slice().sort(function (a, b) { return (bySc ? rank(b) - rank(a) : 0) || a.name.localeCompare(b.name); });
   var body = '';
   if (S.pgroup === 'none') body = sorted.map(row).join('');
   else {
@@ -3417,7 +3480,9 @@ function viewPeople() {
     order.sort(function (a, b) { return (/^No /.test(a) - /^No /.test(b)) || a.localeCompare(b); });
     body = order.map(function (k) { return '<div class="grp-h" role="presentation" data-k="g-' + esc(k) + '">' + esc(k) + ' <span class="hint">' + groups[k].length + '</span></div>' + groups[k].map(row).join(''); }).join('');
   }
-  var tbl = '<div class="tbl" data-k="tbl"><div class="tr th" aria-hidden="true"><span>Name and role</span><span class="c2">Organisation</span><span class="c3">Reports to</span><span class="r">Open items</span></div><div role="list" aria-label="People">' + body + '</div>' + (sorted.length ? '' : '<div class="empty" style="padding:12px 14px">Nobody matches.</div>') + '</div>';
+  var short = (S.pf === 'high' || S.pf === 'low') && !review.enough;
+  var none = short ? 'There isn\'t enough history yet to compare people. It takes ' + plural(review.needs, 'person', 'people') + ' with Interactions, and so far there ' + (review.scored === 1 ? 'is 1' : 'are ' + review.scored) + '.' : 'Nobody matches.';
+  var tbl = '<div class="tbl' + (bySc ? ' by-score' : '') + '" data-k="tbl"><div class="tr th" aria-hidden="true"><span>Name and role</span><span class="c2">Organisation</span><span class="c3">Reports to</span>' + (bySc ? '<span>Score</span>' : '') + '<span class="r">Open items</span></div><div role="list" aria-label="People">' + body + '</div>' + (sorted.length ? '' : '<div class="empty" style="padding:12px 14px">' + esc(none) + '</div>') + '</div>';
   var extra = '';
   var unk = (S.pf === 'all' || S.pf === 'gaps') && !q ? unknownWhos() : [];
   if (unk.length) extra = '<div class="list" style="margin-top:22px">' + vSec('unknown', 'On your tasks but not in People', unk.map(function (u) {
@@ -4067,8 +4132,9 @@ var LINK_STATE = {
   },
   people: {
     q: stateKey(function () { return S.pq; }, function (v) { S.pq = v; forceClear('people-q'); }, ''),
-    show: stateKey(function () { return S.pf; }, function (v) { S.pf = v; }, 'all', { all: 'all', internal: 'internal', external: 'external', priority: 'priority', 'missing-details': 'gaps', left: 'left' }),
-    group: stateKey(function () { return S.pgroup; }, function (v) { S.pgroup = v; }, 'none', { none: 'none', organisation: 'co', department: 'dept', group: 'grp' })
+    show: stateKey(function () { return S.pf; }, function (v) { S.pf = v; }, 'all', { all: 'all', internal: 'internal', external: 'external', priority: 'priority', 'high-score': 'high', 'low-score': 'low', 'missing-details': 'gaps', left: 'left' }),
+    group: stateKey(function () { return S.pgroup; }, function (v) { S.pgroup = v; }, 'none', { none: 'none', organisation: 'co', department: 'dept', group: 'grp' }),
+    sort: stateKey(function () { return S.psort; }, function (v) { S.psort = v; }, 'name', { name: 'name', 'interaction-score': 'score' })
   },
   projects: { q: ENT_Q },
   systems: { q: ENT_Q }
@@ -4217,7 +4283,7 @@ function go(view, entity) {
   if (changed && !landing) linkPush = true;
   S.view = view; S.entity = entity || null;
   S.panel = false; S.sel = null; S.cur = null; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.confirm = null; S.adding = null; S.linkQ = ''; S.tab = 'details'; S.editAsk = null; S.dialog = null;
-  if (changed) { S.eq = ''; S.pq = ''; S.pf = 'all'; S.doneLimit = 60; }
+  if (changed) { S.eq = ''; S.pq = ''; S.pf = 'all'; S.psort = 'name'; S.doneLimit = 60; }
   autoOpen = null; offView = null;
   if (view === 'inbox' && !isDrawer()) { var l = inboxList(); if (l.length) { S.sel = autoOpen = l[0].id; S.panel = true; S.cur = l[0].id; } }
   if (changed) { var m = document.getElementById('main'); if (m) m.scrollTop = 0; S.scrolled = false; }
@@ -4521,6 +4587,11 @@ function addLink(id, other) {
   focusLater('#f-linkq');
 }
 function personOf(id) { return personById(id); }
+function rowAfter(el, filters) {
+  var tr = filters.indexOf(S.pf) >= 0 ? el.closest('.tr') : null, rows = tr ? Array.prototype.slice.call(document.querySelectorAll('.main .tr[data-k^="p-"]')) : [], k = rows.indexOf(tr);
+  return rows[k + 1] || rows[k - 1] || null;
+}
+function focusRow(tr) { focusLater('.main .tr[data-k="' + tr.getAttribute('data-k') + '"] .nm'); }
 function entSnapshot(id) {
   var kind = kindOf(id), D = EDEF[kind], ents = entsOf(kind), e = entById(id);
   return {
@@ -4716,13 +4787,9 @@ var ACT = {
   'wb-tag': function (el) { var t = dvv(el); setWb({ tag: S.wb.tag === t ? '' : t }); if (S.view !== 'all') go('all'); },
   'qa-more': function () { S.qaMore = !S.qaMore; render(); if (S.qaMore) focusLater('#qa-urg'); },
   pf: function (el) { S.pf = dvv(el); render(); },
-  promote: function (el) { promotePerson(did(el)); },
-  // Under the Priority filter a Demote takes the row away, so focus moves to the next one
-  demote: function (el) {
-    var tr = S.pf === 'priority' ? el.closest('.tr') : null, rows = tr ? Array.prototype.slice.call(document.querySelectorAll('.main .tr[data-k^="p-"]')) : [], k = rows.indexOf(tr), nb = rows[k + 1] || rows[k - 1];
-    demotePerson(did(el));
-    if (nb) focusLater('.main .tr[data-k="' + nb.getAttribute('data-k') + '"] .nm');
-  },
+  // Under a filter it would leave, a Promote or Demote takes the row away, so focus moves to the next one
+  promote: function (el) { var nb = rowAfter(el, ['high']); promotePerson(did(el)); if (nb) focusRow(nb); },
+  demote: function (el) { var nb = rowAfter(el, ['priority', 'low']); demotePerson(did(el)); if (nb) focusRow(nb); },
   'add-open': function (el) { S.adding = dvv(el); S.addName = ''; S.addGrp = ''; S.addType = ''; focusLater('#add-name'); },
   'add-cancel': function () { S.adding = null; render(); },
   'review-reset': function () { lsSet('discerny-review', JSON.stringify({ week: isoWeek(todayStr()), done: {} })); render(); },
@@ -4816,6 +4883,7 @@ var CH = {
   'e-owner': function (el) { var e = entById(did(el)), v = cleanName(el.value); if (e && v !== (e.meta.owner || '')) commit(OPS.patchEnt('SYS', did(el), { owner: v })); },
   'e-grp': function (el) { var e = entById(did(el)), v = cleanName(el.value); if (e && v !== e.grp) commit(OPS.entGroup(kindOf(did(el)), did(el), v)); },
   pgroup: function (el) { S.pgroup = el.value; lsSet('discerny-pgroup', S.pgroup); render(); },
+  psort: function (el) { S.psort = el.value; render(); },
   'wb-sort': function (el) { setWb({ sort: el.value }); },
   'wb-tag': function (el) { setWb({ tag: el.value }); },
   'qa-urg': function (el) { S.qaUrg = el.value; render(); },
