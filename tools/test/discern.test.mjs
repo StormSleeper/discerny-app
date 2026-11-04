@@ -2522,6 +2522,18 @@ test('serve lets the page read SETTINGS.toml, 404 when it is missing, and refuse
   assert.equal(fs.existsSync(path.join(d, 'SETTINGS.toml')), false);
 });
 
+test('serve lets the page read DISCERNY.md and refuses to write it', async (t) => {
+  const d = folder(), before = read(d, 'DISCERNY.md');
+  const { url, api, session } = await serve(t, d);
+  const got = await api('/api/file/DISCERNY.md');
+  assert.equal(got.status, 200);
+  assert.equal(await got.text(), before);
+  const put = await fetch(new URL('/api/file/DISCERNY.md', url), { method: 'PUT', headers: { 'Content-Type': 'text/plain', Origin: url.replace(/\/$/, ''), 'X-Discerny-Session': session }, body: '<!-- format: 9.9.9.9 -->\n' });
+  assert.equal(put.status, 405);
+  assert.match(await put.text(), /only an Upgrade/);
+  assert.equal(read(d, 'DISCERNY.md'), before);
+});
+
 test('nothing in the page writes SETTINGS.toml: it is not among the files the page saves', () => {
   const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
   const files = /var FILES = (\{[^}]*\})/.exec(html)[1], watch = /var WATCH = (\[[^\]]*\])/.exec(html)[1];

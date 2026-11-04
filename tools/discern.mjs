@@ -1424,6 +1424,11 @@ CMD.serve = function () {
   };
   // Only the files the page reads or writes, matched as written in the URL, so no name is ever resolved against the disk.
   const NAMES = new Set([...Object.values(C.FILES), ...C.WATCH]);
+  // The files the page may read but the server never writes, each with the answer to a request to write it.
+  const READ_ONLY = new Map([
+    [C.SETTINGS_FILE, `${C.SETTINGS_FILE} is yours to edit by hand: Discerny never writes it`],
+    ['DISCERNY.md', 'DISCERNY.md records the folder\'s Format: only an Upgrade changes it'],
+  ]);
   const mtime = (f) => Math.floor(fs.statSync(f).mtimeMs);
   const MAX_PUT = 10 * 1024 * 1024;
   const bodyText = async (req) => { const chunks = []; let size = 0; for await (const c of req) { size += c.length; if (size <= 64e3) chunks.push(c); } return Buffer.concat(chunks).toString('utf8'); };
@@ -1487,15 +1492,14 @@ CMD.serve = function () {
       return send(res, 200, names.sort().map(n => ({ name: n, text: fs.readFileSync(path.join(dr, n), 'utf8'), mod: mtime(path.join(dr, n)) })));
     }
     const file = /^\/api\/file\/([^/]+)$/.exec(req.url);
-    const readOnly = file && file[1] === C.SETTINGS_FILE;
+    const readOnly = file && READ_ONLY.get(file[1]);
     if (!file || !(NAMES.has(file[1]) || readOnly)) return send(res, 404, 'not found');
     const f = fp(file[1]);
     if (req.method === 'GET') {
       if (!fs.existsSync(f)) return send(res, 404, 'not found');
       return send(res, 200, fs.readFileSync(f, 'utf8'), { 'X-Mtime': String(mtime(f)) });
     }
-    // Only the User edits SETTINGS.toml, by hand.
-    if (readOnly) return send(res, 405, `${C.SETTINGS_FILE} is yours to edit by hand: Discerny never writes it`);
+    if (readOnly) return send(res, 405, readOnly);
     if (req.method === 'PUT') {
       if (!/^text\/plain\s*(;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, 'send the file as text/plain');
       // The whole body is read even when it is too big, so the page gets the answer rather than a dropped connection.
