@@ -3215,3 +3215,14 @@ test('score --report shows an invalid setting as check does, using the default, 
   assert.deepEqual(r['log-problems'], c.json.errors.filter(m => m.startsWith('INTERACTIONS.md')));
   assert.equal(r.events.counted, 4, 'the line with no real date counts for nothing');
 });
+
+test('the usage text points to the files that really describe each command', () => {
+  const r = spawnSync(process.execPath, [CLI], { encoding: 'utf8' });
+  assert.equal(r.status, 0);
+  const pointer = /See SOURCE-SKILLS\.md for the commands source skills use, and AGENTS\.md for ([a-z, ]+)\./.exec(r.stdout);
+  assert.ok(pointer, r.stdout);
+  const inAgents = pointer[1].split(/, | and /);
+  assert.deepEqual(inAgents, ['connect', 'new', 'serve', 'upgrade', 'interaction', 'score']);
+  const agents = fs.readFileSync(path.join(REPO, 'AGENTS.md'), 'utf8');
+  for (const c of inAgents) assert.ok([`discern ${c}`, `discern.mjs ${c}`, '`' + c].some(s => agents.includes(s)), c);
+});

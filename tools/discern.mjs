@@ -7,6 +7,7 @@
 //   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
 // Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, comment, change, interaction, score, ref, commit, log, check, upgrade, serve.
+// SOURCE-SKILLS.md describes the commands source skills use; AGENTS.md describes connect, new, serve, upgrade, interaction and score.
 // Input for match, add, propose, meetings, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
@@ -1533,7 +1534,7 @@ if (cmd === '--version' || cmd === 'version') {
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|comment|change|interaction|score|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|comment|change|interaction|score|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for the commands source skills use, and AGENTS.md for connect, new, serve, upgrade, interaction and score.\n');
   process.exit(cmd ? 1 : 0);
 }
 // serve starts with no usable folder when it can switch to one, so the page can offer Change folder.

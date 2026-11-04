@@ -23,6 +23,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - Adding someone to People from an item's Person field now counts towards their Interaction score for that item, and Undo takes it back.
 - Choosing the person on a prep or invite item while it waits in the Inbox now counts towards their Interaction score once you accept it, as it does if you choose them afterwards.
 - In a narrow window, the People page's rows now line up, and a long Missing badge no longer squeezes the name.
+- The helper's usage text now says where its commands are described: SOURCE-SKILLS.md for the ones source skills use, and AGENTS.md for connect, new, serve, upgrade, interaction and score.
 
 ## 0.3.0.8 (2026-10-25)
 
