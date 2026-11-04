@@ -47,6 +47,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `DISMISSED.md` | Source keys of proposals the user dismissed, kept only until their source can no longer read the message again | by source skills, through `discern match` |
 | `REFRESH-LOG.md` | Reports of source-skill runs, newest last (created on the first run) | append only; read when asked |
 | `drafts/` | Messages you drafted for the user (`<ID>-<slug>.md`). Never sent | when asked |
+| `SETTINGS.toml` | The user's settings for this folder: the Priority pause, and how the Interaction score counts. See "Settings" | when the user asks about a setting; the helper reads it for you |
 | `DISCERNY.md` | What the folder is, and its Format version as `<!-- format: <version> -->`. No file, or no comment, means 0.1.0.0. `discern check` reports it. Only an Upgrade changes it; never edit it | never; run `discern check` |
 
 ### In the app folder
@@ -201,7 +202,7 @@ The user answers each in the UI, Yes or No, and the UI removes the line:
 - **New person**: Add makes the record (a new `P-####`, `emails`, `company` and `title` as proposed) and sets `who` on the listed items that have none; Add as Priority person also adds the ID to `priority-people`. Either can also add an open Task to set up an introduction meeting, related to those items.
 - **New email**: Yes adds the address to the person's `emails`, with a `history` line.
 - **Priority person**: Yes adds the ID to `priority-people` in `SOURCES.md`. Only additions are proposed, never removals, and never someone who is one already. The user can also promote and demote someone by hand, on the UI's People page or the person's record: a Promote answers any Proposal waiting for that person, and a Demote logs the same line as a No, so it pauses them too. The user's manager always counts, so the UI doesn't let them be demoted. Removing someone is only ever the user's choice: skills still never propose it.
-- **No** logs the change in `IGNORED.md` (see below), and the helper never proposes it again; a No to a Priority person only pauses them, for 28 days from the date it logs.
+- **No** logs the change in `IGNORED.md` (see below), and the helper never proposes it again; a No to a Priority person only pauses them, for the Priority pause (see "Settings") from the date it logs.
 
 Source skills write these lines only through `discern propose`; never edit them by hand.
 
@@ -246,6 +247,34 @@ The ID is the item or record the request is about. A request with only a date ha
    ```
 6. Finish with a short summary: what you did for each request, and which requests are still waiting and why.
 
+## Settings (SETTINGS.toml)
+
+`SETTINGS.toml` holds the settings for how this data folder is read, in the same subset of TOML as `config.toml`: comments, `[table]` headings and `key = value`. It has no decimals, so every value is a whole number. It belongs to the data folder, so every computer that opens the folder uses the same settings. `config.toml` says which folder this app is connected to, and belongs to the app folder.
+
+```toml
+[priority]
+pause-days = 28       # the Priority pause: restarts on each No or Demote
+
+[score]
+half-life-days = 30   # at least 1
+high-percent = 20     # 1 to 99
+min-people = 10       # at least 1
+
+[weights]             # each at least 0
+message = 2
+comment = 2
+linked = 2
+reply = 1
+done = 1
+```
+
+- The values above are the built-in defaults. A missing file or key uses the default, with no notice and no `discern check` error.
+- An invalid value uses the default too. `discern check` reports its line as an error, and the UI shows a notice saying which setting it ignored. Only that line is ignored: the rest still count.
+- `discern check` warns about a key it doesn't know.
+- `pause-days` is the only setting in use for now. `[score]` and `[weights]` are there for the Interaction score, which isn't in the app yet.
+- The UI never writes this file, and reads it when it opens the folder, so a change applies on the next reload. The helper reads it on every command.
+- It's the user's to edit. Change it only when they ask you to, and never to get past a `discern check` error they haven't seen.
+
 ## Sources, runs and refresh
 
 A source is anything outside Discerny that a source skill reads: a mailbox, Teams chat, a calendar, an export. A run is one source skill reading its source once; a refresh is running every source skill in turn (`discern-refresh`). Discerny itself never talks to an outside system, so any connector the agent has can be used. Before running or writing a source skill, read `SOURCE-SKILLS.md`: it holds the loop every source skill follows, and how to use the helper, `tools/discern.mjs`, which does the deterministic parts. In short:
@@ -284,7 +313,7 @@ Keys are written with hyphens. Times in `SOURCES.md` are UTC ISO 8601 and their 
 - mail|Toy fair preview {ignored-date: 2026-10-25; reason: not actionable}
 ```
 
-A No to a proposed change is kept as `rel|<id>|<id>` for a Relationship, matching the pair in either order and whatever its kind, `person|<address>` for a new person or email address, or `priority|<P-id>` for a Priority person, which pauses that person for 28 days from its `ignored-date`. A Demote writes that same line. A person can have several, and the pause runs from the newest.
+A No to a proposed change is kept as `rel|<id>|<id>` for a Relationship, matching the pair in either order and whatever its kind, `person|<address>` for a new person or email address, or `priority|<P-id>` for a Priority person, which pauses that person for the Priority pause from its `ignored-date`. A Demote writes that same line. A person can have several, and the pause runs from the newest.
 
 `DISMISSED.md` lines follow the field names in `SOURCE-SKILLS.md`, with the source key as the line's text and the braces parsed from the final ` {`:
 

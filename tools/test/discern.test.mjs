@@ -2419,3 +2419,214 @@ test('the field changes Migration previews and changes nothing; --write rewords 
   assert.match(again.stdout, /Nothing to change/);
   assert.deepEqual(snapshot(d), after);
 });
+
+// ---------------------------------------------------------------- SETTINGS.toml
+const SETTINGS_DEFAULTS = { priority: { 'pause-days': 28 }, score: { 'half-life-days': 30, 'high-percent': 20, 'min-people': 10 }, weights: { message: 2, comment: 2, linked: 2, reply: 1, done: 1 } };
+const withSettings = (d, text) => { fs.writeFileSync(path.join(d, 'SETTINGS.toml'), text); return d; };
+const settingProblems = (lines) => lines.filter(l => /SETTINGS\.toml/.test(l));
+
+test('check says nothing about SETTINGS.toml when it is missing, empty or short of a key', () => {
+  for (const text of [null, '', '[priority]\n', '[score]\nmin-people = 3\n']) {
+    const d = folder();
+    fs.rmSync(path.join(d, 'SETTINGS.toml'), { force: true });
+    if (text !== null) withSettings(d, text);
+    const c = run(d, ['check']);
+    assert.equal(c.code, 0, c.out);
+    assert.deepEqual(settingProblems(c.json.warnings), [], String(text));
+  }
+});
+
+test('check rejects each value a setting can\'t have, naming the line and the setting', () => {
+  for (const [table, key, value] of [
+    ['priority', 'pause-days', '0'], ['score', 'half-life-days', '0'], ['score', 'min-people', '-2'], ['score', 'high-percent', '0'], ['score', 'high-percent', '100'],
+    ['weights', 'message', '-1'], ['weights', 'done', '-5'], ['priority', 'pause-days', '"ten"'], ['score', 'min-people', 'true'], ['weights', 'reply', '0.5'],
+  ]) {
+    const c = run(withSettings(folder(), `# mine\n[${table}]\n${key} = ${value}\n`), ['check']);
+    assert.equal(c.code, 1, `${key} = ${value}: ${c.out}`);
+    assert.equal(c.json.ok, false);
+    const said = settingProblems(c.json.errors);
+    assert.equal(said.length, 1, c.out);
+    assert.match(said[0], new RegExp(`^SETTINGS\\.toml line 3: ${key} must be `), said[0]);
+  }
+});
+
+test('check passes a weight of 0 and the ends of high-percent\'s range', () => {
+  for (const text of ['[weights]\nmessage = 0\n', '[score]\nhigh-percent = 1\n', '[score]\nhigh-percent = 99\n']) {
+    const c = run(withSettings(folder(), text), ['check']);
+    assert.equal(c.code, 0, `${text}: ${c.out}`);
+  }
+});
+
+test('check warns about a key it doesn\'t know, naming the line, and still passes', () => {
+  const c = run(withSettings(folder(), '[priority]\npause-days = 14\npause-dayz = 3\n[nonsense]\nx = 1\n'), ['check']);
+  assert.equal(c.code, 0, c.out);
+  const said = settingProblems(c.json.warnings);
+  assert.equal(said.length, 2, c.out);
+  assert.match(said[0], /^SETTINGS\.toml line 3: .*pause-dayz/);
+  assert.match(said[1], /^SETTINGS\.toml line 5: .*x is not a setting/);
+});
+
+test('propose uses pause-days from SETTINGS.toml, in what it skips and when it proposes again', () => {
+  const d = noChanges(folder());
+  withSettings(d, '[priority]\npause-days = 7\n');
+  fs.appendFileSync(path.join(d, 'IGNORED.md'), '- priority|P-0005 {ignored-date: 2026-10-08; reason: the user said no}\n');
+  const paused = run(d, ['propose', 'teams-chat'], [prio()]);
+  assert.equal(paused.code, 0, paused.out);
+  assert.match(paused.json.skipped[0].why, /as a Priority person less than 7 days ago/);
+  assert.equal(run(d, ['propose', 'teams-chat'], [prio()], '2026-10-15T10:00:00Z').json.proposed.length, 1, 'seven days on');
+});
+
+test('propose can pause for longer than 28 days, and says one day as one day', () => {
+  const d = noChanges(folder());
+  fs.appendFileSync(path.join(d, 'IGNORED.md'), '- priority|P-0005 {ignored-date: 2026-08-01; reason: the user said no}\n');
+  assert.equal(run(withSettings(d, '[priority]\npause-days = 90\n'), ['propose', 'teams-chat'], [prio()], '2026-10-12T10:00:00Z', CLI).json.proposed.length, 0);
+  fs.appendFileSync(path.join(d, 'IGNORED.md'), '- priority|P-0005 {ignored-date: 2026-10-12; reason: the user said no}\n');
+  assert.match(run(withSettings(d, '[priority]\npause-days = 1\n'), ['propose', 'teams-chat'], [prio()]).json.skipped[0].why, /less than 1 day ago/);
+});
+
+test('propose uses 28 days when pause-days is invalid or SETTINGS.toml is missing', () => {
+  for (const text of ['[priority]\npause-days = 0\n', '[priority]\npause-days = 1.5\n', null]) {
+    const d = noChanges(folder());
+    if (text === null) fs.rmSync(path.join(d, 'SETTINGS.toml'), { force: true }); else withSettings(d, text);
+    fs.appendFileSync(path.join(d, 'IGNORED.md'), '- priority|P-0005 {ignored-date: 2026-09-20; reason: the user said no}\n');
+    assert.match(run(d, ['propose', 'teams-chat'], [prio()]).json.skipped[0].why, /less than 28 days ago/, String(text));
+  }
+});
+
+test('new creates SETTINGS.toml with every setting spelled out at its default, and check passes on it', () => {
+  const a = app(), mine = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-new-')), 'mine');
+  assert.equal(runApp(a, ['new', mine]).code, 0);
+  const text = read(mine, 'SETTINGS.toml');
+  for (const [table, keys] of Object.entries(SETTINGS_DEFAULTS)) {
+    const body = text.split(`[${table}]`)[1].split(/^\[/m)[0];
+    for (const [k, v] of Object.entries(keys)) assert.match(body, new RegExp(`^${k} = ${v}\\b`, 'm'), `[${table}] ${k}`);
+  }
+  const c = runApp(a, ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.deepEqual(settingProblems(c.json.warnings), []);
+});
+
+test('serve lets the page read SETTINGS.toml, 404 when it is missing, and refuses to write it', async (t) => {
+  const d = withSettings(folder(), '[priority]\npause-days = 14\n');
+  const { url, api, session } = await serve(t, d);
+  const got = await api('/api/file/SETTINGS.toml');
+  assert.equal(got.status, 200);
+  assert.equal(await got.text(), '[priority]\npause-days = 14\n');
+  const put = await fetch(new URL('/api/file/SETTINGS.toml', url), { method: 'PUT', headers: { 'Content-Type': 'text/plain', Origin: url.replace(/\/$/, ''), 'X-Discerny-Session': session }, body: '[priority]\npause-days = 1\n' });
+  assert.equal(put.status, 405);
+  assert.equal(read(d, 'SETTINGS.toml'), '[priority]\npause-days = 14\n');
+  fs.rmSync(path.join(d, 'SETTINGS.toml'));
+  assert.equal((await api('/api/file/SETTINGS.toml')).status, 404);
+  const made = await fetch(new URL('/api/file/SETTINGS.toml', url), { method: 'PUT', headers: { 'Content-Type': 'text/plain', Origin: url.replace(/\/$/, ''), 'X-Discerny-Session': session }, body: 'x = 1\n' });
+  assert.equal(made.status, 405);
+  assert.equal(fs.existsSync(path.join(d, 'SETTINGS.toml')), false);
+});
+
+test('nothing in the page writes SETTINGS.toml: it is not among the files the page saves', () => {
+  const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
+  const files = /var FILES = (\{[^}]*\})/.exec(html)[1], watch = /var WATCH = (\[[^\]]*\])/.exec(html)[1];
+  assert.doesNotMatch(files, /SETTINGS\.toml/);
+  assert.doesNotMatch(watch, /SETTINGS\.toml/, 'a change waits for the next reload, so the page does not watch it');
+  assert.doesNotMatch(html, /writeText\(\s*SETTINGS_FILE/);
+});
+
+// The Migration that brought in SETTINGS.toml, found by what it says it does.
+const SETTINGS_SCRIPT = (() => {
+  const dir = path.join(REPO, 'migrations');
+  const n = fs.readdirSync(dir).find(x => fs.existsSync(path.join(dir, x, 'migrate.mjs')) && /^\/\/ The Priority pause and the Interaction score's settings now live in SETTINGS\.toml/.test(fs.readFileSync(path.join(dir, x, 'migrate.mjs'), 'utf8')));
+  return path.join(dir, n || 'next', 'migrate.mjs');
+})();
+const migrateSettings = (d, ...args) => spawnSync(process.execPath, [SETTINGS_SCRIPT, d, ...args], { encoding: 'utf8' });
+// A folder as the Format before this Migration left it: no SETTINGS.toml, and IGNORED.md's header saying 28 days.
+const OLD_IGNORED_HEAD = ['# Ignored',
+  '<!-- One line per source key never to be proposed again, ignored by a source skill or deleted by the user:',
+  '     `- <source key> {ignored-date: YYYY-MM-DD; reason: not actionable}`. Parse the braces from the final " {".',
+  '     A Proposal the user dismisses goes in DISMISSED.md instead.',
+  '     A No to a proposed change is kept here too, as rel|<id>|<id> (either order) or person|<address>;',
+  '     a No to a Priority person is kept as priority|<P-id>, and pauses them for 28 days only. -->', ''];
+function beforeSettings(eol = '\n', head = OLD_IGNORED_HEAD) {
+  const d = folder();
+  fs.rmSync(path.join(d, 'SETTINGS.toml'), { force: true });
+  const body = read(d, 'IGNORED.md').replace(/\r\n/g, '\n').split('\n').filter(l => l.startsWith('- '));
+  fs.writeFileSync(path.join(d, 'IGNORED.md'), [...head, ...body, ''].join(eol));
+  return d;
+}
+
+test('the settings Migration\'s script imports only Node\'s built-in modules', () => {
+  const src = fs.readFileSync(SETTINGS_SCRIPT, 'utf8');
+  const from = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g)].map(m => m[1] || m[2] || m[3]);
+  assert.ok(from.length);
+  assert.deepEqual(from.filter(s => !s.startsWith('node:')), []);
+});
+
+test('the settings Migration previews and changes nothing; --write makes SETTINGS.toml with every default and rewords the IGNORED.md header; again, it changes nothing', () => {
+  const d = beforeSettings();
+  const before = snapshot(d), p = migrateSettings(d);
+  assert.equal(p.status, 0, p.stderr);
+  assert.match(p.stdout, /Would change:\nSETTINGS\.toml\n  .*\nIGNORED\.md\n  /);
+  assert.deepEqual(snapshot(d), before);
+  const w = migrateSettings(d, '--write');
+  assert.equal(w.status, 0, w.stderr);
+  const text = read(d, 'SETTINGS.toml');
+  for (const [table, keys] of Object.entries(SETTINGS_DEFAULTS)) {
+    const body = text.split(`[${table}]`)[1].split(/^\[/m)[0];
+    for (const [k, v] of Object.entries(keys)) assert.match(body, new RegExp(`^${k} = ${v}\\b`, 'm'), `[${table}] ${k}`);
+  }
+  const ign = read(d, 'IGNORED.md');
+  assert.doesNotMatch(ign, /28 days/);
+  assert.match(ign, /Priority pause/);
+  assert.match(ign, /pause-days in SETTINGS\.toml/);
+  const after = snapshot(d), again = migrateSettings(d, '--write');
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /Nothing to change/);
+  assert.deepEqual(snapshot(d), after);
+});
+
+test('the settings Migration leaves an existing SETTINGS.toml alone, however it reads', () => {
+  for (const text of ['[priority]\npause-days = 3\n', 'not even toml\n', '']) {
+    const d = withSettings(beforeSettings(), text);
+    const w = migrateSettings(d, '--write');
+    assert.equal(w.status, 0, w.stderr);
+    assert.equal(read(d, 'SETTINGS.toml'), text);
+    assert.doesNotMatch(w.stdout, /SETTINGS\.toml/);
+    assert.doesNotMatch(read(d, 'IGNORED.md'), /28 days/);
+  }
+});
+
+test('the settings Migration rewords the header however it was wrapped, keeps line endings, and never touches a data line', () => {
+  const wrapped = ['# Ignored',
+    '<!-- A No to a proposed change is kept here too, as rel|<id>|<id> (either order) or person|<address>;',
+    '     a No to a Priority person is kept as priority|<P-id>, and pauses them for',
+    '     28 days only. -->', ''];
+  const oneLine = ['# Ignored', '<!-- a No to a Priority person is kept as priority|<P-id>, and pauses them for 28 days only. -->', ''];
+  for (const [head, eol] of [[OLD_IGNORED_HEAD, '\r\n'], [wrapped, '\r\n'], [wrapped, '\n'], [oneLine, '\n']]) {
+    const d = beforeSettings(eol, head);
+    const data = '- mail|pauses them for 28 days only {ignored-date: 2026-10-01; reason: a subject}';
+    fs.appendFileSync(path.join(d, 'IGNORED.md'), data + eol);
+    assert.equal(migrateSettings(d, '--write').status, 0);
+    const ign = read(d, 'IGNORED.md');
+    assert.ok(ign.includes(data + eol), 'the data line is as it was');
+    assert.equal(ign.split(eol).slice(0, head.length + 2).join('\n').includes('28 days'), false, ign.slice(0, 400));
+    assert.match(ign, /Priority pause/);
+    if (eol === '\r\n') assert.doesNotMatch(ign, /[^\r]\n/); else assert.doesNotMatch(ign, /\r/);
+  }
+});
+
+test('the settings Migration changes nothing in an IGNORED.md whose header says something else, and a folder without one is fine', () => {
+  const d = beforeSettings('\n', ['# Ignored', '<!-- my own words -->', '']);
+  const was = read(d, 'IGNORED.md');
+  assert.equal(migrateSettings(d, '--write').status, 0);
+  assert.equal(read(d, 'IGNORED.md'), was);
+  const e = beforeSettings();
+  fs.rmSync(path.join(e, 'IGNORED.md'));
+  assert.equal(migrateSettings(e, '--write').status, 0);
+  assert.equal(fs.existsSync(path.join(e, 'IGNORED.md')), false);
+});
+
+test('an Upgrade of the Example as committed gives it SETTINGS.toml, with check passing and no warning about it', () => {
+  const c = run(folder(), ['check']);
+  assert.equal(c.code, 0, c.out);
+  assert.deepEqual(settingProblems(c.json.warnings), []);
+  assert.equal(fs.existsSync(path.join(BASE, 'SETTINGS.toml')), true);
+  assert.doesNotMatch(read(BASE, 'IGNORED.md'), /28 days/);
+});

@@ -118,6 +118,7 @@ A Link's view and item keep working in later versions of the app. If the item ha
 | `REFERENCE.md` | Web addresses, people's details and other things you look up often |
 | `ASK-AGENT.md`, `ASK-AGENT-LOG.md` | The agent queue: requests waiting for your agent, and a record of what it did with them |
 | `SOURCES.md`, `IGNORED.md`, `DISMISSED.md` | Bookkeeping for source skills: shared settings such as your time zone, how far each source has been read, what was ignored, so it's never proposed again, and what you dismissed, so the same message isn't proposed twice |
+| `SETTINGS.toml` | Settings you edit by hand: how long someone isn't proposed as a Priority person after you demote them or say No (`pause-days`), and how the Interaction score will count once it's in the app. A setting that's missing or invalid uses its default, `discern check` reports an invalid one, and the UI tells you which it ignored. Discerny never writes this file, and a change applies when you reload the page |
 | `REFRESH-LOG.md` | A record of each source-skill run, created on the first run |
 | `drafts/` | Messages your agent drafted for you. They are never sent |
 
@@ -132,11 +133,11 @@ A Link's view and item keep working in later versions of the app. If the item ha
 | `tools/` | `discern.mjs`, the helper: it connects the app to a data folder (`connect`, `new`), serves the UI in any browser (`serve`), upgrades one written by an older app (`upgrade`) and does the fiddly parts for source skills. Also its tests (`node --test tools/test/discern.test.mjs`) and `evals/`, recorded connector responses for testing the skills. Both run on a copy of the Example, a fictional company called Pennywhistle Puppet Works: [discerny-example](https://github.com/StormSleeper/discerny-example), cloned beside the app folder and read as of its last commit, or the folder named in `DISCERNY_TEST_DATA` |
 | `migrations/` | One folder per change to the way a data folder is written, which `discern upgrade` runs in order. Its `README.md` is for whoever writes one |
 | `new_discerny_repo/` | The blank starter files a new data folder is copied from |
-| `config.toml` | The app folder's settings. `data_folder` says where your data folder is, so your agent and the skills can find it; `discern connect` and `discern new` write it, and leave the rest of the file as you wrote it |
+| `config.toml` | The app folder's settings, per computer. Settings for how your data is read are in `SETTINGS.toml`, in your data folder. `data_folder` says where your data folder is, so your agent and the skills can find it; `discern connect` and `discern new` write it, and leave the rest of the file as you wrote it |
 
 `discerny.html` is the UI: Today, Inbox, Next actions, Waiting for, Upcoming, FYI, All items, Projects, People, Systems, Weekly review, Done and an Agent page, with search (Ctrl K), undo and dark mode.
 
-You choose your Priority people, whose messages source skills always capture. Promote or Demote anyone on the People page or their record, and filter People to see who's on the list. Your manager always counts. Skills can propose adding someone, but never removing them, and they won't propose someone again for 28 days after you demote them or say No.
+You choose your Priority people, whose messages source skills always capture. Promote or Demote anyone on the People page or their record, and filter People to see who's on the list. Your manager always counts. Skills can propose adding someone, but never removing them, and they won't propose someone again for a while after you demote them or say No: 28 days, unless you change `pause-days` in `SETTINGS.toml`.
 
 ### Version
 

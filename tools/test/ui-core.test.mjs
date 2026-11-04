@@ -14,7 +14,7 @@ function loadCore() {
   const names = ['parse', 'serialize', 'pParse', 'pSerialize', 'eParse', 'eSerialize', 'changesOf', 'changeKey', 'setPriority', 'priorityIds', 'priorityStatus', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue',
     'REL_HEAD', 'ASK_HEAD', 'DIS_HEAD', 'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK',
     'serItem', 'canMerge', 'mergeItem', 'mergeRefs', 'fieldChange', 'changeUndo', 'priorityPaused', 'dueOf', 'setDue', 'receivedOf',
-    'aParse', 'aLine', 'logParse', 'rParse', 'relLine', 'ignoredOf', 'ignoredLine', 'addHistory'];
+    'aParse', 'aLine', 'logParse', 'rParse', 'relLine', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -687,4 +687,94 @@ test('the Agent log reads each entry\'s ID, its times, the request and the resul
     ['T-0013', '2026-10-05 17:15', '2026-10-06 08:41', 'Add sub-tasks\nfor the KPI pack', 'Added 2 sub-tasks to T-0013'],
     ['P-0001', '2026-10-01', '2026-10-02 09:00', 'Ask me my name', 'Asked\nand updated the record']]);
   assert.equal(L[0].raw, text.split('\n').slice(3, 7).join('\n'));
+});
+
+// ---------------------------------------------------------------- SETTINGS.toml and the parser it shares with config.toml
+const DEFAULTS = { priority: { 'pause-days': 28 }, score: { 'half-life-days': 30, 'high-percent': 20, 'min-people': 10 }, weights: { message: 2, comment: 2, linked: 2, reply: 1, done: 1 } };
+
+test('the TOML parser in the core reads its subset: comments, tables, strings, whole numbers and booleans', () => {
+  const t = C.parseToml(`# a comment\r\ntop = 'C:\\x' # after\r\n\r\n[one]\r\nn = -1_000\r\nyes = true\r\ns = "a\\tb"\r\n`, 'any.toml');
+  assert.equal(t.top.top.value, 'C:\\x');
+  assert.deepEqual([t.tables.one.n.value, t.tables.one.yes.value, t.tables.one.s.value], [-1000, true, 'a\tb']);
+  assert.equal(t.tables.one.n.line, 4);
+  assert.equal(t.eol, '\r\n');
+  assert.equal(t.firstTable, 3);
+});
+
+test('the TOML parser\'s errors name the file they are about, and the line', () => {
+  for (const file of ['config.toml', 'SETTINGS.toml']) {
+    for (const [bad, line] of [['x = 1.5', 2], ['x = [1, 2]', 2], ['a.b = 1', 2], ['just words', 2], ['[t]\n[t]', 3], ['k = 1\nk = 2', 3], ['k = 1 junk', 2]]) {
+      assert.throws(() => C.parseToml(`# first\n${bad}\n`, file), new RegExp(`^Error: ${file.replace('.', '\\.')} line ${line}\\b`), bad);
+    }
+  }
+});
+
+test('a key named like something every object has is only a key', () => {
+  assert.equal(C.parseToml('constructor = 1\n[toString]\nvalueOf = 2\n', 'any.toml').tables.toString.valueOf.value, 2);
+  assert.deepEqual(C.readSettings('constructor = 1\n').errors, []);
+  assert.equal(C.readSettings('[constructor]\nname = 1\n').warnings.length, 1);
+});
+
+test('readSettings: no file, an empty one, or a missing key gives the built-in defaults with nothing to report', () => {
+  for (const text of ['', '# only a comment\n', '[priority]\n', '[score]\nmin-people = 10\n']) {
+    const s = C.readSettings(text);
+    assert.deepEqual(s.values, DEFAULTS, JSON.stringify(text));
+    assert.deepEqual([s.errors, s.warnings], [[], []], JSON.stringify(text));
+  }
+});
+
+test('readSettings: every setting can be changed, and a weight may be 0', () => {
+  const s = C.readSettings('[priority]\npause-days = 14\n[score]\nhalf-life-days = 7\nhigh-percent = 99\nmin-people = 1\n[weights]\nmessage = 0\ncomment = 3\nlinked = 4\nreply = 5\ndone = 6\n');
+  assert.deepEqual(s.values, { priority: { 'pause-days': 14 }, score: { 'half-life-days': 7, 'high-percent': 99, 'min-people': 1 }, weights: { message: 0, comment: 3, linked: 4, reply: 5, done: 6 } });
+  assert.deepEqual(s.errors, []);
+});
+
+test('readSettings: an invalid value uses that default, names its line and setting, and leaves the other settings alone', () => {
+  const cases = [
+    ['priority', 'pause-days', '0', 'at least 1'], ['priority', 'pause-days', '-3', 'at least 1'],
+    ['score', 'half-life-days', '0', 'at least 1'], ['score', 'min-people', '0', 'at least 1'],
+    ['score', 'high-percent', '0', 'from 1 to 99'], ['score', 'high-percent', '100', 'from 1 to 99'],
+    ['weights', 'done', '-1', 'at least 0'],
+    ['priority', 'pause-days', '"ten"', 'whole number'], ['priority', 'pause-days', 'true', 'whole number'],
+    ['priority', 'pause-days', '1.5', 'whole number'], ['weights', 'reply', '0.5', 'whole number'], ['priority', 'pause-days', '[1]', 'whole number'],
+  ];
+  for (const [table, key, value, says] of cases) {
+    const s = C.readSettings(`# first\n[${table}]\n${key} = ${value} # why\n[weights]\nlinked = 9\n`.replace('[weights]\nlinked', table === 'weights' ? 'linked' : '[weights]\nlinked'));
+    assert.equal(s.values[table][key], DEFAULTS[table][key], `${key} = ${value}`);
+    assert.equal(s.values.weights.linked, 9, `${key} = ${value}`);
+    assert.equal(s.errors.length, 1, `${key} = ${value}: ${JSON.stringify(s.errors)}`);
+    assert.equal(s.errors[0].line, 3);
+    assert.match(s.errors[0].message, new RegExp(`^SETTINGS\\.toml line 3: ${key} must be .*${says}.*, so it uses the default, ${DEFAULTS[table][key]}`), s.errors[0].message);
+    assert.ok(s.errors[0].message.includes(value), s.errors[0].message);
+  }
+});
+
+test('readSettings: a line it can\'t read is an error naming the line, and the lines after it still count', () => {
+  const s = C.readSettings('[priority]\njust words\npause-days = 14\n');
+  assert.equal(s.values.priority['pause-days'], 14);
+  assert.deepEqual(s.errors.map(e => e.line), [2]);
+  assert.match(s.errors[0].message, /^SETTINGS\.toml line 2: /);
+});
+
+test('readSettings: a key it doesn\'t know is a warning naming the line, wherever it is, and nothing is ignored by it', () => {
+  const s = C.readSettings('stray = 1\n[priority]\npause-dayz = 3\n[wieghts]\nmessage = 1\n[weights]\nodd = 1.5\ndone = 4\n');
+  assert.deepEqual(s.errors, []);
+  assert.deepEqual(s.warnings.map(w => w.line), [1, 3, 5, 7]);
+  assert.match(s.warnings[1].message, /^SETTINGS\.toml line 3: .*pause-dayz/);
+  assert.equal(s.values.weights.done, 4);
+  assert.deepEqual(s.values.priority, DEFAULTS.priority);
+});
+
+test('priorityPaused uses the days it is given, and 28 when given none', () => {
+  const ign = '- priority|P-0012 {ignored-date: 2026-10-01; reason: the user said no}\n';
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-14', 14), true);
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-15', 14), false);
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-28', 40), true);
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-28'), true);
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-29'), false);
+});
+
+test('the Priority pause has no constant of its own: its default is the setting\'s', () => {
+  const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
+  assert.doesNotMatch(html, /PRIORITY_PAUSE/);
 });

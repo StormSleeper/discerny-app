@@ -1,0 +1,19 @@
+# Discerny's settings for this data folder. They're yours to edit by hand, and Discerny never writes this file.
+# A change applies the next time you reload the page. A setting that's missing or invalid uses its default,
+# which is what's written here, and discern check reports an invalid one.
+# Every value is a whole number.
+
+[priority]
+pause-days = 28       # days someone isn't proposed as a Priority person after a No or a Demote; restarts on each
+
+[score]
+half-life-days = 30   # an Interaction counts half as much after this many days
+high-percent = 20     # the top share of scored people counted as high
+min-people = 10       # fewer scored people than this is not enough history to compare them
+
+[weights]
+message = 2           # something someone sent you
+comment = 2           # news in a Comment you acknowledged
+linked = 2            # you tied them to an Item yourself
+reply = 1             # your effort, not their demand
+done = 1              # a second event on an Item already counted

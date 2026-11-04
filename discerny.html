@@ -430,8 +430,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.1.11'; // the app's version; tools/discern.mjs reads it from here
-var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
+var VERSION='0.4.0.1'; // the app's version; tools/discern.mjs reads it from here
+var FORMAT='0.4.0.1'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','this week','soon','later','fyi'];
@@ -576,10 +576,81 @@ function changesOf(post){var out=[],cur=null;
   return out;}
 // the IGNORED.md source key a No to a change writes: rel|<id>|<id> (matched in either order), person|<address>, or priority|<P-id>
 function changeKey(c){return c.type==='relationship'?'rel|'+c.a+'|'+c.b:c.type==='priority'?'priority|'+c.id:'person|'+String(c.email||'').toLowerCase();}
-// A No to a Priority person is not for good: it pauses them for PRIORITY_PAUSE days from the date on its IGNORED.md line
-var PRIORITY_PAUSE=28;
-function priorityPaused(ignored,id,today){return ignoredOf(ignored).some(function(g){
-  var d=g.fields['ignored-date']||'';return g.key==='priority|'+id&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&daysBetween(d,today)<PRIORITY_PAUSE;});}
+// A No to a Priority person is not for good: it pauses them for pause-days in SETTINGS.toml, from the date on its IGNORED.md line
+function priorityPaused(ignored,id,today,days){var n=days===undefined?SETTING_RULES.priority['pause-days'][0]:days;return ignoredOf(ignored).some(function(g){
+  var d=g.fields['ignored-date']||'';return g.key==='priority|'+id&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&daysBetween(d,today)<n;});}
+// A subset of TOML, for the App folder's config.toml and the data folder's SETTINGS.toml: comments, blank lines, [table] headings,
+// and key = value with a basic or literal string, an integer or a boolean.
+// -> {top:{key:{value,line}},tables:{name:{key:{value,line}}},firstTable,lines,eol}, line being the index in lines.
+// Anything else throws an Error naming the file and line; given onError, it calls onError({line,key,message}) with the 1-based line
+// and goes on to the next line instead. key is there when the line's value is what's wrong.
+var TOML_UNESCAPE={b:'\b',t:'\t',n:'\n',f:'\f',r:'\r','"':'"','\\':'\\'};
+function parseToml(text,file,onError){
+  text=String(text);
+  var eol=/\r\n/.test(text)?'\r\n':'\n',lines=text.split(/\r?\n/),top=Object.create(null),tables=Object.create(null),cur=top,firstTable=-1;
+  function oneLine(ln,i){
+    var where=file+' line '+(i+1);
+    var rest=function(s,key){if(!/^\s*(#.*)?$/.test(s)){var e=new Error(where+': unexpected "'+s.trim()+'" after the value; put a comment after #');e.key=key;throw e;}};
+    if(/^\s*(#.*)?$/.test(ln))return;
+    var h=/^\s*\[\s*([A-Za-z0-9_-]+)\s*\](.*)$/.exec(ln);
+    if(h){
+      rest(h[2]);
+      var again=tables[h[1]];
+      cur=again||(tables[h[1]]=Object.create(null));
+      if(again)throw new Error(where+': ['+h[1]+'] appears twice; keep one');
+      if(firstTable<0)firstTable=i;
+      return;}
+    var kv=/^\s*([A-Za-z0-9_-]+)\s*=\s*(.*)$/.exec(ln);
+    if(!kv)throw new Error(where+': "'+ln.trim()+'" is not key = value, a [table] heading or a # comment');
+    var key=kv[1],v=kv[2],m,value,e;
+    if((m=/^'([^'\r\n]*)'(.*)$/.exec(v)))value=m[1];
+    else if((m=/^"((?:[^"\\]|\\.)*)"(.*)$/.exec(v))){
+      value=m[1].replace(/\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)/g,function(s,c){
+        if(c.length>1)return String.fromCodePoint(parseInt(c.slice(1),16));
+        if(!(c in TOML_UNESCAPE)){e=new Error(where+': \\'+c+' is not an escape TOML knows; write \\\\ for a backslash, or use single quotes');e.key=key;throw e;}
+        return TOML_UNESCAPE[c];});}
+    else if((m=/^([+-]?(?:0|[1-9](?:_?\d)*))(?![\w.:-])(.*)$/.exec(v)))value=Number(m[1].replace(/_/g,''));
+    else if((m=/^(true|false)(?![\w.-])(.*)$/.exec(v)))value=m[1]==='true';
+    else{e=new Error(where+': the value of '+key+' must be a \'string\', a "string", a whole number, true or false');e.key=key;throw e;}
+    rest(m[m.length-1],key);
+    if(cur[key])throw new Error(where+': '+key+' is set twice; keep one');
+    cur[key]={value:value,line:i};
+  }
+  lines.forEach(function(ln,i){
+    try{oneLine(ln,i);}
+    catch(e){if(!onError)throw e;onError({line:i+1,key:e.key,message:e.message});}});
+  return {top:top,tables:tables,firstTable:firstTable,lines:lines,eol:eol};}
+// SETTINGS.toml in the data folder, which only the User edits, and what each setting may be: [default, lowest, highest]
+var SETTINGS_FILE='SETTINGS.toml';
+var SETTING_RULES={priority:{'pause-days':[28,1]},score:{'half-life-days':[30,1],'high-percent':[20,1,99],'min-people':[10,1]},weights:{message:[2,0],comment:[2,0],linked:[2,0],reply:[1,0],done:[1,0]}};
+function settingRule(table,key){var has=Object.prototype.hasOwnProperty,t=has.call(SETTING_RULES,table)?SETTING_RULES[table]:null;return t&&has.call(t,key)?t[key]:null;}
+// -> {values:{table:{key:number}},errors:[{line,message}],warnings:[{line,message}]}. A missing file (''), key or table is the default and
+// nothing to report. An invalid value is the default and an error, a key it doesn't know is a warning, and no line stops the others being read.
+function readSettings(text){
+  var values={},errors=[],warnings=[],table='',unknownAt={};
+  Object.keys(SETTING_RULES).forEach(function(t){values[t]={};Object.keys(SETTING_RULES[t]).forEach(function(k){values[t][k]=SETTING_RULES[t][k][0];});});
+  function at(line){return SETTINGS_FILE+' line '+line+': ';}
+  function unknown(line,t,k){if(unknownAt[line])return;unknownAt[line]=1;warnings.push({line:line,message:at(line)+(t?'['+t+'] ':'')+k+' is not a setting Discerny knows, so it does nothing'});}
+  function refuse(line,k,r,shown){var want=r[2]!==undefined?'a whole number from '+r[1]+' to '+r[2]:'a whole number of at least '+r[1];
+    errors.push({line:line,message:at(line)+k+' must be '+want+', not '+shown+', so it uses the default, '+r[0]});}
+  // the table each line falls under, for an error raised before the line is stored
+  var src=String(text||''),under=src.split(/\r?\n/).map(function(ln){var h=/^\s*\[\s*([A-Za-z0-9_-]+)\s*\]/.exec(ln);if(h)table=h[1];return table;});
+  var cfg=parseToml(src,SETTINGS_FILE,function(p){
+    if(!p.key){errors.push({line:p.line,message:p.message});return;}
+    var t=under[p.line-1],r=settingRule(t,p.key);
+    if(!r){unknown(p.line,t,p.key);return;}
+    refuse(p.line,p.key,r,src.split(/\r?\n/)[p.line-1].replace(/^[^=]*=\s*/,'').replace(/\s+#.*$/,'').trim());});
+  function look(t,kv){Object.keys(kv).forEach(function(k){
+    var r=settingRule(t,k),e=kv[k],line=e.line+1;
+    if(!r){unknown(line,t,k);return;}
+    var v=e.value;
+    if(typeof v!=='number'||v<r[1]||(r[2]!==undefined&&v>r[2])){refuse(line,k,r,typeof v==='string'?'"'+v+'"':String(v));return;}
+    values[t][k]=v;});}
+  look('',cfg.top);
+  Object.keys(cfg.tables).forEach(function(t){look(t,cfg.tables[t]);});
+  errors.sort(function(a,b){return a.line-b.line;});
+  warnings.sort(function(a,b){return a.line-b.line;});
+  return {values:values,errors:errors,warnings:warnings};}
 // IGNORED.md: "- <source key> {ignored-date: YYYY-MM-DD; reason: not actionable}", the braces parsed from the final " {"
 // -> [{key, fields, line, at}], at the line's index
 function ignoredOf(text){var out=[];String(text||'').replace(/\r/g,'').split('\n').forEach(function(ln,at){
@@ -912,7 +983,7 @@ function mergeRefs(kind,lines,d,s){
     if(n===null||(k&&seen[k])){swaps.push([ln,null,at]);return;}
     if(k)seen[k]=1;out.push(n);swaps.push([ln,n,at]);});
   return {lines:out,swaps:swaps};}
-// The data folder files the page reads and writes; `discern serve` serves these and no others.
+// The data folder files the page reads and writes; `discern serve` serves these, and SETTINGS_FILE for reading, and no others.
 var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', asklog: 'ASK-AGENT-LOG.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md', settings: 'SOURCES.md' };
 var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
 // The header the page writes when it creates a missing RELATIONSHIPS.md, DISMISSED.md or ASK-AGENT.md: the starter file's, word for word.
@@ -1002,6 +1073,9 @@ async function idbSet(k, v) {
 
 /* ===================== file input/output ===================== */
 var lastMod = {};
+// SETTINGS.toml as it was when the page opened the folder: a change to the file applies on the next reload. The page never writes it.
+var SET = readSettings('');
+function pauseDays() { return SET.values.priority['pause-days']; }
 // Set when the page is served by node tools/discern.mjs serve: {folder, name, version, session, problem, canSwitch}
 // from /api/info. The four functions below then go through the server instead of the folder handle.
 var srv = null;
@@ -3504,6 +3578,11 @@ function vBanner() {
   if (S.confirm === 'discard') return '<div class="banner err" role="alert" data-k="banner"><span class="grow">Discard ' + plural(n, 'unsaved change') + '? The screen will go back to what is in your files.</span>' + bt('Discard', 'discard-yes', { cls: 'danger sm' }) + bt('Keep them', 'discard-no', { cls: 'sm' }) + '</div>';
   return '<div class="banner err" role="alert" data-k="banner"><span class="grow">Couldn’t save “' + esc(Q.blocked.job.label || 'change') + '”: ' + esc(Q.blocked.msg) + '. ' + plural(n, 'change') + ' waiting, still shown on screen.</span>' + bt('Try again', 'retry', { cls: 'primary sm' }) + bt('Discard…', 'discard', { cls: 'sm' }) + '</div>';
 }
+// A setting SETTINGS.toml gets wrong costs the User its default and this notice, and nothing else.
+function vSettingsNotice() {
+  if (!SET.errors.length) return '';
+  return '<div class="banner" role="status" data-k="settings-notice"><span class="grow"><strong>Discerny ignored ' + (SET.errors.length === 1 ? 'a line' : SET.errors.length + ' lines') + ' in ' + esc(SETTINGS_FILE) + ':</strong> ' + SET.errors.map(function (e) { return esc(e.message.replace(SETTINGS_FILE + ' ', '')); }).join('; ') + '. Correct the file, then reload.</span>' + bt('Reload', 'reload', { cls: 'sm' }) + '</div>';
+}
 function viewFor() {
   switch (S.view) {
     case 'today': return viewToday();
@@ -3531,7 +3610,7 @@ function vMain(c) {
     (v.crumb ? '<button type="button" class="crumb" data-act="go" data-v="' + v.crumb[1] + '">' + ic('back', 's') + esc(v.crumb[0]) + '</button>' : '') +
     '<div class="titles"><h1 id="page-title" tabindex="-1">' + esc(v.title) + '</h1>' + (v.sub ? '<div class="sub">' + esc(v.sub) + '</div>' : '') + '</div></div>' +
     '<div class="head-tools">' + (v.tools || '') + '<button type="button" class="btn sm quiet" data-act="copy-link">' + ic('link', 's') + 'Copy link</button></div></div></header>';
-  return '<main class="main" id="main" data-k="main" aria-labelledby="page-title">' + head + '<div class="wrap" data-k="wrap-' + S.view + '">' + vBanner() + (v.qa ? vQuick() : '') + (v.cards ? vCards() : '') + v.body + '</div></main>';
+  return '<main class="main" id="main" data-k="main" aria-labelledby="page-title">' + head + '<div class="wrap" data-k="wrap-' + S.view + '">' + vBanner() + vSettingsNotice() + (v.qa ? vQuick() : '') + (v.cards ? vCards() : '') + v.body + '</div></main>';
 }
 function vToasts() {
   return '<div class="toasts" data-k="toasts" role="region" aria-label="Messages" aria-live="polite">' + S.toasts.map(function (t) {
@@ -4079,7 +4158,7 @@ function relYes(line) {
 function changeNo(line) {
   var c = changeByLine(line);
   if (!c) return;
-  var what = c.type === 'relationship' ? c.a + ' and ' + c.b + ' won’t be proposed as related again.' : c.type === 'priority' ? c.name + ' won’t be proposed as a Priority person for ' + PRIORITY_PAUSE + ' days.' : c.email + ' won’t be proposed again.';
+  var what = c.type === 'relationship' ? c.a + ' and ' + c.b + ' won’t be proposed as related again.' : c.type === 'priority' ? c.name + ' won’t be proposed as a Priority person for ' + plural(pauseDays(), 'day') + '.' : c.email + ' won’t be proposed again.';
   commit(OPS.changeNo(c), { toast: 'No: ' + what, undo: OPS.changeUnno(c, noLine(c)) });
 }
 function emailYes(line) {
@@ -4101,7 +4180,7 @@ function demotePerson(id) {
   var p = personById(id), st = {};
   if (!p || prioOf(p) !== 'on') return;
   var line = noLine({ type: 'priority', id: rid(id) });
-  commit(OPS.demote(id, line, st), { toast: p.name + ' is no longer a Priority person, and won’t be proposed as one for ' + PRIORITY_PAUSE + ' days.', undo: OPS.undemote(id, line, st) });
+  commit(OPS.demote(id, line, st), { toast: p.name + ' is no longer a Priority person, and won’t be proposed as one for ' + plural(pauseDays(), 'day') + '.', undo: OPS.undemote(id, line, st) });
 }
 // Undo on a Skill's latest change to a field puts back the value from before its first unacknowledged change, and acknowledges them all
 function undoChange(id, field) {
@@ -4778,6 +4857,7 @@ async function openFolder() {
   try {
     var g = await formatGate();
     if (g) { S.gate = g; render(); return; }
+    SET = readSettings(await readText(SETTINGS_FILE));
     var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now();
   }
   catch (e) {

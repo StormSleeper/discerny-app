@@ -51,48 +51,24 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--suggests') OPT.suggests = argv[++i] || '';
   else ARGS.push(a);
 }
-// ---------------------------------------------------------------- config.toml
-// The App folder's settings. The helper reads and writes a subset of TOML itself, with no dependencies:
-// comments, blank lines, [table] headings, and key = value with a basic or literal string, an integer or a boolean.
-const UNESCAPE = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\' };
-// The settings as { top: { key: { value, line } }, tables: { name: { key: { value, line } } }, firstTable, lines, eol }.
-// Throws an Error naming the line for anything outside the subset.
-function parseConfig(text) {
-  const eol = eolOf(text), lines = text.split(/\r?\n/);
-  const top = {}, tables = {};
-  let cur = top, firstTable = -1;
-  lines.forEach((ln, i) => {
-    const where = `config.toml line ${i + 1}`;
-    const rest = (s) => { if (!/^\s*(#.*)?$/.test(s)) throw new Error(`${where}: unexpected "${s.trim()}" after the value; put a comment after #`); };
-    if (/^\s*(#.*)?$/.test(ln)) return;
-    const h = /^\s*\[\s*([A-Za-z0-9_-]+)\s*\](.*)$/.exec(ln);
-    if (h) {
-      rest(h[2]);
-      if (tables[h[1]]) throw new Error(`${where}: [${h[1]}] appears twice; keep one`);
-      cur = tables[h[1]] = {};
-      if (firstTable < 0) firstTable = i;
-      return;
-    }
-    const kv = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.*)$/.exec(ln);
-    if (!kv) throw new Error(`${where}: "${ln.trim()}" is not key = value, a [table] heading or a # comment`);
-    const [, key, v] = kv;
-    let m, value;
-    if ((m = /^'([^'\r\n]*)'(.*)$/.exec(v))) value = m[1];
-    else if ((m = /^"((?:[^"\\]|\\.)*)"(.*)$/.exec(v))) {
-      value = m[1].replace(/\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)/g, (s, c) => {
-        if (c.length > 1) return String.fromCodePoint(parseInt(c.slice(1), 16));
-        if (!(c in UNESCAPE)) throw new Error(`${where}: \\${c} is not an escape TOML knows; write \\\\ for a backslash, or use single quotes`);
-        return UNESCAPE[c];
-      });
-    } else if ((m = /^([+-]?(?:0|[1-9](?:_?\d)*))(?![\w.:-])(.*)$/.exec(v))) value = Number(m[1].replace(/_/g, ''));
-    else if ((m = /^(true|false)(?![\w.-])(.*)$/.exec(v))) value = m[1] === 'true';
-    else throw new Error(`${where}: the value of ${key} must be a 'string', a "string", a whole number, true or false`);
-    rest(m[m.length - 1]);
-    if (cur[key]) throw new Error(`${where}: ${key} is set twice; keep one`);
-    cur[key] = { value, line: i };
-  });
-  return { top, tables, firstTable, lines, eol };
+// ---------------------------------------------------------------- the shared parser from the UI
+function loadCore() {
+  const p = path.join(REPO, 'discerny.html');
+  const html = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
+  const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
+  if (a < 0 || b < a) fail('no //<core> ... //</core> block found in discerny.html next to tools/');
+  const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'eParse', 'TYPES', 'URG_ORDER', 'STATUS', 'PRIORITIES', 'FILES', 'WATCH',
+    'CHANGES_HEAD', 'changesOf', 'changeKey', 'relLine', 'REL_RE', 'NOTE_RE', 'LOG_RE', 'serSub', 'placeSub', 'ITEM_RANK', 'PERSON_RANK', 'ENT_RANK', 'setDesc', 'addComment', 'USER_ID',
+    'pSerItem', 'commentsOf', 'CHANGE_FIELDS', 'fieldChange', 'priorityPaused', 'dueOf', 'setDue', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings', 'SETTINGS_FILE'];
+  const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
+  try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
+  catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
 }
+const C = loadCore();
+
+// ---------------------------------------------------------------- config.toml
+// The App folder's settings, in the subset of TOML the core reads. The helper writes it itself, with no dependencies.
+function parseConfig(text) { return C.parseToml(text, 'config.toml'); }
 function configText() { try { return fs.readFileSync(CONFIG, 'utf8'); } catch (e) { return ''; } }
 // A TOML string: literal ('...') so Windows paths need no escaping, or basic ("...") when it holds a '.
 function tomlString(s) { return s.includes("'") ? `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : `'${s}'`; }
@@ -147,24 +123,11 @@ function refuseOldKeys(cmd, rows, what) {
   if (found.length) fail('nothing was written. Every key is named as the Format names its fields, with hyphens. ' + found.join(' | '));
 }
 
-// ---------------------------------------------------------------- the shared parser from the UI
-function loadCore() {
-  const p = path.join(REPO, 'discerny.html');
-  const html = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
-  const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-  if (a < 0 || b < a) fail('no //<core> ... //</core> block found in discerny.html next to tools/');
-  const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'eParse', 'TYPES', 'URG_ORDER', 'STATUS', 'PRIORITIES', 'FILES', 'WATCH',
-    'CHANGES_HEAD', 'changesOf', 'changeKey', 'relLine', 'REL_RE', 'NOTE_RE', 'LOG_RE', 'serSub', 'placeSub', 'ITEM_RANK', 'PERSON_RANK', 'ENT_RANK', 'setDesc', 'addComment', 'USER_ID',
-    'pSerItem', 'commentsOf', 'CHANGE_FIELDS', 'fieldChange', 'priorityPaused', 'PRIORITY_PAUSE', 'dueOf', 'setDue', 'ignoredOf', 'ignoredLine', 'addHistory'];
-  const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
-  try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
-  catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
-}
-const C = loadCore();
-
 // ---------------------------------------------------------------- files
 function fp(f) { return path.join(DIR, f); }
 function read(f) { return fs.existsSync(fp(f)) ? fs.readFileSync(fp(f), 'utf8') : ''; }
+// SETTINGS.toml, as the core reads it: { values, errors, warnings }. A missing file is every default.
+function settings() { return C.readSettings(read(C.SETTINGS_FILE)); }
 function eolOf(t) { return /\r\n/.test(t) ? '\r\n' : '\n'; }
 function write(f, text) {
   if (!String(text).trim()) fail(`refusing to leave ${f} empty`);
@@ -191,7 +154,7 @@ const IGNORED_HEAD = ['# Ignored',
   '     `- <source key> {ignored-date: YYYY-MM-DD; reason: not actionable}`. Parse the braces from the final " {".',
   '     A Proposal the user dismisses goes in DISMISSED.md instead.',
   '     A No to a proposed change is kept here too, as rel|<id>|<id> (either order) or person|<address>;',
-  '     a No to a Priority person is kept as priority|<P-id>, and pauses them for 28 days only. -->', ''].join('\n');
+  '     a No to a Priority person is kept as priority|<P-id>, and starts a Priority pause: pause-days in SETTINGS.toml says how long. -->', ''].join('\n');
 // New Items go in INBOX.md above "## Changes", and change Proposals at its end, under that heading.
 function addToInbox(lines, changes) {
   let t = read('INBOX.md');
@@ -903,7 +866,7 @@ CMD.add = function () {
 
 // Changes to records go to INBOX.md under "## Changes", for the user to answer Yes or No: a Relationship, a new person,
 // a new email address for a person, or a Priority person. One the folder already has, already proposed, or said No to is
-// skipped, not an error; a No to a Priority person only for PRIORITY_PAUSE days.
+// skipped, not an error; a No to a Priority person only for pause-days in SETTINGS.toml.
 const EMAIL = /^[^\s@,;{}]+@[^\s@,;{}]+\.[^\s@,;{}]+$/;
 CMD.propose = function () {
   const source = ARGS[1], S = sources();
@@ -975,7 +938,8 @@ CMD.propose = function () {
       if (p3.meta.id === C.USER_ID) { e(`${C.USER_ID} is the user: only someone else can be a Priority person`); return; }
       key = `priority|${p3.meta.id}`;
       if (prio.has(p3.meta.id)) return skip(`${p3.name} (${p3.meta.id}) is already a Priority person`);
-      if (C.priorityPaused(ignoredText, p3.meta.id, today)) return skip(`the user said no to ${p3.name} (${p3.meta.id}) as a Priority person less than ${C.PRIORITY_PAUSE} days ago`);
+      const pause = settings().values.priority['pause-days'];
+      if (C.priorityPaused(ignoredText, p3.meta.id, today, pause)) return skip(`the user said no to ${p3.name} (${p3.meta.id}) as a Priority person less than ${pause} day${pause === 1 ? '' : 's'} ago`);
       line = `- Make ${meta(p3.name)} (${p3.meta.id}) a Priority person {${tail.join('; ')}}`;
     } else { e('change must be relationship, person, email or priority'); return; }
     if (pending.has(key)) return skip(`already proposed in the Inbox`);
@@ -1260,6 +1224,9 @@ CMD.check = function () {
   if (!S.blocks.defaults) warnings.push('SOURCES.md has no "## defaults" block');
   else if (!val(S.blocks.defaults, 'timezone')) warnings.push('SOURCES.md defaults has no timezone');
   Object.values(S.blocks).forEach(b => Object.keys(b.keys).filter(k => k.includes('_')).forEach(k => errors.push(`SOURCES.md ## ${b.name}: ${k} is the name an older Format gave it, and is not read: run discern upgrade, or write it with hyphens`)));
+  const set = settings();
+  set.errors.forEach(e => errors.push(e.message));
+  set.warnings.forEach(w => warnings.push(w.message));
   const { format, problem } = formatStanding(DIR);
   if (problem) errors.push(problem);
   out({ ok: !errors.length, errors, warnings, format, items: all.size, next_id: counter ? +counter : null });
@@ -1397,12 +1364,15 @@ CMD.serve = function () {
       return send(res, 200, names.sort().map(n => ({ name: n, text: fs.readFileSync(path.join(dr, n), 'utf8'), mod: mtime(path.join(dr, n)) })));
     }
     const file = /^\/api\/file\/([^/]+)$/.exec(req.url);
-    if (!file || !NAMES.has(file[1])) return send(res, 404, 'not found');
+    const readOnly = file && file[1] === C.SETTINGS_FILE;
+    if (!file || !(NAMES.has(file[1]) || readOnly)) return send(res, 404, 'not found');
     const f = fp(file[1]);
     if (req.method === 'GET') {
       if (!fs.existsSync(f)) return send(res, 404, 'not found');
       return send(res, 200, fs.readFileSync(f, 'utf8'), { 'X-Mtime': String(mtime(f)) });
     }
+    // Only the User edits SETTINGS.toml, by hand.
+    if (readOnly) return send(res, 405, `${C.SETTINGS_FILE} is yours to edit by hand: Discerny never writes it`);
     if (req.method === 'PUT') {
       if (!/^text\/plain\s*(;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, 'send the file as text/plain');
       // The whole body is read even when it is too big, so the page gets the answer rather than a dropped connection.
