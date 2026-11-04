@@ -25,6 +25,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - In a narrow window, the People page's rows now line up, and a long Missing badge no longer squeezes the name.
 - The helper's usage text now says where its commands are described: SOURCE-SKILLS.md for the ones source skills use, and AGENTS.md for connect, new, serve, upgrade, interaction and score.
 - Going Back, or editing the address, no longer sometimes does nothing when the page happens to be redrawing at that moment.
+- Sorted by Interaction score in a very narrow window, names no longer run over the score, which now sits on its own line.
 
 ## 0.3.0.8 (2026-10-25)
 
