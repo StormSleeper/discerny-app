@@ -6,7 +6,8 @@
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
 //   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
-// Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, comment, change, ref, commit, log, check, upgrade, serve.
+// Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, comment, change, interaction, score, ref, commit, log, check, upgrade, serve.
+// SOURCE-SKILLS.md describes the commands source skills use; AGENTS.md describes connect, new, serve, upgrade, interaction and score.
 // Input for match, add, propose, meetings, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
@@ -32,7 +33,7 @@ const DAY = 864e5, HOUR = 36e5;
 
 // ---------------------------------------------------------------- arguments and output
 const argv = process.argv.slice(2);
-const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '', port: '4790', author: '', ack: false, field: null, to: null, suggests: '' };
+const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '', port: '4790', author: '', ack: false, field: null, to: null, suggests: '', sender: null, replyTo: null, kind: '', person: null, report: false, excludeInferred: false };
 const ARGS = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -49,50 +50,34 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--field') OPT.field = argv[++i] || '';
   else if (a === '--to') OPT.to = argv[++i] ?? '';
   else if (a === '--suggests') OPT.suggests = argv[++i] || '';
+  else if (a === '--sender') OPT.sender = argv[++i] ?? '';
+  else if (a === '--reply-to') OPT.replyTo = argv[++i] ?? '';
+  else if (a === '--kind') OPT.kind = argv[++i] || '';
+  else if (a === '--person') OPT.person = argv[++i] ?? '';
+  else if (a === '--report') OPT.report = true;
+  else if (a === '--exclude-inferred') OPT.excludeInferred = true;
   else ARGS.push(a);
 }
-// ---------------------------------------------------------------- config.toml
-// The App folder's settings. The helper reads and writes a subset of TOML itself, with no dependencies:
-// comments, blank lines, [table] headings, and key = value with a basic or literal string, an integer or a boolean.
-const UNESCAPE = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\' };
-// The settings as { top: { key: { value, line } }, tables: { name: { key: { value, line } } }, firstTable, lines, eol }.
-// Throws an Error naming the line for anything outside the subset.
-function parseConfig(text) {
-  const eol = eolOf(text), lines = text.split(/\r?\n/);
-  const top = {}, tables = {};
-  let cur = top, firstTable = -1;
-  lines.forEach((ln, i) => {
-    const where = `config.toml line ${i + 1}`;
-    const rest = (s) => { if (!/^\s*(#.*)?$/.test(s)) throw new Error(`${where}: unexpected "${s.trim()}" after the value; put a comment after #`); };
-    if (/^\s*(#.*)?$/.test(ln)) return;
-    const h = /^\s*\[\s*([A-Za-z0-9_-]+)\s*\](.*)$/.exec(ln);
-    if (h) {
-      rest(h[2]);
-      if (tables[h[1]]) throw new Error(`${where}: [${h[1]}] appears twice; keep one`);
-      cur = tables[h[1]] = {};
-      if (firstTable < 0) firstTable = i;
-      return;
-    }
-    const kv = /^\s*([A-Za-z0-9_-]+)\s*=\s*(.*)$/.exec(ln);
-    if (!kv) throw new Error(`${where}: "${ln.trim()}" is not key = value, a [table] heading or a # comment`);
-    const [, key, v] = kv;
-    let m, value;
-    if ((m = /^'([^'\r\n]*)'(.*)$/.exec(v))) value = m[1];
-    else if ((m = /^"((?:[^"\\]|\\.)*)"(.*)$/.exec(v))) {
-      value = m[1].replace(/\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)/g, (s, c) => {
-        if (c.length > 1) return String.fromCodePoint(parseInt(c.slice(1), 16));
-        if (!(c in UNESCAPE)) throw new Error(`${where}: \\${c} is not an escape TOML knows; write \\\\ for a backslash, or use single quotes`);
-        return UNESCAPE[c];
-      });
-    } else if ((m = /^([+-]?(?:0|[1-9](?:_?\d)*))(?![\w.:-])(.*)$/.exec(v))) value = Number(m[1].replace(/_/g, ''));
-    else if ((m = /^(true|false)(?![\w.-])(.*)$/.exec(v))) value = m[1] === 'true';
-    else throw new Error(`${where}: the value of ${key} must be a 'string', a "string", a whole number, true or false`);
-    rest(m[m.length - 1]);
-    if (cur[key]) throw new Error(`${where}: ${key} is set twice; keep one`);
-    cur[key] = { value, line: i };
-  });
-  return { top, tables, firstTable, lines, eol };
+// ---------------------------------------------------------------- the shared parser from the UI
+function loadCore() {
+  const p = path.join(REPO, 'discerny.html');
+  const html = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
+  const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
+  if (a < 0 || b < a) fail('no //<core> ... //</core> block found in discerny.html next to tools/');
+  const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'eParse', 'TYPES', 'URG_ORDER', 'STATUS', 'PRIORITIES', 'FILES', 'WATCH',
+    'CHANGES_HEAD', 'changesOf', 'changeKey', 'relLine', 'REL_RE', 'NOTE_RE', 'LOG_RE', 'serSub', 'placeSub', 'ITEM_RANK', 'PERSON_RANK', 'ENT_RANK', 'setDesc', 'addComment', 'USER_ID',
+    'pSerItem', 'commentsOf', 'CHANGE_FIELDS', 'fieldChange', 'priorityPaused', 'dueOf', 'setDue', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings', 'SETTINGS_FILE',
+    'INTERACTIONS_FILE', 'INTER_HEAD', 'PROPOSAL_INTERACTIONS', 'addInteractions', 'checkInteractions', 'creditById', 'creditByName', 'linkedEvents',
+    'INTER_KINDS', 'interactionsOf', 'interactionScores', 'scoreExplanation', 'scoreable', 'priorityIds', 'priorityStatus', 'tenths', 'realDay'];
+  const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
+  try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
+  catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
 }
+const C = loadCore();
+
+// ---------------------------------------------------------------- config.toml
+// The App folder's settings, in the subset of TOML the core reads. The helper writes it itself, with no dependencies.
+function parseConfig(text) { return C.parseToml(text, 'config.toml'); }
 function configText() { try { return fs.readFileSync(CONFIG, 'utf8'); } catch (e) { return ''; } }
 // A TOML string: literal ('...') so Windows paths need no escaping, or basic ("...") when it holds a '.
 function tomlString(s) { return s.includes("'") ? `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"` : `'${s}'`; }
@@ -147,24 +132,11 @@ function refuseOldKeys(cmd, rows, what) {
   if (found.length) fail('nothing was written. Every key is named as the Format names its fields, with hyphens. ' + found.join(' | '));
 }
 
-// ---------------------------------------------------------------- the shared parser from the UI
-function loadCore() {
-  const p = path.join(REPO, 'discerny.html');
-  const html = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
-  const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-  if (a < 0 || b < a) fail('no //<core> ... //</core> block found in discerny.html next to tools/');
-  const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'eParse', 'TYPES', 'URG_ORDER', 'STATUS', 'PRIORITIES', 'FILES', 'WATCH',
-    'CHANGES_HEAD', 'changesOf', 'changeKey', 'relLine', 'REL_RE', 'NOTE_RE', 'LOG_RE', 'serSub', 'placeSub', 'ITEM_RANK', 'PERSON_RANK', 'ENT_RANK', 'setDesc', 'addComment', 'USER_ID',
-    'pSerItem', 'commentsOf', 'CHANGE_FIELDS', 'fieldChange', 'priorityPaused', 'PRIORITY_PAUSE', 'dueOf', 'setDue', 'ignoredOf', 'ignoredLine', 'addHistory'];
-  const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
-  try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
-  catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
-}
-const C = loadCore();
-
 // ---------------------------------------------------------------- files
 function fp(f) { return path.join(DIR, f); }
 function read(f) { return fs.existsSync(fp(f)) ? fs.readFileSync(fp(f), 'utf8') : ''; }
+// SETTINGS.toml, as the core reads it: { values, errors, warnings }. A missing file is every default.
+function settings() { return C.readSettings(read(C.SETTINGS_FILE)); }
 function eolOf(t) { return /\r\n/.test(t) ? '\r\n' : '\n'; }
 function write(f, text) {
   if (!String(text).trim()) fail(`refusing to leave ${f} empty`);
@@ -191,7 +163,7 @@ const IGNORED_HEAD = ['# Ignored',
   '     `- <source key> {ignored-date: YYYY-MM-DD; reason: not actionable}`. Parse the braces from the final " {".',
   '     A Proposal the user dismisses goes in DISMISSED.md instead.',
   '     A No to a proposed change is kept here too, as rel|<id>|<id> (either order) or person|<address>;',
-  '     a No to a Priority person is kept as priority|<P-id>, and pauses them for 28 days only. -->', ''].join('\n');
+  '     a No to a Priority person is kept as priority|<P-id>, and starts a Priority pause: pause-days in SETTINGS.toml says how long. -->', ''].join('\n');
 // New Items go in INBOX.md above "## Changes", and change Proposals at its end, under that heading.
 function addToInbox(lines, changes) {
   let t = read('INBOX.md');
@@ -451,12 +423,15 @@ function dMon(date) { const m = /^\d{4}-(\d{2})-(\d{2})/.exec(date || ''); retur
 const firstName = (name, or) => name ? name.split(/\s+/)[0] : or;
 // The command that adds a Comment to the Item a candidate matched: one to acknowledge carries news from someone else.
 const oneOf = ids => ids.length === 1 ? ids[0] : `<whichever of ${ids.join(', ')} it is about>`;
+// News names who it came from, and a record of the user's own reply names who it went to, when they're in PEOPLE.md. A calendar's Comments count for no one.
 function commentCmd(ids, c, text, ack, done) {
-  return `discern comment ${oneOf(ids)} --author ${c.author}${ack ? ' --to-acknowledge' : ''}${done ? ' --suggests done' : ''} "${text}"`;
+  const whom = !c.who || c.author === AUTHOR.cal ? '' : ack ? ` --sender "${c.who}"` : ` --reply-to "${c.who}"`;
+  return `discern comment ${oneOf(ids)} --author ${c.author}${ack ? ' --to-acknowledge' : ''}${done ? ' --suggests done' : ''}${whom} "${text}"`;
 }
 // The command that applies news changing one of an Item's fields, with a Comment for the user to acknowledge.
 function changeCmd(ids, c, field, to) {
-  return `discern change ${oneOf(ids)} --author ${c.author} --field ${field || '<due-date, due-time, status or who>'} --to "${to || '<the new value>'}" "<why, in a sentence>"`;
+  const whom = !c.who || c.author === AUTHOR.cal ? '' : ` --sender "${c.who}"`;
+  return `discern change ${oneOf(ids)} --author ${c.author}${whom} --field ${field || '<due-date, due-time, status or who>'} --to "${to || '<the new value>'}" "<why, in a sentence>"`;
 }
 const NEWS = '<the news, in a sentence>';
 
@@ -768,13 +743,119 @@ function checkAuthor(author) {
   if (!/^[a-z]+$/.test(author)) fail(`--author must be one lowercase word: the Skill's (email, calendar, teams), or agent for a request from the agent queue`);
   if (author === 'user') fail('only the user writes Comments as user, in the UI: give your Skill\'s word, or agent');
 }
+// --sender says who the news is from, and --reply-to who a reply went to: each a name, address, handle or P-ID, and someone not in
+// PEOPLE.md is left off rather than refused. A record of the user replying or chasing writes a reply event at once, for --reply-to, else the Item's who.
+const USERS_REPLY = /^(You replied|Chased)\b/;
 CMD.comment = function () {
   const [, id, ...rest] = ARGS, text = rest.join(' ').replace(/\r\n?/g, '\n').trim(), author = OPT.author.trim();
-  if (!id || !/^(T|P|PRJ|SYS)-\d+$/.test(id) || !text || !author) fail('usage: discern comment <id> --author <word> [--to-acknowledge [--suggests done]] <text>');
+  if (!id || !/^(T|P|PRJ|SYS)-\d+$/.test(id) || !text || !author) fail('usage: discern comment <id> --author <word> [--to-acknowledge [--suggests done]] [--sender <person>] [--reply-to <person>] <text>');
   checkAuthor(author);
   if (OPT.suggests && (OPT.suggests !== 'done' || !OPT.ack || !/^T-/.test(id))) fail('--suggests takes only done, with --to-acknowledge, on an Item: news that it is finished, which the user marks done');
-  const at = local(nowDate(), timezone()), fields = OPT.suggests ? { suggests: 'done' } : null;
-  out({ id, author, 'added-datetime': at, acknowledge: OPT.ack, ...(fields || {}), ...editSubs(id, (x, rank) => { C.addComment(x, { at, author, ack: OPT.ack, text, fields }, rank); }) });
+  const at = local(nowDate(), timezone()), P = people(), sender = senderId(OPT.sender, P), fields = { ...(OPT.suggests ? { suggests: 'done' } : {}), ...(sender ? { sender } : {}) };
+  let who = '';
+  const res = editSubs(id, (x, rank) => { who = x.meta.who || ''; C.addComment(x, { at, author, ack: OPT.ack, text, fields }, rank); });
+  // Still in the Inbox, it counts for nothing yet, and a Record's Comment never does.
+  const reply = /^T-/.test(id) && res.file === 'TASKS.md' && (OPT.replyTo !== null || USERS_REPLY.test(text)) ? (OPT.replyTo !== null && senderId(OPT.replyTo, P)) || C.creditByName(P, who) : '';
+  if (reply) writeEvents([{ date: at.slice(0, 10), person: reply, kind: 'reply', item: id }]);
+  out({ id, author, 'added-datetime': at, acknowledge: OPT.ack, ...fields, ...(reply ? { reply } : {}), ...res });
+};
+
+// someone a command names: a name, address, handle or P-ID -> their P-ID, or '' for no one, or for the user, who never gets an event
+function senderId(q, P) {
+  const s = String(q || '').trim();
+  if (!s) return '';
+  const p = P.find(x => x.meta.id === s) || findPerson(s, P);
+  return p ? C.creditById(P, p.meta.id) : '';
+}
+// Writes events to INTERACTIONS.md, keeping its line endings -> the lines written, one-per-Item kinds not repeating
+function writeEvents(events) {
+  const f = C.INTERACTIONS_FILE, was = read(f), eol = eolOf(was || '\n'), r = C.addInteractions(was.replace(/\r\n/g, '\n'), events);
+  if (r.added.length) write(f, r.text.replace(/\n/g, eol));
+  return r.added;
+}
+
+// An Agent working at the user's request records what the UI would have: linked when it sets who, done when it completes an Item.
+CMD.interaction = function () {
+  const id = ARGS[1], kind = OPT.kind, usage = 'usage: discern interaction <T-id> --kind linked|done --person <person>';
+  if (!id || !/^T-\d+$/.test(id) || !OPT.person) fail(usage);
+  if (kind !== 'linked' && kind !== 'done') fail(`--kind must be linked or done, not "${kind}": the others are written when the user accepts or acknowledges. ${usage}`);
+  if (itemAt(id, ['INBOX.md'])) fail(`${id} is still waiting in the Inbox, where nothing counts yet`);
+  if (!itemAt(id, ['TASKS.md', 'DONE.md'])) fail(`${id} is not in TASKS.md or DONE.md`);
+  const P = people(), q = String(OPT.person).trim(), p = P.find(x => x.meta.id === q) || findPerson(q, P);
+  if (!p) fail(`--person "${q}" is not in PEOPLE.md: a name, address, handle or P-ID of someone there`);
+  const person = C.creditById(P, p.meta.id);
+  if (!person) { out({ id, kind, recorded: false, why: `${p.name} is the user, who never gets an event` }); return; }
+  const date = local(nowDate(), timezone()).slice(0, 10), added = writeEvents([{ date, person, kind, item: id }]);
+  out(added.length ? { id, kind, person, date, recorded: true } : { id, kind, person, recorded: false, why: `${person} already has ${kind} on ${id}: there's one per Person per Item` });
+};
+
+// What's driving the scores, and how that compares with the user's own decisions, for them to tune SETTINGS.toml by or to ask an Agent about.
+// It reads the files and writes nothing, and nothing leaves the machine.
+const REPORT_PEOPLE = 10, REPORT_NEEDS_EACH = 5;
+const byKind = (f) => Object.fromEntries(C.INTER_KINDS.map(k => [k, f(k)]));
+// A decision's logged score and breakdown as numbers, or null without all of them: a No an Upgrade inferred has none.
+function loggedBreakdown(e) {
+  const num = (v) => /^\d+(\.\d+)?$/.test(v ?? '') ? Number(v) : NaN, score = num(e.fields.score), breakdown = byKind(k => num(e.fields[k]));
+  return Number.isNaN(score) || Object.values(breakdown).some(Number.isNaN) ? null : { score, breakdown };
+}
+// The yes and promote decisions against the no and demote ones, using what each logged at that moment. Too few says so and gives no averages.
+function compareDecisions(log) {
+  const yes = [], no = [], leftOut = { start: 0, 'no-breakdown': 0 }, halves = new Set();
+  log.filter(e => e.kind === 'decision').forEach(e => {
+    if (e.decision === 'start') { leftOut.start++; return; }
+    const side = ['yes', 'promote'].includes(e.decision) ? yes : ['no', 'demote'].includes(e.decision) ? no : null;
+    if (!side) return;
+    const logged = loggedBreakdown(e);
+    if (!logged) { leftOut['no-breakdown']++; return; }
+    side.push(logged);
+    if (/^\d+$/.test(e.fields['half-life-days'] ?? '')) halves.add(Number(e.fields['half-life-days']));
+  });
+  const skipped = leftOut.start + leftOut['no-breakdown'] ? ` Left out: ${leftOut.start} start, ${leftOut['no-breakdown']} with no breakdown.` : '';
+  const c = { enough: yes.length >= REPORT_NEEDS_EACH && no.length >= REPORT_NEEDS_EACH, 'needs-each': REPORT_NEEDS_EACH, 'left-out': leftOut };
+  if (!c.enough) {
+    c['yes-or-promote'] = { decisions: yes.length };
+    c['no-or-demote'] = { decisions: no.length };
+    c.says = `Too few decisions to compare: ${yes.length} yes or promote and ${no.length} no or demote, and it takes ${REPORT_NEEDS_EACH} of each.${skipped}`;
+    return c;
+  }
+  const mean = (side, pick) => side.reduce((n, d) => n + pick(d), 0) / side.length;
+  const summary = (side) => ({ decisions: side.length, score: C.tenths(mean(side, d => d.score)), breakdown: byKind(k => C.tenths(mean(side, d => d.breakdown[k]))) });
+  const hi = summary(yes), lo = summary(no), gap = (x, y) => C.tenths(x - y);
+  c['yes-or-promote'] = hi;
+  c['no-or-demote'] = lo;
+  c.difference = { score: gap(mean(yes, d => d.score), mean(no, d => d.score)), breakdown: byKind(k => gap(mean(yes, d => d.breakdown[k]), mean(no, d => d.breakdown[k]))) };
+  c['half-life-days'] = [...halves].sort((x, y) => x - y);
+  const most = C.INTER_KINDS.reduce((m, k) => Math.abs(c.difference.breakdown[k]) > Math.abs(c.difference.breakdown[m]) ? k : m);
+  c.says = `An average score of ${hi.score} at a yes or promote against ${lo.score} at a no or demote.`
+    + (c.difference.breakdown[most] ? ` ${most} differs most: ${hi.breakdown[most]} against ${lo.breakdown[most]}.` : '') + skipped;
+  return c;
+}
+CMD.score = function () {
+  if (!OPT.report) fail('usage: discern score --report [--exclude-inferred]');
+  const set = settings(), { values } = set, P = people(), ids = C.priorityIds(read('SOURCES.md')), today = local(nowDate(), timezone()).slice(0, 10), text = read(C.INTERACTIONS_FILE);
+  const log = C.interactionsOf(text), inferred = (e) => e.fields.inferred === 'yes', used = OPT.excludeInferred ? log.filter(e => !inferred(e)) : log;
+  const scores = C.interactionScores(used, values, today), scoreable = new Set(P.filter(C.scoreable).map(p => p.meta.id));
+  // what the scores are made of: an event, for someone who gets a score, with a date it can count from
+  const event = (e) => C.INTER_KINDS.includes(e.kind) && C.realDay(e.date) && scoreable.has(e.person);
+  const scored = P.filter(p => C.scoreable(p) && scores[p.meta.id]).map(p => ({ p, score: scores[p.meta.id] }));
+  const sum = (k) => scored.reduce((n, s) => n + s.score.shares[k], 0), all = C.INTER_KINDS.reduce((n, k) => n + sum(k), 0);
+  scored.sort((a, b) => Math.abs(b.score.total - a.score.total) > 1e-9 ? b.score.total - a.score.total : a.p.name.localeCompare(b.p.name));
+  const comparison = compareDecisions(log);
+  if (OPT.excludeInferred) comparison.note = "Each decision's breakdown is as logged at that moment, so it still holds any inferred events that counted then.";
+  out({
+    date: today,
+    'exclude-inferred': OPT.excludeInferred,
+    settings: { values, errors: set.errors.map(e => e.message), warnings: set.warnings.map(w => w.message) },
+    'log-problems': C.checkInteractions(text).map(e => e.message),
+    events: { counted: used.filter(event).length, inferred: log.filter(e => event(e) && inferred(e)).length },
+    'scored-people': scored.length,
+    kinds: byKind(k => ({ total: C.tenths(sum(k)), percent: all ? C.tenths(sum(k) / all * 100) : 0 })),
+    people: scored.slice(0, REPORT_PEOPLE).map(({ p, score }) => ({
+      id: p.meta.id, name: p.name, priority: C.priorityStatus(P, ids, p), score: C.tenths(score.total),
+      breakdown: byKind(k => C.tenths(score.shares[k])), explanation: C.scoreExplanation(used, p.meta.id, values, today),
+    })),
+    comparison,
+  });
 };
 
 // A Skill applies news that changes one of an Item's or a Person's fields itself, with a Comment to acknowledge naming the field,
@@ -788,7 +869,7 @@ const OLD_FIELDS = { due: 'due-date or due-time', st: 'status', co: 'company', d
   prj: 'projects', tg: 'tags', dep: 'dependencies', ty: 'type', done: 'done-date' };
 CMD.change = function () {
   const [, id, ...rest] = ARGS, why = rest.join(' ').replace(/\r\n?/g, '\n').trim(), author = OPT.author.trim();
-  if (!id || !why || !author || !OPT.field || OPT.to === null) fail('usage: discern change <id> --author <word> --field <field> --to <value> <why>');
+  if (!id || !why || !author || !OPT.field || OPT.to === null) fail('usage: discern change <id> --author <word> --field <field> --to <value> [--sender <person>] <why>');
   checkAuthor(author);
   const kind = id.split('-')[0], allowed = C.CHANGE_FIELDS[kind], field = OPT.field;
   if (!/^(T|P)-\d+$/.test(id)) fail(`${id} is not an Item or a Person: a Skill changes fields only on those. Give other news as a Comment: discern comment ${id} --author ${author} --to-acknowledge "<the news>"`);
@@ -798,7 +879,9 @@ CMD.change = function () {
   if (kind === 'T' && USERS_OWN.includes(field)) fail(`${field} is the user's own judgement: a Skill never changes it on an existing Item. On an Item it changes ${allowed.join(', ')}`);
   if (!allowed.includes(field)) fail(`on ${kind === 'T' ? 'an Item' : 'a Person'} discern change takes --field ${allowed.join(', ')}, not ${field}`);
   let to = cleanMeta(OPT.to);
-  const names = new Set(people().map(p => p.name));
+  const P = people(), names = new Set(P.map(p => p.name));
+  // A change of who counts for the new who, whoever brought the news.
+  const sender = field === 'who' ? '' : senderId(OPT.sender, P);
   if (field === 'due-date' && !/^\d{4}-\d{2}-\d{2}$/.test(to)) fail('--to for due-date must be YYYY-MM-DD; a time goes in due-time');
   if (field === 'due-time' && to && !/^\d{2}:\d{2}$/.test(to)) fail('--to for due-time must be HH:MM, or "" to clear it');
   if (field === 'status') {
@@ -816,11 +899,13 @@ CMD.change = function () {
     if (field === 'due-time' && to && !x.meta['due-date']) { noDay = true; return false; }
     if (C.commentsOf(x).some(c => { const g = C.fieldChange(c); return g && g.field === field && g.to === to; })) { skip = `${id} already has a Comment changing ${field} to ${to ? `"${to}"` : 'empty'}: a change applies once`; return false; }
     if (to) x.meta[field] = to; else delete x.meta[field];
+    // The who a Skill writes is never the User's change, so it's what a who the User set is compared with on Accept.
+    if (field === 'who' && x.meta['who-proposed'] !== undefined) x.meta['who-proposed'] = to;
     if (kind === 'P') { C.addHistory(x, today, field, from, to); x.meta['checked-date'] = today; }
-    C.addComment(x, { at, author, ack: true, text: why, fields: { changed: field, from, to } }, rank);
+    C.addComment(x, { at, author, ack: true, text: why, fields: { changed: field, from, to, ...(sender ? { sender } : {}) } }, rank);
   }, true);
   if (noDay) fail(`${id} has no due-date, so it can't take a due-time: change its due-date first`);
-  out(skip ? { id, field, unchanged: true, why: skip, file: res.file } : { id, field, from, to, author, 'added-datetime': at, file: res.file });
+  out(skip ? { id, field, unchanged: true, why: skip, file: res.file } : { id, field, from, to, author, 'added-datetime': at, ...(sender ? { sender } : {}), file: res.file });
 };
 function itemAt(id, files) { return files.some(f => itemLine(read(f).split(/\r?\n/), id) >= 0); }
 
@@ -850,6 +935,7 @@ CMD.add = function () {
     if (!C.TYPES.includes(d.type)) e(`type must be one of ${C.TYPES.join(', ')}`);
     if (!C.URG_ORDER.includes(d.urgency)) e(`urgency must be one of ${C.URG_ORDER.join(', ')}`);
     if (!C.PRIORITIES.includes(d.priority)) e(`priority must be one of ${C.PRIORITIES.join(', ')}`);
+    if (!C.PROPOSAL_INTERACTIONS.includes(d.interaction)) e(`interaction must be one of ${C.PROPOSAL_INTERACTIONS.join(', ')}: what it counts as for the who it has when the user accepts it`);
     if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) e('due-date must be YYYY-MM-DD; a time goes in due-time');
     if (dueTime && !/^\d{2}:\d{2}$/.test(dueTime)) e('due-time must be HH:MM');
     if (dueTime && !dueDate) e('due-time goes only beside a due-date');
@@ -884,7 +970,7 @@ CMD.add = function () {
     const meta = { type: d.type, who: d.who ? cleanMeta(d.who) : undefined, projects: prj.length ? prj.join(', ') : undefined,
       tags: listOf(d.tags).map(t => cleanMeta(t)).filter(Boolean).join(', ') || undefined,
       urgency: d.urgency, priority: d.priority, 'due-date': dueDate || undefined, 'due-time': dueTime || undefined, status: d.status || undefined,
-      dependencies: listOf(d.dependencies).join(', ') || undefined, 'received-datetime': received, source };
+      dependencies: listOf(d.dependencies).join(', ') || undefined, 'received-datetime': received, interaction: d.interaction, source };
     Object.keys(meta).forEach(k => { if (meta[k] === undefined || meta[k] === '') delete meta[k]; else meta[k] = cleanMeta(meta[k]); });
     const x = { subs: [{ k: 'origin', v: String(d.origin || '').replace(/[\r\n]+/g, ' ') }] };
     if (typeof d.description === 'string') C.setDesc(x, d.description, C.ITEM_RANK);
@@ -903,7 +989,7 @@ CMD.add = function () {
 
 // Changes to records go to INBOX.md under "## Changes", for the user to answer Yes or No: a Relationship, a new person,
 // a new email address for a person, or a Priority person. One the folder already has, already proposed, or said No to is
-// skipped, not an error; a No to a Priority person only for PRIORITY_PAUSE days.
+// skipped, not an error; a No to a Priority person only for pause-days in SETTINGS.toml.
 const EMAIL = /^[^\s@,;{}]+@[^\s@,;{}]+\.[^\s@,;{}]+$/;
 CMD.propose = function () {
   const source = ARGS[1], S = sources();
@@ -975,7 +1061,8 @@ CMD.propose = function () {
       if (p3.meta.id === C.USER_ID) { e(`${C.USER_ID} is the user: only someone else can be a Priority person`); return; }
       key = `priority|${p3.meta.id}`;
       if (prio.has(p3.meta.id)) return skip(`${p3.name} (${p3.meta.id}) is already a Priority person`);
-      if (C.priorityPaused(ignoredText, p3.meta.id, today)) return skip(`the user said no to ${p3.name} (${p3.meta.id}) as a Priority person less than ${C.PRIORITY_PAUSE} days ago`);
+      const pause = settings().values.priority['pause-days'];
+      if (C.priorityPaused(ignoredText, p3.meta.id, today, pause)) return skip(`the user said no to ${p3.name} (${p3.meta.id}) as a Priority person less than ${pause} day${pause === 1 ? '' : 's'} ago`);
       line = `- Make ${meta(p3.name)} (${p3.meta.id}) a Priority person {${tail.join('; ')}}`;
     } else { e('change must be relationship, person, email or priority'); return; }
     if (pending.has(key)) return skip(`already proposed in the Inbox`);
@@ -1186,7 +1273,7 @@ const OLD_SHAPES = {
 };
 CMD.check = function () {
   const errors = [], warnings = [];
-  const files = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'SOURCES.md'];
+  const files = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'SOURCES.md', C.INTERACTIONS_FILE];
   files.forEach(f => { if (fs.existsSync(fp(f)) && !read(f).trim()) errors.push(`${f} is empty`); });
   const sets = { 'TASKS.md': C.parse(read('TASKS.md')), 'INBOX.md': C.parse(read('INBOX.md')), 'DONE.md': C.parse(read('DONE.md')) };
   const seen = {}, all = new Set();
@@ -1201,6 +1288,7 @@ CMD.check = function () {
     oldKeys(where, it.meta, OLD_ITEM_KEYS);
     oneOf(where, it.meta, 'type', C.TYPES); oneOf(where, it.meta, 'urgency', C.URG_ORDER); oneOf(where, it.meta, 'priority', C.PRIORITIES);
     oneOf(where, it.meta, 'status', ['waiting', 'in progress']);
+    oneOf(where, it.meta, 'interaction', C.PROPOSAL_INTERACTIONS);
     if (it.meta['due-time'] && !it.meta['due-date']) warnings.push(`${where}: due-time goes only beside a due-date`);
     subLines(f, it.id, it);
     C.getSub(it, 'source-key').forEach(s => { if (!/^[a-z][a-z0-9-]*\|./i.test(s.v.trim())) errors.push(`${where}: source key "${s.v}" has no scheme`); });
@@ -1221,6 +1309,7 @@ CMD.check = function () {
       if (g && Object.hasOwn(old, g.field)) errors.push(`${said} has changed: ${g.field}, the name an older Format gave ${old[g.field]}, which is not read: run discern upgrade`);
       else if (g && !(C.CHANGE_FIELDS[kind] || []).includes(g.field)) warnings.push(`${said} has changed: ${g.field}, a field no Skill changes${C.CHANGE_FIELDS[kind] ? ` there: only ${C.CHANGE_FIELDS[kind].join(', ')}` : ''}`);
       if (c.f.suggests !== undefined && (c.f.suggests !== 'done' || kind !== 'T')) warnings.push(`${said} has suggests: ${c.f.suggests}: only an Item's Comment suggests, and only done`);
+      if (c.f.sender !== undefined && !/^P-\d+$/.test(c.f.sender)) warnings.push(`${said} has sender: ${c.f.sender}: it is a Person's ID, P-####`);
       if (!c.v.trim()) warnings.push(`${said} has no text`);
     });
   }
@@ -1260,6 +1349,10 @@ CMD.check = function () {
   if (!S.blocks.defaults) warnings.push('SOURCES.md has no "## defaults" block');
   else if (!val(S.blocks.defaults, 'timezone')) warnings.push('SOURCES.md defaults has no timezone');
   Object.values(S.blocks).forEach(b => Object.keys(b.keys).filter(k => k.includes('_')).forEach(k => errors.push(`SOURCES.md ## ${b.name}: ${k} is the name an older Format gave it, and is not read: run discern upgrade, or write it with hyphens`)));
+  C.checkInteractions(read(C.INTERACTIONS_FILE)).forEach(e => errors.push(e.message));
+  const set = settings();
+  set.errors.forEach(e => errors.push(e.message));
+  set.warnings.forEach(w => warnings.push(w.message));
   const { format, problem } = formatStanding(DIR);
   if (problem) errors.push(problem);
   out({ ok: !errors.length, errors, warnings, format, items: all.size, next_id: counter ? +counter : null });
@@ -1334,6 +1427,11 @@ CMD.serve = function () {
   };
   // Only the files the page reads or writes, matched as written in the URL, so no name is ever resolved against the disk.
   const NAMES = new Set([...Object.values(C.FILES), ...C.WATCH]);
+  // The files the page may read but the server never writes, each with the answer to a request to write it.
+  const READ_ONLY = new Map([
+    [C.SETTINGS_FILE, `${C.SETTINGS_FILE} is yours to edit by hand: Discerny never writes it`],
+    ['DISCERNY.md', 'DISCERNY.md records the folder\'s Format: only an Upgrade changes it'],
+  ]);
   const mtime = (f) => Math.floor(fs.statSync(f).mtimeMs);
   const MAX_PUT = 10 * 1024 * 1024;
   const bodyText = async (req) => { const chunks = []; let size = 0; for await (const c of req) { size += c.length; if (size <= 64e3) chunks.push(c); } return Buffer.concat(chunks).toString('utf8'); };
@@ -1397,12 +1495,14 @@ CMD.serve = function () {
       return send(res, 200, names.sort().map(n => ({ name: n, text: fs.readFileSync(path.join(dr, n), 'utf8'), mod: mtime(path.join(dr, n)) })));
     }
     const file = /^\/api\/file\/([^/]+)$/.exec(req.url);
-    if (!file || !NAMES.has(file[1])) return send(res, 404, 'not found');
+    const readOnly = file && READ_ONLY.get(file[1]);
+    if (!file || !(NAMES.has(file[1]) || readOnly)) return send(res, 404, 'not found');
     const f = fp(file[1]);
     if (req.method === 'GET') {
       if (!fs.existsSync(f)) return send(res, 404, 'not found');
       return send(res, 200, fs.readFileSync(f, 'utf8'), { 'X-Mtime': String(mtime(f)) });
     }
+    if (readOnly) return send(res, 405, readOnly);
     if (req.method === 'PUT') {
       if (!/^text\/plain\s*(;|$)/i.test(req.headers['content-type'] || '')) return send(res, 415, 'send the file as text/plain');
       // The whole body is read even when it is too big, so the page gets the answer rather than a dropped connection.
@@ -1434,7 +1534,7 @@ if (cmd === '--version' || cmd === 'version') {
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|comment|change|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|comment|change|interaction|score|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for the commands source skills use, and AGENTS.md for connect, new, serve, upgrade, interaction and score.\n');
   process.exit(cmd ? 1 : 0);
 }
 // serve starts with no usable folder when it can switch to one, so the page can offer Change folder.

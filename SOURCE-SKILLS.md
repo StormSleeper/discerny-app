@@ -68,16 +68,27 @@ A Meeting item records when and where a Meeting happens and who attends; the wor
 
 ## Writing
 
-`discern add <source>` takes drafts, and writes `source: <source>` on each proposal, so a Dismiss knows whose watermark to wait for. `<source>` is the name of its block in `SOURCES.md`. Each draft has `title`, `type`, `who`, `projects`, `tags`, `urgency`, `priority`, `due-date`, `due-time`, `status`, `origin`, `source-keys` (the `refs` from `match`), `description` (what the item is and the context it needs, as one string, its lines joined with `\n`), `links` (`{label, url}`), and `received-datetime` (ISO with Z) or `derived: true`. Values are as the Format writes them (`type: "task"`, `urgency: "this week"`, `priority: "high"`). List fields take an array or a comma-separated string. Optional: `meeting-subject` when the event's subject differs from the message's, `reopen: true` to capture again something in `DONE.md`. It checks every draft before writing any, and refuses the short keys of older Formats.
+`discern add <source>` takes drafts, and writes `source: <source>` on each proposal, so a Dismiss knows whose watermark to wait for. `<source>` is the name of its block in `SOURCES.md`. Each draft has `title`, `type`, `who`, `projects`, `tags`, `urgency`, `priority`, `due-date`, `due-time`, `status`, `origin`, `source-keys` (the `refs` from `match`), `interaction` (required: see below), `description` (what the item is and the context it needs, as one string, its lines joined with `\n`), `links` (`{label, url}`), and `received-datetime` (ISO with Z) or `derived: true`. Values are as the Format writes them (`type: "task"`, `urgency: "this week"`, `priority: "high"`). List fields take an array or a comma-separated string. Optional: `meeting-subject` when the event's subject differs from the message's, `reopen: true` to capture again something in `DONE.md`. It checks every draft before writing any, and refuses the short keys of older Formats.
+
+`interaction` says what a proposal counts as in the Interaction log (`AGENTS.md`, "Interactions") once the user accepts it. A draft with no valid one is refused.
+
+| The draft | `interaction` |
+|---|---|
+| Inbound mail, a Teams message or mention, a reply to an invite | `message` |
+| A sent-mail ask, a Teams ask, the user's own commitment | `reply` |
+| A transcript's action item | `linked` |
+| A prep item, or a "Respond to invite" item | `none` |
+
+A horizon source's Meetings aren't drafts and count for nothing: `discern meetings` writes no events.
 
 `discern propose <source>` takes change Proposals, which it writes under `## Changes` in `INBOX.md` (the format is in `AGENTS.md`). Each has `change`, `why` (one line: what the source showed), and `received-datetime` (ISO with Z) or, from a horizon source, `event-date` (`YYYY-MM-DD`), plus:
 
 - `"change": "relationship"`: `ids`, its two ends, and optionally `kind`, which the helper checks against the kinds the ends allow. Both must exist, so propose a new item's Relationships after `discern add` has given it its ID.
 - `"change": "person"`: `name`, `email`, and optionally `company`, `title` and `items` (the open or inbox items they are on, whose `who` an Add fills in).
 - `"change": "email"`: `email` and `person`, the P-id of someone in `PEOPLE.md`.
-- `"change": "priority"`: `person`, the P-id of someone to add to `priority-people`. Propose only additions, never removals.
+- `"change": "priority"`: `person`, the P-id of someone to add to `priority-people`. Propose only additions, never removals: the user promotes and demotes by hand in the UI.
 
-It checks every Proposal before writing any. One already made (related already, the address already someone's, or the person a Priority person already), already waiting in the inbox, or one the user said No to is skipped, not written, and listed in `skipped` with why. A No is for good, except to a Priority person, which pauses that person for 28 days. `--dry-run` shows the lines without writing them.
+It checks every Proposal before writing any. One already made (related already, the address already someone's, or the person a Priority person already), already waiting in the inbox, or one the user said No to is skipped, not written, and listed in `skipped` with why. A No is for good, except to a Priority person, which pauses that person for the Priority pause (`pause-days` in `SETTINGS.toml`, in the data folder), as the user demoting them by hand does. `--dry-run` shows the lines without writing them.
 
 ## Field changes
 
@@ -86,6 +97,7 @@ News on an item or person already tracked that changes one of its fields is appl
 - On an item: `due-date` (a new date), `due-time` (a new time, or `""` to clear it), `status` (`waiting`, `in progress`, or `""` to clear it) and `who` (a name in `PEOPLE.md`, for an item handed to someone else). A Meeting's new place is a plain Comment to acknowledge, and a new attendee a Proposal.
 - On a person: `title`, `company`, `department` and `manager`.
 - Never `urgency`, `priority`, `projects`, `tags`, `dependencies` or `type`, which are the user's own judgement and organising, and never closing an item: news that one is finished is `discern comment <id> --author <word> --to-acknowledge --suggests done "<the news>"`, which the user can Mark done. The helper refuses all of these.
+- `--sender <person>` says who brought the news, on a change to any field but `who`: `match`'s actions give it. A change of `who` counts for the new `who`, once the user acknowledges it.
 
 The newest evidence wins, even over a value the user set by hand. A change the item or person already has a Comment for, to the same value, is skipped, so a message read again in the overlap, or after the user's Undo, changes nothing.
 
@@ -94,6 +106,7 @@ The newest evidence wins, even over a value the user set by hand. A change the i
 | `INBOX.md` | New items; under `## Changes`, Relationships, new people, new email addresses and Priority people | `discern add`, `propose` |
 | `IGNORED.md` | Noise; a whole out-of-scope chat with `"container": true` | `discern ignore` |
 | `TASKS.md` | The counter; hidden `source-key:` lines; Comments; field changes; a horizon source's Meetings | `discern add`, `ref`, `comment`, `change`, `meetings` |
+| `INTERACTIONS.md` | A `reply` event, for a Comment recording the user's reply or chaser | `discern comment` |
 | `PEOPLE.md` | Field changes, with their `history` lines; Comments | `discern change`, `comment` |
 | `SOURCES.md` | Its own block's state | `discern commit` |
 | `DISMISSED.md` | Nothing; the UI writes it and a commit removes lines its sources have moved past | `discern commit` |
@@ -103,13 +116,18 @@ A setting other than `priority-people`, such as an exclude rule, is a proposal i
 
 ## Comments
 
-News on an item already tracked that changes none of its fields goes on the item as a Comment, without asking (the format is in `AGENTS.md`, "Descriptions and Comments"). `discern comment <id> --author <word> "<text>"` writes it, stamped with the time now in `timezone`. The word is your skill's, which its `SKILL.md` names. Add `--to-acknowledge` for news from someone else, which then waits in the UI's Inbox until the user acknowledges it. A record of something the user did needs none. `match`'s actions give the command for the commonest cases:
+News on an item already tracked that changes none of its fields goes on the item as a Comment, without asking (the format is in `AGENTS.md`, "Descriptions and Comments"). `discern comment <id> --author <word> "<text>"` writes it, stamped with the time now in `timezone`. The word is your skill's, which its `SKILL.md` names. Add `--to-acknowledge` for news from someone else, which then waits in the UI's Inbox until the user acknowledges it. A record of something the user did needs none. Who it concerns goes in the Interaction log, so name them whenever you know them; `match`'s actions give these when the message's sender or recipient is in `PEOPLE.md`:
+
+- `--sender <person>` on news from someone else: who it came from, written on the Comment as a P-ID. Someone not in `PEOPLE.md` is left off, and the news then counts for the item's `who` when acknowledged. A `calendar` Comment takes none, and counts for no one.
+- `--reply-to <person>` on a record of the user replying or chasing: who it went to. The Comment writes a `reply` event at once, for that person, else the item's `who`. A Comment starting "You replied" or "Chased" writes one even without it.
+
+`match`'s actions give the command for the commonest cases:
 
 | What the skill finds | The Comment | To acknowledge |
 |---|---|---|
-| A reply on a Waiting-for item | "Meera replied on 22 Oct: …" | yes |
-| The user replied | "You replied on 21 Oct." | no |
-| The user chased | "Chased Meera on 20 Oct." | no |
+| A reply on a Waiting-for item, with `--sender` | "Meera replied on 22 Oct: …" | yes |
+| The user replied, with `--reply-to` | "You replied on 21 Oct." | no |
+| The user chased, with `--reply-to` | "Chased Meera on 20 Oct." | no |
 | A Meeting cancelled (`discern meetings`) | "Found cancelled." | yes |
 | A Meeting moved (`discern meetings`) | "Moved in the calendar.", `changed: due-date` or `due-time` | yes |
 | News that changes a field, such as a new Due date (`discern change`) | "Jo says the 8D report slips a week.", `changed: due-date` | yes |

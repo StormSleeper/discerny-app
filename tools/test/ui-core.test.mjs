@@ -7,14 +7,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const EXAMPLE = path.resolve(process.env.DISCERNY_TEST_DATA || path.join(REPO, '..', 'discerny-example'));
 
 function loadCore() {
   const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
   const a = html.indexOf('//<core>'), b = html.indexOf('//</core>');
-  const names = ['parse', 'serialize', 'pParse', 'pSerialize', 'eParse', 'eSerialize', 'changesOf', 'changeKey', 'setPriority', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue',
+  const names = ['parse', 'serialize', 'pParse', 'pSerialize', 'eParse', 'eSerialize', 'changesOf', 'changeKey', 'setPriority', 'priorityIds', 'priorityStatus', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue',
     'REL_HEAD', 'ASK_HEAD', 'DIS_HEAD', 'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK',
     'serItem', 'canMerge', 'mergeItem', 'mergeRefs', 'fieldChange', 'changeUndo', 'priorityPaused', 'dueOf', 'setDue', 'receivedOf',
-    'aParse', 'aLine', 'logParse', 'rParse', 'relLine', 'ignoredOf', 'ignoredLine', 'addHistory'];
+    'aParse', 'aLine', 'logParse', 'rParse', 'relLine', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings',
+    'INTER_HEAD', 'interactionsOf', 'checkInteractions', 'addInteractions', 'dropInteractions', 'removeInteractions', 'restoreInteractions', 'interactionScore', 'interactionScores', 'scoreExplanation', 'scoreable', 'reviewLists', 'decisionLine', 'creditByName', 'creditById', 'acceptEvents', 'whoByUser', 'ackEvents', 'doneEvents', 'linkedEvents'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -406,6 +408,30 @@ test('changesOf reads each kind of change Proposal, its fields, either spacing, 
   assert.equal(C.changesOf(['## Changes', '- Rename T-0001 {source: x}'])[0].type, '');
 });
 
+test('priorityIds reads priority-people from "## defaults", on one line or as a list, and from nowhere else', () => {
+  assert.deepEqual(C.priorityIds('## defaults\n- timezone: Europe/London\n- priority-people: P-0007, P-0010\n- page-cap: 10\n\n## outlook-mail\n- priority-people: P-0099\n'), ['P-0007', 'P-0010']);
+  assert.deepEqual(C.priorityIds('## defaults\r\n- priority-people:\r\n  - P-0007\r\n  - P-0012\r\n- page-cap: 10\r\n'), ['P-0007', 'P-0012']);
+  assert.deepEqual(C.priorityIds('## defaults\n- priority-people:\n- page-cap: 10\n'), []);
+  assert.deepEqual(C.priorityIds('## outlook-mail\n- priority-people: P-0099\n'), []);
+  assert.deepEqual(C.priorityIds(''), []);
+  const src = '## defaults\n- priority-people: P-0007\n';
+  assert.deepEqual(C.priorityIds(C.setPriority(src, 'P-0012', true)), ['P-0007', 'P-0012']);
+  assert.deepEqual(C.priorityIds(C.setPriority(src, 'P-0007', false)), []);
+});
+
+test('priorityStatus says who is the User, who is their manager and always counts, and who else is on or off', () => {
+  const people = C.pParse('# People\n## G\n- Una User {id: P-0001; manager: Mia Manager}\n- Mia Manager {id: P-0002}\n- Pat Priority {id: P-0003}\n- Nat Normal {id: P-0004}\n').people;
+  const of = id => people.find(p => p.meta.id === id);
+  assert.equal(C.priorityStatus(people, ['P-0003'], of('P-0001')), 'user');
+  assert.equal(C.priorityStatus(people, ['P-0003'], of('P-0002')), 'manager');
+  assert.equal(C.priorityStatus(people, ['P-0002'], of('P-0002')), 'manager', 'listed or not, the manager is locked');
+  assert.equal(C.priorityStatus(people, ['P-0003'], of('P-0003')), 'on');
+  assert.equal(C.priorityStatus(people, ['P-0003'], of('P-0004')), 'off');
+  assert.equal(C.priorityStatus(people, ['P-0001'], of('P-0001')), 'user', 'the User is never a Priority person');
+  const noBoss = C.pParse('# People\n## G\n- Una User {id: P-0001}\n- Nat Normal {id: P-0004}\n').people;
+  assert.equal(C.priorityStatus(noBoss, [], noBoss[1]), 'off');
+});
+
 test('setPriority adds a Person to priority-people in "## defaults" and takes them out, leaving every other line as it was', () => {
   const src = '# Sources\n<!-- h -->\n\n## defaults\n- timezone: Europe/London\n- priority-people: P-0007, P-0010\n- page-cap: 10\n\n## outlook-mail\n- priority-people: P-0099\n';
   const on = C.setPriority(src, 'P-0012', true);
@@ -663,4 +689,396 @@ test('the Agent log reads each entry\'s ID, its times, the request and the resul
     ['T-0013', '2026-10-05 17:15', '2026-10-06 08:41', 'Add sub-tasks\nfor the KPI pack', 'Added 2 sub-tasks to T-0013'],
     ['P-0001', '2026-10-01', '2026-10-02 09:00', 'Ask me my name', 'Asked\nand updated the record']]);
   assert.equal(L[0].raw, text.split('\n').slice(3, 7).join('\n'));
+});
+
+// ---------------------------------------------------------------- SETTINGS.toml and the parser it shares with config.toml
+const DEFAULTS = { priority: { 'pause-days': 28 }, score: { 'half-life-days': 30, 'high-percent': 20, 'min-people': 10 }, weights: { message: 2, comment: 2, linked: 2, reply: 1, done: 1 } };
+
+test('the TOML parser in the core reads its subset: comments, tables, strings, whole numbers and booleans', () => {
+  const t = C.parseToml(`# a comment\r\ntop = 'C:\\x' # after\r\n\r\n[one]\r\nn = -1_000\r\nyes = true\r\ns = "a\\tb"\r\n`, 'any.toml');
+  assert.equal(t.top.top.value, 'C:\\x');
+  assert.deepEqual([t.tables.one.n.value, t.tables.one.yes.value, t.tables.one.s.value], [-1000, true, 'a\tb']);
+  assert.equal(t.tables.one.n.line, 4);
+  assert.equal(t.eol, '\r\n');
+  assert.equal(t.firstTable, 3);
+});
+
+test('the TOML parser\'s errors name the file they are about, and the line', () => {
+  for (const file of ['config.toml', 'SETTINGS.toml']) {
+    for (const [bad, line] of [['x = 1.5', 2], ['x = [1, 2]', 2], ['a.b = 1', 2], ['just words', 2], ['[t]\n[t]', 3], ['k = 1\nk = 2', 3], ['k = 1 junk', 2]]) {
+      assert.throws(() => C.parseToml(`# first\n${bad}\n`, file), new RegExp(`^Error: ${file.replace('.', '\\.')} line ${line}\\b`), bad);
+    }
+  }
+});
+
+test('a key named like something every object has is only a key', () => {
+  assert.equal(C.parseToml('constructor = 1\n[toString]\nvalueOf = 2\n', 'any.toml').tables.toString.valueOf.value, 2);
+  assert.deepEqual(C.readSettings('constructor = 1\n').errors, []);
+  assert.equal(C.readSettings('[constructor]\nname = 1\n').warnings.length, 1);
+});
+
+test('readSettings: no file, an empty one, or a missing key gives the built-in defaults with nothing to report', () => {
+  for (const text of ['', '# only a comment\n', '[priority]\n', '[score]\nmin-people = 10\n']) {
+    const s = C.readSettings(text);
+    assert.deepEqual(s.values, DEFAULTS, JSON.stringify(text));
+    assert.deepEqual([s.errors, s.warnings], [[], []], JSON.stringify(text));
+  }
+});
+
+test('readSettings: every setting can be changed, and a weight may be 0', () => {
+  const s = C.readSettings('[priority]\npause-days = 14\n[score]\nhalf-life-days = 7\nhigh-percent = 99\nmin-people = 1\n[weights]\nmessage = 0\ncomment = 3\nlinked = 4\nreply = 5\ndone = 6\n');
+  assert.deepEqual(s.values, { priority: { 'pause-days': 14 }, score: { 'half-life-days': 7, 'high-percent': 99, 'min-people': 1 }, weights: { message: 0, comment: 3, linked: 4, reply: 5, done: 6 } });
+  assert.deepEqual(s.errors, []);
+});
+
+test('readSettings: an invalid value uses that default, names its line and setting, and leaves the other settings alone', () => {
+  const cases = [
+    ['priority', 'pause-days', '0', 'at least 1'], ['priority', 'pause-days', '-3', 'at least 1'],
+    ['score', 'half-life-days', '0', 'at least 1'], ['score', 'min-people', '0', 'at least 1'],
+    ['score', 'high-percent', '0', 'from 1 to 99'], ['score', 'high-percent', '100', 'from 1 to 99'],
+    ['weights', 'done', '-1', 'at least 0'],
+    ['priority', 'pause-days', '"ten"', 'whole number'], ['priority', 'pause-days', 'true', 'whole number'],
+    ['priority', 'pause-days', '1.5', 'whole number'], ['weights', 'reply', '0.5', 'whole number'], ['priority', 'pause-days', '[1]', 'whole number'],
+  ];
+  for (const [table, key, value, says] of cases) {
+    const s = C.readSettings(`# first\n[${table}]\n${key} = ${value} # why\n[weights]\nlinked = 9\n`.replace('[weights]\nlinked', table === 'weights' ? 'linked' : '[weights]\nlinked'));
+    assert.equal(s.values[table][key], DEFAULTS[table][key], `${key} = ${value}`);
+    assert.equal(s.values.weights.linked, 9, `${key} = ${value}`);
+    assert.equal(s.errors.length, 1, `${key} = ${value}: ${JSON.stringify(s.errors)}`);
+    assert.equal(s.errors[0].line, 3);
+    assert.match(s.errors[0].message, new RegExp(`^SETTINGS\\.toml line 3: ${key} must be .*${says}.*, so it uses the default, ${DEFAULTS[table][key]}`), s.errors[0].message);
+    assert.ok(s.errors[0].message.includes(value), s.errors[0].message);
+  }
+});
+
+test('readSettings: a line it can\'t read is an error naming the line, and the lines after it still count', () => {
+  const s = C.readSettings('[priority]\njust words\npause-days = 14\n');
+  assert.equal(s.values.priority['pause-days'], 14);
+  assert.deepEqual(s.errors.map(e => e.line), [2]);
+  assert.match(s.errors[0].message, /^SETTINGS\.toml line 2: /);
+});
+
+test('readSettings: a key it doesn\'t know is a warning naming the line, wherever it is, and nothing is ignored by it', () => {
+  const s = C.readSettings('stray = 1\n[priority]\npause-dayz = 3\n[wieghts]\nmessage = 1\n[weights]\nodd = 1.5\ndone = 4\n');
+  assert.deepEqual(s.errors, []);
+  assert.deepEqual(s.warnings.map(w => w.line), [1, 3, 5, 7]);
+  assert.match(s.warnings[1].message, /^SETTINGS\.toml line 3: .*pause-dayz/);
+  assert.equal(s.values.weights.done, 4);
+  assert.deepEqual(s.values.priority, DEFAULTS.priority);
+});
+
+test('priorityPaused uses the days it is given, and 28 when given none', () => {
+  const ign = '- priority|P-0012 {ignored-date: 2026-10-01; reason: the user said no}\n';
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-14', 14), true);
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-15', 14), false);
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-28', 40), true);
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-28'), true);
+  assert.equal(C.priorityPaused(ign, 'P-0012', '2026-10-29'), false);
+});
+
+test('the Priority pause has no constant of its own: its default is the setting\'s', () => {
+  const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
+  assert.doesNotMatch(html, /PRIORITY_PAUSE/);
+});
+
+// ---------------------------------------------------------------- The Interaction log
+const logOf = (...lines) => C.INTER_HEAD.join('\n') + '\n' + lines.map(l => l + '\n').join('');
+const PEOPLE_MD = C.pParse(['## Team', '- Imogen Hartley {id: P-0001; manager: Oliver Pemberton}', '- Oliver Pemberton {id: P-0002}', '- Meera Ilangovan {id: P-0003}', '- Tomasz Kowalczyk {id: P-0004}'].join('\n')).people;
+const oneItem = (meta, subs = '') => C.parse(`# Tasks\n- [ ] T-0041 A thing {${meta}}\n${subs}`).items[0];
+
+test('interactionsOf reads events and decisions, keeping their lines, and skips the header', () => {
+  const log = logOf('- 2026-10-22 P-0012 message T-0041', '- 2026-08-03 P-0012 linked T-0017 {inferred: yes}',
+    '- 2026-10-22 P-0012 decision promote {score: 14.2; message: 8.1; comment: 3.6; linked: 2.5; reply: 0; done: 0; half-life-days: 30}');
+  const ev = C.interactionsOf(log);
+  assert.equal(ev.length, 3);
+  assert.deepEqual([ev[0].date, ev[0].person, ev[0].kind, ev[0].item], ['2026-10-22', 'P-0012', 'message', 'T-0041']);
+  assert.equal(ev[1].fields.inferred, 'yes');
+  assert.equal(ev[2].kind, 'decision');
+  assert.equal(ev[2].decision, 'promote');
+  assert.equal(ev[2].fields.score, '14.2');
+  assert.equal(ev[0].line, '- 2026-10-22 P-0012 message T-0041');
+});
+
+test('checkInteractions passes a good log and names the line of a bad date, kind, decision or ID, not a deleted Item', () => {
+  assert.deepEqual(C.checkInteractions(logOf('- 2026-10-22 P-0012 message T-9999', '- 2026-10-22 P-0999 decision no')), []);
+  const head = C.INTER_HEAD.length + 1;
+  const bad = [['- 2026-13-40 P-0012 message T-0041', /date/], ['- 22/10/2026 P-0012 message T-0041', /date/], ['- 2026-10-22 P-0012 waved T-0041', /kind/],
+    ['- 2026-10-22 P-0012 decision maybe', /decision/], ['- 2026-10-22 Meera message T-0041', /P-/], ['- 2026-10-22 P-0012 message PRJ-0041', /T-/], ['- 2026-10-22 P-0012 message', /line|shape/], ['nonsense', /line|shape/]];
+  bad.forEach(([line, re]) => {
+    const e = C.checkInteractions(logOf(line));
+    assert.equal(e.length, 1, line);
+    assert.match(e[0].message, re, line);
+    assert.equal(e[0].line, head, line);
+    assert.match(e[0].message, new RegExp(`INTERACTIONS.md line ${head}`), line);
+  });
+});
+
+test('addInteractions keeps one message, linked and done per Person per Item, repeats comment and reply, and starts a blank file with the header', () => {
+  const ev = (kind, person = 'P-0003', item = 'T-0041', date = '2026-10-22') => ({ date, person, kind, item });
+  let r = C.addInteractions('', [ev('message')]);
+  assert.ok(r.text.startsWith(C.INTER_HEAD[0]));
+  assert.deepEqual(r.added, ['- 2026-10-22 P-0003 message T-0041']);
+  ['message', 'linked', 'done'].forEach(k => {
+    const a = C.addInteractions(logOf(`- 2026-01-01 P-0003 ${k} T-0041 {inferred: yes}`), [ev(k)]);
+    assert.deepEqual(a.added, [], k);
+    assert.equal(C.addInteractions(logOf(`- 2026-01-01 P-0003 ${k} T-0041`), [ev(k, 'P-0004')]).added.length, 1, 'another Person');
+    assert.equal(C.addInteractions(logOf(`- 2026-01-01 P-0003 ${k} T-0041`), [ev(k, 'P-0003', 'T-0042')]).added.length, 1, 'another Item');
+    assert.equal(C.addInteractions('', [ev(k), ev(k)]).added.length, 1, 'twice in one go');
+  });
+  ['comment', 'reply'].forEach(k => {
+    const a = C.addInteractions(logOf(`- 2026-10-22 P-0003 ${k} T-0041`), [ev(k), ev(k)]);
+    assert.equal(a.added.length, 2, k);
+    assert.equal(a.text.split('\n').filter(l => l === `- 2026-10-22 P-0003 ${k} T-0041`).length, 3, k);
+  });
+});
+
+test('dropInteractions takes out one line for each named, even when two are identical', () => {
+  const line = '- 2026-10-22 P-0003 comment T-0041';
+  const log = logOf(line, '- 2026-10-23 P-0003 reply T-0041', line);
+  const now = C.dropInteractions(log, [line]);
+  assert.equal(now.split('\n').filter(l => l === line).length, 1);
+  assert.equal(C.dropInteractions(now, [line]).split('\n').filter(l => l === line).length, 0);
+  assert.ok(C.dropInteractions(logOf(line), [line]).startsWith(C.INTER_HEAD[0]), 'the header stays');
+});
+
+test('removeInteractions and restoreInteractions take a Person out and put every line back where it was', () => {
+  const log = logOf('- 2026-10-20 P-0003 message T-0041', '- 2026-10-21 P-0004 message T-0041', '- 2026-10-22 P-0003 decision no', '- 2026-10-23 P-0004 done T-0041');
+  const r = C.removeInteractions(log, e => e.person === 'P-0003');
+  assert.equal(r.removed.length, 2);
+  assert.equal(C.interactionsOf(r.text).length, 2);
+  assert.equal(C.restoreInteractions(r.text, r.removed), log);
+});
+
+test('the score decays by half-life, uses each kind\'s weight, and adds up to its shares', () => {
+  const v = C.readSettings('').values, log = logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-09-22 P-0003 comment T-0002', '- 2026-10-22 P-0003 reply T-0003', '- 2026-10-22 P-0004 linked T-0004');
+  const s = C.interactionScore(log, 'P-0003', v, '2026-10-22');
+  assert.equal(s.shares.message, 2);
+  assert.equal(s.shares.comment, 1, 'a half-life old');
+  assert.equal(s.shares.reply, 1);
+  assert.equal(s.shares.linked, 0);
+  assert.equal(s.shares.done, 0);
+  assert.equal(s.total, 4);
+  assert.equal(C.interactionScore(log, 'P-0099', v, '2026-10-22').total, 0);
+});
+
+test('the score counts a future date as age 0, counts inferred events the same, and ignores decisions and bad dates', () => {
+  const v = C.readSettings('').values;
+  assert.equal(C.interactionScore(logOf('- 2027-01-01 P-0003 message T-0001'), 'P-0003', v, '2026-10-22').total, 2);
+  assert.equal(C.interactionScore(logOf('- 2026-10-22 P-0003 message T-0001 {inferred: yes}'), 'P-0003', v, '2026-10-22').total, 2);
+  assert.equal(C.interactionScore(logOf('- 2026-10-22 P-0003 decision yes {score: 99}', 'junk', '- nope P-0003 message T-0001'), 'P-0003', v, '2026-10-22').total, 0);
+});
+
+test('the score uses the settings it is given, and the defaults for any it is missing', () => {
+  const log = logOf('- 2026-10-12 P-0003 message T-0001', '- 2026-10-22 P-0003 done T-0001');
+  const set = C.readSettings('[score]\nhalf-life-days = 10\n[weights]\nmessage = 8\ndone = 0\n').values;
+  const s = C.interactionScore(log, 'P-0003', set, '2026-10-22');
+  assert.equal(s.shares.message, 4);
+  assert.equal(s.shares.done, 0);
+  assert.equal(C.interactionScore(log, 'P-0003', undefined, '2026-10-22').shares.done, 1, 'no settings at all');
+  assert.equal(C.interactionScore(log, 'P-0003', { weights: { done: 3 } }, '2026-10-22').shares.done, 3, 'a partial one');
+  assert.equal(C.interactionScore(log, 'P-0003', { weights: { done: 3 } }, '2026-10-22').shares.message, 2 * Math.pow(0.5, 10 / 30));
+});
+
+test('interactionScores gives every Person in the log their score', () => {
+  const all = C.interactionScores(logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-10-22 P-0004 reply T-0001'), C.readSettings('').values, '2026-10-22');
+  assert.equal(all['P-0003'].total, 2);
+  assert.equal(all['P-0004'].total, 1);
+});
+
+test('scoreExplanation counts each kind, in order of how much it adds, and says when most of the score comes from', () => {
+  const v = C.readSettings('').values, day = '2026-10-22';
+  const log = logOf(
+    '- 2026-10-20 P-0003 message T-0001', '- 2026-10-10 P-0003 message T-0002', '- 2026-10-05 P-0003 message T-0003', '- 2026-10-01 P-0003 message T-0004',
+    '- 2026-10-12 P-0003 comment T-0001', '- 2026-10-02 P-0003 comment T-0002', '- 2026-09-30 P-0003 linked T-0005', '- 2026-10-22 P-0004 reply T-0009');
+  assert.equal(C.scoreExplanation(log, 'P-0003', v, day), '4 messages, 2 comments, 1 linked, mostly this month');
+});
+
+test('scoreExplanation orders by what a kind adds rather than by how many there are', () => {
+  const v = C.readSettings('').values, day = '2026-10-22';
+  const log = logOf('- 2026-10-22 P-0003 comment T-0001', '- 2026-06-01 P-0003 message T-0002', '- 2026-06-02 P-0003 message T-0003', '- 2026-06-03 P-0003 message T-0004');
+  assert.match(C.scoreExplanation(log, 'P-0003', v, day), /^1 comment, 3 messages, /);
+  const heavy = C.readSettings('[weights]\nreply = 9\n').values, replies = logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-10-22 P-0003 reply T-0002', '- 2026-10-21 P-0003 reply T-0003');
+  assert.match(C.scoreExplanation(replies, 'P-0003', heavy, day), /^2 replies, 1 message, /);
+});
+
+test('scoreExplanation words the time by where most of the score comes from, and a single event says just when', () => {
+  const v = C.readSettings('').values, day = '2026-10-22', say = (...lines) => C.scoreExplanation(logOf(...lines), 'P-0003', v, day);
+  assert.equal(say('- 2026-10-20 P-0003 message T-0001', '- 2026-10-21 P-0003 linked T-0002'), '1 linked, 1 message, mostly this week');
+  assert.equal(say('- 2026-08-20 P-0003 message T-0001', '- 2026-08-21 P-0003 done T-0001'), '1 message, 1 done, mostly the last three months');
+  assert.equal(say('- 2026-03-20 P-0003 message T-0001', '- 2026-03-21 P-0003 message T-0002'), '2 messages, mostly longer ago');
+  assert.equal(say('- 2026-10-01 P-0003 reply T-0001'), '1 reply, this month');
+  assert.equal(say('- 2027-01-01 P-0003 message T-0001', '- 2027-01-02 P-0003 message T-0002'), '2 messages, mostly this week', 'a future date is age 0');
+});
+
+test('scoreExplanation has words for no Interactions, and leaves out what a weight of 0 adds nothing for', () => {
+  const v = C.readSettings('').values, day = '2026-10-22';
+  assert.equal(C.scoreExplanation(logOf('- 2026-10-22 P-0004 message T-0001', '- 2026-10-22 P-0003 decision promote'), 'P-0003', v, day), 'No Interactions yet');
+  const noReply = C.readSettings('[weights]\nreply = 0\n').values;
+  assert.equal(C.scoreExplanation(logOf('- 2026-10-22 P-0003 reply T-0001', '- 2026-10-21 P-0003 message T-0002'), 'P-0003', noReply, day), '1 message, this week');
+  const none = C.readSettings('[weights]\nmessage = 0\n').values;
+  assert.equal(C.scoreExplanation(logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-10-21 P-0003 message T-0002'), 'P-0003', none, day), '2 Interactions, none of them counting under your weights');
+});
+
+// ---- the review filters. P-0001 is the User, and P-0002 their manager.
+const staff = (n, extra = {}) => Array.from({ length: n }, (_, i) => {
+  const id = 'P-' + String(i + 2).padStart(4, '0');
+  return { name: 'Person ' + id, meta: { id, ...(extra[id] || {}) } };
+});
+const team = (n, extra) => [{ name: 'Me', meta: { id: 'P-0001', manager: 'Person P-0002' } }, ...staff(n, extra)];
+// each of ids gets a total: the first the highest
+const totals = (ids) => Object.fromEntries(ids.map((id, i) => [id, { total: ids.length - i, shares: {} }]));
+const tenIds = ['P-0003', 'P-0004', 'P-0005', 'P-0006', 'P-0007', 'P-0008', 'P-0009', 'P-0010', 'P-0011', 'P-0012'];
+
+test('scoreable leaves out the User, anyone who has left and anyone with no ID', () => {
+  assert.equal(C.scoreable({ name: 'Me', meta: { id: 'P-0001' } }), false);
+  assert.equal(C.scoreable({ name: 'Gone', meta: { id: 'P-0009', status: 'left' } }), false);
+  assert.equal(C.scoreable({ name: 'No ID', meta: {} }), false);
+  assert.equal(C.scoreable({ name: 'Here', meta: { id: 'P-0009' } }), true);
+});
+
+test('High score, not Priority is the top high-percent of scored people, rounded up, leaving out Priority people', () => {
+  const v = C.readSettings('').values, r = C.reviewLists(team(12), ['P-0003'], totals(tenIds), v);
+  assert.equal(r.scored, 10);
+  assert.equal(r.enough, true);
+  assert.deepEqual(r.high, ['P-0004'], 'the top 2 of 10, less the Priority person');
+  const pct = C.readSettings('[score]\nhigh-percent = 21\n').values;
+  assert.deepEqual(C.reviewLists(team(12), [], totals(tenIds), pct).high, ['P-0003', 'P-0004', 'P-0005'], '2.1 people rounds up');
+  assert.ok(!C.reviewLists(team(12), [], totals(['P-0002', ...tenIds.slice(1)]), v).high.includes('P-0002'), 'the manager always counts as Priority');
+});
+
+test('High score takes in everyone tied with the last place', () => {
+  const v = C.readSettings('').values, s = totals(tenIds);
+  s['P-0005'] = { total: s['P-0004'].total, shares: {} };
+  assert.deepEqual(C.reviewLists(team(12), [], s, v).high, ['P-0003', 'P-0004', 'P-0005']);
+});
+
+test('Priority, low score is a Priority person below the median, with no Interactions counting, and never the manager', () => {
+  const v = C.readSettings('').values, s = totals(tenIds);
+  const r = C.reviewLists(team(13), ['P-0003', 'P-0011', 'P-0014', 'P-0002'], s, v);
+  assert.deepEqual(r.low, ['P-0011', 'P-0014'], 'below the median, and one with no Interactions; not the manager, listed or not');
+  const managerLow = totals([...tenIds.slice(1), 'P-0002']);
+  assert.ok(!C.reviewLists(team(13), ['P-0002'], managerLow, v).low.includes('P-0002'), 'the lowest score, but the manager');
+  const nine = C.readSettings('[score]\nmin-people = 9\n').values;
+  assert.deepEqual(C.reviewLists(team(13), ['P-0007', 'P-0008'], totals(tenIds.slice(0, 9)), nine).low, ['P-0008'], 'exactly on the median is not below it');
+  const allZero = Object.fromEntries(tenIds.map(id => [id, { total: 0, shares: {} }]));
+  assert.deepEqual(C.reviewLists(team(13), ['P-0014'], allZero, v).low, ['P-0014'], 'no Interactions counts even when the median is 0');
+});
+
+test('the User and anyone who has left are not scored or listed, and someone in the log but not in People is no one', () => {
+  const v = C.readSettings('[score]\nmin-people = 1\n').values, ids = [...tenIds, 'P-0013', 'P-0001', 'P-0099'];
+  const r = C.reviewLists(team(12, { 'P-0003': { status: 'left' }, 'P-0012': { status: 'left' } }), ['P-0003', 'P-0012'], totals(ids), v);
+  assert.equal(r.scored, 9, 'the ten and P-0013, less the two who have left');
+  assert.deepEqual(r.high, ['P-0004', 'P-0005'], 'the top 2 of the nine, with neither those who have left, the User nor someone not in People');
+  assert.ok(!r.low.includes('P-0012'), 'left, and listed in priority-people');
+});
+
+test('fewer than min-people scored means both lists are empty and not enough', () => {
+  const v = C.readSettings('').values, s = totals(tenIds.slice(0, 9));
+  const r = C.reviewLists(team(13), ['P-0011', 'P-0014'], s, v);
+  assert.deepEqual([r.scored, r.needs, r.enough, r.high, r.low], [9, 10, false, [], []]);
+  const fewer = C.readSettings('[score]\nmin-people = 9\n').values;
+  assert.equal(C.reviewLists(team(13), [], s, fewer).enough, true);
+});
+
+test('the Example has at least 10 scored people, and someone in each review filter', { skip: !fs.existsSync(EXAMPLE) && 'no Example beside the app' }, () => {
+  const read = f => fs.readFileSync(path.join(EXAMPLE, f), 'utf8');
+  const people = C.pParse(read('PEOPLE.md')).people, v = C.readSettings(read('SETTINGS.toml')).values;
+  const r = C.reviewLists(people, C.priorityIds(read('SOURCES.md')), C.interactionScores(read('INTERACTIONS.md'), v, '2026-11-04'), v);
+  assert.ok(r.scored >= 10, `${r.scored} scored`);
+  assert.ok(r.high.length, 'someone under High score, not Priority');
+  assert.ok(r.low.length, 'someone under Priority, low score');
+});
+
+test('decisionLine writes the score and each share to one decimal, with the half-life; no score is no braces', () => {
+  const v = C.readSettings('').values, score = C.interactionScore(logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-09-30 P-0003 comment T-0002'), 'P-0003', v, '2026-10-22');
+  assert.equal(C.decisionLine('2026-10-22', 'P-0003', 'promote', score, 30), '- 2026-10-22 P-0003 decision promote {score: 3.2; message: 2; comment: 1.2; linked: 0; reply: 0; done: 0; half-life-days: 30}');
+  assert.equal(C.decisionLine('2026-10-22', 'P-0003', 'no'), '- 2026-10-22 P-0003 decision no');
+});
+
+test('only someone in PEOPLE.md other than the User gets credit, by name or ID', () => {
+  assert.equal(C.creditByName(PEOPLE_MD, 'Meera Ilangovan'), 'P-0003');
+  ['Imogen Hartley', 'Unassigned', 'Nobody Known', '', undefined].forEach(w => assert.equal(C.creditByName(PEOPLE_MD, w), '', String(w)));
+  assert.equal(C.creditById(PEOPLE_MD, 'P-0003'), 'P-0003');
+  ['P-0001', 'P-0999', '', undefined].forEach(w => assert.equal(C.creditById(PEOPLE_MD, w), '', String(w)));
+});
+
+test('acceptEvents follows the Proposal\'s interaction, credits who as it is now, and dates it when received', () => {
+  ['message', 'reply', 'linked'].forEach(k => {
+    const ev = C.acceptEvents(oneItem(`who: Meera Ilangovan; received-datetime: 2026-10-01 09:00; interaction: ${k}`), PEOPLE_MD, '2026-10-22');
+    assert.deepEqual(ev, [{ date: '2026-10-01', person: 'P-0003', kind: k, item: 'T-0041' }], k);
+  });
+  assert.equal(C.acceptEvents(oneItem('who: Meera Ilangovan; received-date: 2026-10-02; interaction: message'), PEOPLE_MD, '2026-10-22')[0].date, '2026-10-02');
+  assert.equal(C.acceptEvents(oneItem('who: Meera Ilangovan; interaction: message'), PEOPLE_MD, '2026-10-22')[0].date, '2026-10-22', 'undated: today');
+  ['interaction: none', '', 'interaction: sideways'].forEach(m => assert.deepEqual(C.acceptEvents(oneItem(`who: Meera Ilangovan; received-date: 2026-10-02; ${m}`), PEOPLE_MD, '2026-10-22'), [], m));
+  ['Imogen Hartley', 'Unassigned', 'Nobody Known'].forEach(w => assert.deepEqual(C.acceptEvents(oneItem(`who: ${w}; interaction: message`), PEOPLE_MD, '2026-10-22'), [], w));
+});
+
+test('a none Proposal counts only as linked, today, for a who the User changed in the Inbox', () => {
+  const today = '2026-10-22', accepted = meta => C.acceptEvents(oneItem(`received-date: 2026-10-02; interaction: none; ${meta}`), PEOPLE_MD, today);
+  assert.deepEqual(accepted('who: Meera Ilangovan; who-proposed: Tomasz Kowalczyk'), [{ date: today, person: 'P-0003', kind: 'linked', item: 'T-0041' }]);
+  assert.deepEqual(accepted('who: Meera Ilangovan; who-proposed: -'), [{ date: today, person: 'P-0003', kind: 'linked', item: 'T-0041' }], 'the Skill wrote no who');
+  assert.deepEqual(accepted('who: Meera Ilangovan'), [], 'the who the Skill wrote');
+  assert.deepEqual(accepted('who: Meera Ilangovan; who-proposed: Meera Ilangovan'), [], 'the same who as the Skill wrote');
+  assert.deepEqual(accepted('who-proposed: Meera Ilangovan'), [], 'cleared');
+  ['Imogen Hartley', 'Unassigned', 'Nobody Known'].forEach(w => assert.deepEqual(accepted(`who: ${w}; who-proposed: Meera Ilangovan`), [], w));
+  const message = C.acceptEvents(oneItem('who: Meera Ilangovan; received-date: 2026-10-02; interaction: message; who-proposed: Tomasz Kowalczyk'), PEOPLE_MD, today);
+  assert.deepEqual(message, [{ date: '2026-10-02', person: 'P-0003', kind: 'message', item: 'T-0041' }], 'another interaction is as it was');
+});
+
+test('whoByUser keeps the who the Skill wrote on a none Proposal, from the User\'s first change until they change it back', () => {
+  const set = (it, who) => { const was = it.meta.who || ''; if (who) it.meta.who = who; else delete it.meta.who; C.whoByUser(it, was); return it.meta['who-proposed']; };
+  const prep = oneItem('who: Tomasz Kowalczyk; interaction: none');
+  assert.equal(set(prep, 'Meera Ilangovan'), 'Tomasz Kowalczyk');
+  assert.equal(set(prep, 'Declan Moss'), 'Tomasz Kowalczyk', 'a second change keeps the first who');
+  assert.equal(set(prep, ''), 'Tomasz Kowalczyk', 'and so does clearing it');
+  assert.equal(set(prep, 'Tomasz Kowalczyk'), undefined, 'changing back leaves no trace');
+  assert.equal(C.serItem(prep), C.serItem(oneItem('who: Tomasz Kowalczyk; interaction: none')));
+  const invite = oneItem('interaction: none');
+  assert.equal(set(invite, 'Meera Ilangovan'), '-', 'the Skill wrote no who');
+  assert.equal(set(invite, ''), undefined);
+  assert.equal(set(oneItem('who: Tomasz Kowalczyk; interaction: message'), 'Meera Ilangovan'), undefined, 'only a none Proposal needs it');
+  assert.equal(set(oneItem('who: Tomasz Kowalczyk'), 'Meera Ilangovan'), undefined);
+});
+
+test('who-proposed survives a read and write of the Item, as a field the parser doesn\'t know', () => {
+  const line = '- [ ] T-0041 A thing {who: Meera Ilangovan; interaction: none; who-proposed: -}';
+  assert.equal(C.serItem(C.parse(`# Tasks\n${line}\n`).items[0]), line);
+});
+
+test('ackEvents: news is a comment for its sender, else who; a who change is linked for the new who; calendar, user and agent are nothing', () => {
+  const cm = (fields) => `  - comment: {added-datetime: 2026-10-05 10:00; ${fields}}\n    News.`;
+  const ack = (fields, who = 'Meera Ilangovan') => { const it = oneItem(`who: ${who}`, cm(fields)); return C.ackEvents(it, C.commentsOf(it)[0], PEOPLE_MD, '2026-10-22'); };
+  assert.deepEqual(ack('author: email; acknowledged: no'), [{ date: '2026-10-05', person: 'P-0003', kind: 'comment', item: 'T-0041' }]);
+  assert.equal(ack('author: email; acknowledged: no; sender: P-0004')[0].person, 'P-0004');
+  assert.deepEqual(ack('author: email; acknowledged: no; sender: P-0001'), [], 'the User as sender');
+  assert.deepEqual(ack('author: email; acknowledged: no; sender: P-0999'), [], 'a sender no longer in People');
+  assert.equal(ack('author: email; acknowledged: no; changed: due-date; from: 2026-10-30; to: 2026-11-06; sender: P-0004')[0].kind, 'comment');
+  assert.deepEqual(ack('author: email; acknowledged: no; changed: who; from: Meera Ilangovan; to: Tomasz Kowalczyk', 'Tomasz Kowalczyk'), [{ date: '2026-10-05', person: 'P-0004', kind: 'linked', item: 'T-0041' }]);
+  assert.deepEqual(ack('author: email; acknowledged: no; changed: who; from: Meera Ilangovan; to: Nobody Known'), [], 'to someone not in People');
+  assert.deepEqual(ack('author: email; acknowledged: no; changed: who; from: Meera Ilangovan; to: Imogen Hartley'), [], 'to the User');
+  ['calendar', 'user', 'agent'].forEach(a => assert.deepEqual(ack(`author: ${a}; acknowledged: no`), [], a));
+  assert.deepEqual(ack('author: email; acknowledged: no', 'Nobody Known'), [], 'no sender, and a who not in People');
+  const undated = oneItem('who: Meera Ilangovan', '  - comment: {author: email; acknowledged: no}\n    News.');
+  assert.equal(C.ackEvents(undated, C.commentsOf(undated)[0], PEOPLE_MD, '2026-10-22')[0].date, '2026-10-22');
+});
+
+test('a Comment keeps its sender through being parsed and written', () => {
+  const it = oneItem('who: Meera Ilangovan', '  - comment: {added-datetime: 2026-10-05 10:00; author: email; acknowledged: no; sender: P-0004}\n    News.');
+  assert.match(C.serItem(it), /author: email; acknowledged: no; sender: P-0004\}/);
+});
+
+test('doneEvents and linkedEvents credit only someone who can get credit', () => {
+  assert.deepEqual(C.doneEvents(oneItem('who: Meera Ilangovan'), PEOPLE_MD, '2026-10-22'), [{ date: '2026-10-22', person: 'P-0003', kind: 'done', item: 'T-0041' }]);
+  assert.deepEqual(C.doneEvents(oneItem('who: Unassigned'), PEOPLE_MD, '2026-10-22'), []);
+  assert.deepEqual(C.doneEvents(oneItem('type: task'), PEOPLE_MD, '2026-10-22'), []);
+  assert.deepEqual(C.linkedEvents('P-0003', 'T-0041', '2026-10-22'), [{ date: '2026-10-22', person: 'P-0003', kind: 'linked', item: 'T-0041' }]);
+  assert.deepEqual(C.linkedEvents('', 'T-0041', '2026-10-22'), []);
+});
+
+test('mergeRefs moves a duplicate\'s events to the survivor, collapses one-per-Item kinds, keeps repeats, and leaves others alone', () => {
+  const lines = ['# Interactions', '- 2026-10-01 P-0003 message T-0001', '- 2026-10-02 P-0003 message T-0002', '- 2026-10-02 P-0004 linked T-0002', '- 2026-10-03 P-0003 comment T-0001', '- 2026-10-03 P-0003 comment T-0002', '- 2026-10-03 P-0003 decision no', '- 2026-10-04 P-0003 done T-0003'];
+  const r = C.mergeRefs('interactions', lines, 'T-0002', 'T-0001');
+  assert.deepEqual(r.lines, ['# Interactions', '- 2026-10-01 P-0003 message T-0001', '- 2026-10-02 P-0004 linked T-0001', '- 2026-10-03 P-0003 comment T-0001', '- 2026-10-03 P-0003 comment T-0001', '- 2026-10-03 P-0003 decision no', '- 2026-10-04 P-0003 done T-0003']);
+  assert.equal(r.swaps.filter(s => s[1] === null).length, 1);
+  assert.deepEqual(r.swaps.find(s => s[1] === null).slice(0, 2), ['- 2026-10-02 P-0003 message T-0002', null]);
 });

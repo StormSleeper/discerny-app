@@ -341,12 +341,19 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .ecard .lines .k{color:var(--muted)}
 .ecard .path{font-size:12.5px;color:var(--muted)}
 .tbl{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow-x:auto;container-type:inline-size}
-.tr{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,2fr) minmax(0,1.4fr) 92px;gap:12px;padding:9px 14px;border-top:1px solid var(--line-3);align-items:center}
+.btn[aria-disabled="true"]{cursor:not-allowed;color:var(--muted)}
+.tr{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,2fr) minmax(0,1.4fr) 150px;gap:12px;padding:9px 14px;border-top:1px solid var(--line-3);align-items:center}
 .tr.th{border-top:0;font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
 .tr .nm{border:0;background:none;padding:0;text-align:left;font-weight:600;font-size:14.5px;color:var(--ink)}
 .tr .nm:hover{text-decoration:underline;text-underline-offset:2px}
 .tr .r{text-align:right;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;align-items:center}
-@container (max-width:640px){.tr{grid-template-columns:minmax(0,1fr) auto}.tr .c2,.tr .c3{display:none}}
+.tbl.by-score .tr{grid-template-columns:minmax(0,2.2fr) minmax(0,2fr) minmax(0,1.4fr) 96px 150px}
+.score{display:flex;align-items:center;gap:8px;font-variant-numeric:tabular-nums;font-size:13px}
+.score-n{min-width:2.4em;text-align:right}
+.score-bar{flex:1;min-width:24px;height:6px;border-radius:999px;background:var(--line);overflow:hidden}
+.score-bar>span{display:block;height:6px;border-radius:999px;background:var(--accent)}
+@container (max-width:640px){.tr{grid-template-columns:minmax(0,1fr) 132px}.tbl.by-score .tr{grid-template-columns:minmax(0,1fr) 84px 132px}.tr .c2,.tr .c3{display:none}.tr .r .b{white-space:normal;border-radius:10px}}
+@container (max-width:400px){.tbl.by-score .tr{grid-template-columns:minmax(0,1fr) 132px}.tbl.by-score .score,.tbl.by-score .score-h{grid-row:2;grid-column:1/-1}.tbl.by-score .score:empty{display:none}}
 .grp-h{font-size:12.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);padding:12px 14px 6px;border-top:1px solid var(--line)}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px}
 .toolbar .sp{margin-left:auto}
@@ -429,8 +436,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.3.0.8'; // the app's version; tools/discern.mjs reads it from here
-var FORMAT='0.3.0.8'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
+var VERSION='0.4.0.11'; // the app's version; tools/discern.mjs reads it from here
+var FORMAT='0.4.0.2'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','this week','soon','later','fyi'];
@@ -498,7 +505,7 @@ function textLines(each,curOf,blank){var tx=null,gap=0;
     var cur=curOf(),last=cur&&cur.subs[cur.subs.length-1];
     tx=last&&(last.k==='description'||fielded(last.k))&&last.n!==undefined?last:null;
     if(i===all.length-1)end();};}
-var COMMENT_ORDER=['added-datetime','author','acknowledged','changed','from','to','suggests'],HISTORY_ORDER=['changed-date','changed'];
+var COMMENT_ORDER=['added-datetime','author','acknowledged','changed','from','to','suggests','sender'],HISTORY_ORDER=['changed-date','changed'];
 // one sub-line of an Item or Record as written: several physical lines for a Description, Comment or history line
 function serSub(b){
   if(b.k==='raw')return b.v;
@@ -575,10 +582,81 @@ function changesOf(post){var out=[],cur=null;
   return out;}
 // the IGNORED.md source key a No to a change writes: rel|<id>|<id> (matched in either order), person|<address>, or priority|<P-id>
 function changeKey(c){return c.type==='relationship'?'rel|'+c.a+'|'+c.b:c.type==='priority'?'priority|'+c.id:'person|'+String(c.email||'').toLowerCase();}
-// A No to a Priority person is not for good: it pauses them for PRIORITY_PAUSE days from the date on its IGNORED.md line
-var PRIORITY_PAUSE=28;
-function priorityPaused(ignored,id,today){return ignoredOf(ignored).some(function(g){
-  var d=g.fields['ignored-date']||'';return g.key==='priority|'+id&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&daysBetween(d,today)<PRIORITY_PAUSE;});}
+// A No to a Priority person is not for good: it pauses them for pause-days in SETTINGS.toml, from the date on its IGNORED.md line
+function priorityPaused(ignored,id,today,days){var n=days===undefined?SETTING_RULES.priority['pause-days'][0]:days;return ignoredOf(ignored).some(function(g){
+  var d=g.fields['ignored-date']||'';return g.key==='priority|'+id&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&daysBetween(d,today)<n;});}
+// A subset of TOML, for the App folder's config.toml and the data folder's SETTINGS.toml: comments, blank lines, [table] headings,
+// and key = value with a basic or literal string, an integer or a boolean.
+// -> {top:{key:{value,line}},tables:{name:{key:{value,line}}},firstTable,lines,eol}, line being the index in lines.
+// Anything else throws an Error naming the file and line; given onError, it calls onError({line,key,message}) with the 1-based line
+// and goes on to the next line instead. key is there when the line's value is what's wrong.
+var TOML_UNESCAPE={b:'\b',t:'\t',n:'\n',f:'\f',r:'\r','"':'"','\\':'\\'};
+function parseToml(text,file,onError){
+  text=String(text);
+  var eol=/\r\n/.test(text)?'\r\n':'\n',lines=text.split(/\r?\n/),top=Object.create(null),tables=Object.create(null),cur=top,firstTable=-1;
+  function oneLine(ln,i){
+    var where=file+' line '+(i+1);
+    var rest=function(s,key){if(!/^\s*(#.*)?$/.test(s)){var e=new Error(where+': unexpected "'+s.trim()+'" after the value; put a comment after #');e.key=key;throw e;}};
+    if(/^\s*(#.*)?$/.test(ln))return;
+    var h=/^\s*\[\s*([A-Za-z0-9_-]+)\s*\](.*)$/.exec(ln);
+    if(h){
+      rest(h[2]);
+      var again=tables[h[1]];
+      cur=again||(tables[h[1]]=Object.create(null));
+      if(again)throw new Error(where+': ['+h[1]+'] appears twice; keep one');
+      if(firstTable<0)firstTable=i;
+      return;}
+    var kv=/^\s*([A-Za-z0-9_-]+)\s*=\s*(.*)$/.exec(ln);
+    if(!kv)throw new Error(where+': "'+ln.trim()+'" is not key = value, a [table] heading or a # comment');
+    var key=kv[1],v=kv[2],m,value,e;
+    if((m=/^'([^'\r\n]*)'(.*)$/.exec(v)))value=m[1];
+    else if((m=/^"((?:[^"\\]|\\.)*)"(.*)$/.exec(v))){
+      value=m[1].replace(/\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)/g,function(s,c){
+        if(c.length>1)return String.fromCodePoint(parseInt(c.slice(1),16));
+        if(!(c in TOML_UNESCAPE)){e=new Error(where+': \\'+c+' is not an escape TOML knows; write \\\\ for a backslash, or use single quotes');e.key=key;throw e;}
+        return TOML_UNESCAPE[c];});}
+    else if((m=/^([+-]?(?:0|[1-9](?:_?\d)*))(?![\w.:-])(.*)$/.exec(v)))value=Number(m[1].replace(/_/g,''));
+    else if((m=/^(true|false)(?![\w.-])(.*)$/.exec(v)))value=m[1]==='true';
+    else{e=new Error(where+': the value of '+key+' must be a \'string\', a "string", a whole number, true or false');e.key=key;throw e;}
+    rest(m[m.length-1],key);
+    if(cur[key])throw new Error(where+': '+key+' is set twice; keep one');
+    cur[key]={value:value,line:i};
+  }
+  lines.forEach(function(ln,i){
+    try{oneLine(ln,i);}
+    catch(e){if(!onError)throw e;onError({line:i+1,key:e.key,message:e.message});}});
+  return {top:top,tables:tables,firstTable:firstTable,lines:lines,eol:eol};}
+// SETTINGS.toml in the data folder, which only the User edits, and what each setting may be: [default, lowest, highest]
+var SETTINGS_FILE='SETTINGS.toml';
+var SETTING_RULES={priority:{'pause-days':[28,1]},score:{'half-life-days':[30,1],'high-percent':[20,1,99],'min-people':[10,1]},weights:{message:[2,0],comment:[2,0],linked:[2,0],reply:[1,0],done:[1,0]}};
+function settingRule(table,key){var has=Object.prototype.hasOwnProperty,t=has.call(SETTING_RULES,table)?SETTING_RULES[table]:null;return t&&has.call(t,key)?t[key]:null;}
+// -> {values:{table:{key:number}},errors:[{line,message}],warnings:[{line,message}]}. A missing file (''), key or table is the default and
+// nothing to report. An invalid value is the default and an error, a key it doesn't know is a warning, and no line stops the others being read.
+function readSettings(text){
+  var values={},errors=[],warnings=[],table='',unknownAt={};
+  Object.keys(SETTING_RULES).forEach(function(t){values[t]={};Object.keys(SETTING_RULES[t]).forEach(function(k){values[t][k]=SETTING_RULES[t][k][0];});});
+  function at(line){return SETTINGS_FILE+' line '+line+': ';}
+  function unknown(line,t,k){if(unknownAt[line])return;unknownAt[line]=1;warnings.push({line:line,message:at(line)+(t?'['+t+'] ':'')+k+' is not a setting Discerny knows, so it does nothing'});}
+  function refuse(line,k,r,shown){var want=r[2]!==undefined?'a whole number from '+r[1]+' to '+r[2]:'a whole number of at least '+r[1];
+    errors.push({line:line,message:at(line)+k+' must be '+want+', not '+shown+', so it uses the default, '+r[0]});}
+  // the table each line falls under, for an error raised before the line is stored
+  var src=String(text||''),under=src.split(/\r?\n/).map(function(ln){var h=/^\s*\[\s*([A-Za-z0-9_-]+)\s*\]/.exec(ln);if(h)table=h[1];return table;});
+  var cfg=parseToml(src,SETTINGS_FILE,function(p){
+    if(!p.key){errors.push({line:p.line,message:p.message});return;}
+    var t=under[p.line-1],r=settingRule(t,p.key);
+    if(!r){unknown(p.line,t,p.key);return;}
+    refuse(p.line,p.key,r,src.split(/\r?\n/)[p.line-1].replace(/^[^=]*=\s*/,'').replace(/\s+#.*$/,'').trim());});
+  function look(t,kv){Object.keys(kv).forEach(function(k){
+    var r=settingRule(t,k),e=kv[k],line=e.line+1;
+    if(!r){unknown(line,t,k);return;}
+    var v=e.value;
+    if(typeof v!=='number'||v<r[1]||(r[2]!==undefined&&v>r[2])){refuse(line,k,r,typeof v==='string'?'"'+v+'"':String(v));return;}
+    values[t][k]=v;});}
+  look('',cfg.top);
+  Object.keys(cfg.tables).forEach(function(t){look(t,cfg.tables[t]);});
+  errors.sort(function(a,b){return a.line-b.line;});
+  warnings.sort(function(a,b){return a.line-b.line;});
+  return {values:values,errors:errors,warnings:warnings};}
 // IGNORED.md: "- <source key> {ignored-date: YYYY-MM-DD; reason: not actionable}", the braces parsed from the final " {"
 // -> [{key, fields, line, at}], at the line's index
 function ignoredOf(text){var out=[];String(text||'').replace(/\r/g,'').split('\n').forEach(function(ln,at){
@@ -753,6 +831,22 @@ function setPriority(text,id,on){
     if(!on)has.reverse().forEach(function(k){ls.splice(k,1);});}
   else{var ids=csv(v);if(on&&ids.indexOf(id)<0)ids.push(id);if(!on)ids=ids.filter(function(x){return x!==id;});ls[at]='- priority-people:'+(ids.length?' '+ids.join(', '):'');}
   return ls.join(eol);}
+// SOURCES.md: the IDs in priority-people in "## defaults", on its one line or as a list under it
+function priorityIds(text){
+  var ls=String(text||'').split(/\r?\n/),d=false,out=[],i;
+  for(i=0;i<ls.length;i++){
+    if(/^## /.test(ls[i])){if(d)break;d=/^## defaults\s*$/.test(ls[i]);continue;}
+    if(!d||!/^- priority-people:/.test(ls[i]))continue;
+    out=csv(ls[i].replace(/^- priority-people:\s*/,''));
+    if(!out.length)for(i++;i<ls.length&&/^ {2,}- /.test(ls[i]);i++)out.push(ls[i].replace(/^ {2,}- /,'').trim());
+    break;}
+  return out;}
+// Where a Person stands: 'user' never counts, 'manager' (the User's) always does, listed or not; everyone else is 'on' or 'off' priority-people
+function priorityStatus(people,ids,p){
+  if(p.meta.id===USER_ID)return 'user';
+  var me=people.filter(function(x){return x.meta.id===USER_ID;})[0];
+  if(me&&me.meta.manager&&me.meta.manager===p.name)return 'manager';
+  return ids.indexOf(p.meta.id)>=0?'on':'off';}
 // versions compare part by part, a missing part counting as 0; 'next' (an unlanded Migration) is newer than any
 function versionCmp(a,b){if(a===b)return 0;if(a==='next')return 1;if(b==='next')return -1;
   var x=String(a).split('.'),y=String(b).split('.');
@@ -836,6 +930,138 @@ function stampIn(tz,ms){try{var o={};new Intl.DateTimeFormat('en-GB',{timeZone:t
 // Comments in time order, the undated ones (older than any stamp) first; those with the same time keep their order
 function byTime(list){return list.map(function(c,k){return {c:c,k:k,t:String((c.f||{})['added-datetime']||'')};})
   .sort(function(a,b){return a.t<b.t?-1:a.t>b.t?1:a.k-b.k;}).map(function(x){return x.c;});}
+// ---- The Interaction log, INTERACTIONS.md: one line per event, "- YYYY-MM-DD P-#### <kind> T-####", or per decision, "- YYYY-MM-DD P-#### decision <what> {score: …}".
+// The Interaction score is worked out from it whenever it's read, and is never stored.
+var INTERACTIONS_FILE='INTERACTIONS.md';
+var INTER_HEAD=['# Interactions',
+  '<!-- The log the Interaction score is worked out from, keyed by P-ID. One line per event, written as it gets past the Inbox:',
+  '     `- YYYY-MM-DD P-#### <kind> T-####`, the kind being message, comment, linked, reply or done.',
+  '     One line per decision about a Priority person, with the score and breakdown at that moment:',
+  '     `- YYYY-MM-DD P-#### decision <yes|no|promote|demote|start> {score: …; message: …; half-life-days: …}`.',
+  '     `{inferred: yes}` marks a line an Upgrade inferred from older data. discerny.html and tools/discern.mjs write this file. -->',''];
+var INTER_KINDS=['message','comment','linked','reply','done'],INTER_DECISIONS=['yes','no','promote','demote','start'];
+// There's at most one of these for each Person on each Item; comment and reply can repeat.
+var INTER_ONCE=['message','linked','done'];
+// What a Proposal's interaction field may be: what it counts as when it's accepted, none being nothing
+var PROPOSAL_INTERACTIONS=['message','reply','linked','none'];
+var INTER_LINE=/^- (\S+) (\S+) (\S+) (\S+)(?: \{([^{}]*)\})?$/;
+function realDay(d){var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d||''));if(!m)return false;var t=new Date(Date.UTC(+m[1],+m[2]-1,+m[3]));return t.getUTCFullYear()===+m[1]&&t.getUTCMonth()===+m[2]-1&&t.getUTCDate()===+m[3];}
+// one line -> {date, person, kind, item | decision, fields, line}, or null for a line that isn't one
+function interactionOf(ln){var m=INTER_LINE.exec(ln);
+  if(!m)return null;
+  var o={date:m[1],person:m[2],kind:m[3],fields:m[5]?fieldsOf(m[5]):{},line:ln};
+  if(m[3]==='decision')o.decision=m[4];else o.item=m[4];
+  return o;}
+// the events and decisions in the log's text, with at, each one's index among its lines
+function interactionsOf(text){var out=[];String(text||'').replace(/\r/g,'').split('\n').forEach(function(ln,at){if(ln.slice(0,2)!=='- ')return;var o=interactionOf(ln);if(o){o.at=at;out.push(o);}});return out;}
+// what's wrong with the log's lines -> [{line, message}], line being 1-based. An ID needn't still exist: a deleted Item's events stay.
+function checkInteractions(text){var out=[],open=false;
+  String(text||'').replace(/\r/g,'').split('\n').forEach(function(ln,i){
+    var inC=open;if(ln.indexOf('<!--')>=0)inC=open=true;if(ln.indexOf('-->')>=0)open=false;
+    if(inC||!ln.trim()||/^#/.test(ln))return;
+    function no(m){out.push({line:i+1,message:INTERACTIONS_FILE+' line '+(i+1)+': '+m});}
+    var o=/^- /.test(ln)?interactionOf(ln):null;
+    if(!o){no('"'+ln.trim().slice(0,60)+'" is not in the shape of an event or a decision');return;}
+    if(!realDay(o.date))no('the date "'+o.date+'" must be a real date, YYYY-MM-DD');
+    if(!/^P-\d+$/.test(o.person))no('"'+o.person+'" must be a Person\'s ID, P-####');
+    if(o.kind==='decision'){if(INTER_DECISIONS.indexOf(o.decision)<0)no('the decision "'+o.decision+'" must be one of '+INTER_DECISIONS.join(', '));}
+    else{if(INTER_KINDS.indexOf(o.kind)<0)no('the kind "'+o.kind+'" must be one of '+INTER_KINDS.join(', ')+', or decision');
+      if(!/^T-\d+$/.test(o.item))no('"'+o.item+'" must be an Item\'s ID, T-####');}});
+  return out;}
+function interactionLine(e){var f=e.fields||{},parts=Object.keys(f).map(function(k){return k+': '+f[k];});
+  return '- '+e.date+' '+e.person+' '+e.kind+' '+(e.kind==='decision'?e.decision:e.item)+(parts.length?' {'+parts.join('; ')+'}':'');}
+function interactionText(text){var t=String(text||'');return t.trim()?t:INTER_HEAD.join('\n')+'\n';}
+function interactionAdd(t,line){if(t.slice(-1)!=='\n')t+='\n';return t+line+'\n';}
+// The log with these events written, unless that would repeat a one-per-Item kind -> {text, added: [the lines written]}
+function addInteractions(text,events){var t=interactionText(text),have={},added=[];
+  function key(e){return e.person+'|'+e.kind+'|'+e.item;}
+  interactionsOf(t).forEach(function(e){if(INTER_ONCE.indexOf(e.kind)>=0)have[key(e)]=1;});
+  events.forEach(function(e){
+    if(INTER_ONCE.indexOf(e.kind)>=0){if(have[key(e)])return;have[key(e)]=1;}
+    var l=interactionLine(e);t=interactionAdd(t,l);added.push(l);});
+  return {text:added.length?t:String(text||''),added:added};}
+// One line out for each line named, so what an action wrote goes even when an identical line remains from another.
+function dropInteractions(text,lines){var ls=String(text||'').split('\n');
+  for(var i=lines.length-1;i>=0;i--){var k=ls.lastIndexOf(lines[i]);if(k>=0)ls.splice(k,1);}
+  return ls.join('\n');}
+// The lines test picks taken out -> {text, removed: [[line, where it was]]}, which restoreInteractions puts back
+function removeInteractions(text,test){var removed=[],ls=String(text||'').split('\n');
+  var keep=ls.filter(function(ln,at){var o=ln.slice(0,2)==='- '?interactionOf(ln):null;if(o&&test(o)){removed.push([ln,at]);return false;}return true;});
+  return {text:removed.length?keep.join('\n'):String(text||''),removed:removed};}
+function restoreInteractions(text,removed){if(!removed||!removed.length)return String(text||'');var ls=interactionText(text).split('\n');
+  removed.forEach(function(r){ls.splice(Math.min(r[1],ls.length&&ls[ls.length-1]===''?ls.length-1:ls.length),0,r[0]);});
+  return ls.join('\n');}
+// values as readSettings gives them; a table or key that's missing is the default
+function settingOf(values,table,key){var t=values&&values[table];return t&&typeof t[key]==='number'?t[key]:SETTING_RULES[table][key][0];}
+function noScore(){var s={};INTER_KINDS.forEach(function(k){s[k]=0;});return {total:0,shares:s};}
+// score = the sum of weight(kind) x 0.5 ^ (age in days / half-life-days), an event dated in the future being age 0. Inferred events weigh the same; decisions don't count.
+// log is the file's text or interactionsOf's result -> {P-id: {total, shares: {kind: its part of the total}}}
+function interactionScores(log,values,today){var out={},half=settingOf(values,'score','half-life-days');
+  (typeof log==='string'?interactionsOf(log):log||[]).forEach(function(e){
+    if(INTER_KINDS.indexOf(e.kind)<0||!realDay(e.date))return;
+    var s=out[e.person]||(out[e.person]=noScore()),n=settingOf(values,'weights',e.kind)*Math.pow(0.5,Math.max(daysBetween(e.date,today),0)/half);
+    s.shares[e.kind]+=n;s.total+=n;});
+  return out;}
+function interactionScore(log,id,values,today){return interactionScores(log,values,today)[id]||noScore();}
+// A plain account of a Person's score: each kind that adds anything, the most first, then when most of it comes from.
+// log is as for interactionScores.
+function scoreExplanation(log,id,values,today){var half=settingOf(values,'score','half-life-days'),n={},add={},total=0,count=0,week=0,month=0,quarter=0,seen=0;
+  (typeof log==='string'?interactionsOf(log):log||[]).forEach(function(e){
+    if(e.person!==id||INTER_KINDS.indexOf(e.kind)<0||!realDay(e.date))return;
+    seen++;var w=settingOf(values,'weights',e.kind);if(!w)return;
+    var age=Math.max(daysBetween(e.date,today),0),v=w*Math.pow(0.5,age/half);
+    n[e.kind]=(n[e.kind]||0)+1;add[e.kind]=(add[e.kind]||0)+v;total+=v;count++;
+    if(age<=7)week+=v;if(age<=30)month+=v;if(age<=90)quarter+=v;});
+  if(!seen)return 'No Interactions yet';
+  if(!count)return seen+' Interactions, none of them counting under your weights';
+  var words={message:['message','messages'],reply:['reply','replies'],comment:['comment','comments'],linked:['linked','linked'],done:['done','done']};
+  var parts=Object.keys(n).sort(function(a,b){return add[b]-add[a]||INTER_KINDS.indexOf(a)-INTER_KINDS.indexOf(b);}).map(function(k){return n[k]+' '+words[k][n[k]===1?0:1];});
+  var when=week>total/2?'this week':month>total/2?'this month':quarter>total/2?'the last three months':'longer ago';
+  return parts.join(', ')+', '+(count>1?'mostly ':'')+when;}
+// Who a score is for: everyone with an ID but the User and anyone who has left
+function scoreable(p){return !!p.meta.id&&p.meta.id!==USER_ID&&p.meta.status!=='left';}
+// The review filters. people as in PEOPLE.md, ids priority-people, scores as interactionScores gives them, by P-ID.
+// Scored people are those scoreable with at least one Interaction. Totals closer than a rounding error count as tied.
+// -> {scored, needs, enough, high: [P-id], low: [P-id]}, both lists empty when there aren't enough scored people to compare
+function reviewLists(people,ids,scores,values){var EPS=1e-9,needs=settingOf(values,'score','min-people');
+  var scored=people.filter(function(p){return scoreable(p)&&scores[p.meta.id];}),n=scored.length,out={scored:n,needs:needs,enough:n>=needs,high:[],low:[]};
+  if(!out.enough)return out;
+  var totals=scored.map(function(p){return scores[p.meta.id].total;}).sort(function(a,b){return b-a;});
+  var cut=totals[Math.min(Math.ceil(n*settingOf(values,'score','high-percent')/100),n)-1];
+  var median=n%2?totals[(n-1)/2]:(totals[n/2-1]+totals[n/2])/2;
+  people.forEach(function(p){if(!scoreable(p))return;var s=scores[p.meta.id],st=priorityStatus(people,ids,p);
+    if(st==='off'&&s&&s.total>=cut-EPS)out.high.push(p.meta.id);
+    if(st==='on'&&(!s||s.total<median-EPS))out.low.push(p.meta.id);});
+  return out;}
+function tenths(n){return Math.round(n*10)/10;}
+// A decision's line: with a score, the score and each kind's share at that moment
+function decisionLine(date,person,decision,score,half){var f;
+  if(score){f={score:tenths(score.total)};INTER_KINDS.forEach(function(k){f[k]=tenths(score.shares[k]);});f['half-life-days']=half;}
+  return interactionLine({date:date,person:person,kind:'decision',decision:decision,fields:f});}
+// Who can get credit: someone in PEOPLE.md other than the User -> their P-ID, or ''. Unassigned, and a name not there, are no one.
+function creditById(people,id){return id&&id!==USER_ID&&people.some(function(p){return p.meta.id===id;})?id:'';}
+function creditByName(people,name){var p=name?people.filter(function(x){return x.name===name;})[0]:null;return p&&/^P-\d+$/.test(p.meta.id||'')&&p.meta.id!==USER_ID?p.meta.id:'';}
+function dayOf(s){var m=/^\d{4}-\d{2}-\d{2}/.exec(String(s||''));return m?m[0]:'';}
+// A none Proposal counts for nothing, unless the User changed its who while it waited. who-proposed keeps the who the Skill wrote, '-' if it wrote none,
+// from the User's first change until they change it back. was is who before this change.
+var WHO_PROPOSED='who-proposed',NO_WHO='-';
+function proposedWho(it){var w=it.meta[WHO_PROPOSED];return w===NO_WHO?'':w;}
+function whoByUser(it,was){if(it.meta.interaction!=='none')return;var from=proposedWho(it);if(from===undefined)from=was;
+  if((it.meta.who||'')===from)delete it.meta[WHO_PROPOSED];else it.meta[WHO_PROPOSED]=from||NO_WHO;}
+// Accept or Already handled: the Proposal's interaction, credited to who as it is now, dated when the Item reached the User.
+// A who the User changed on a none Proposal is linked, as it would have been had they changed it after accepting, so it's dated today.
+function acceptEvents(it,people,today){var k=it.meta.interaction,pid=creditByName(people,it.meta.who),from=proposedWho(it);
+  if(k==='none')return from!==undefined&&from!==(it.meta.who||'')?linkedEvents(pid,it.id,today):[];
+  return pid&&k&&PROPOSAL_INTERACTIONS.indexOf(k)>=0?[{date:dayOf(receivedOf(it.meta))||today,person:pid,kind:k,item:it.id}]:[];}
+// Acknowledging a Comment on an Item: news is a comment, credited to its sender, else who; a change of who is linked, credited to the new one.
+// A Comment from the calendar, the User or an Agent is nothing.
+function ackEvents(it,c,people,today){var f=c.f||{},g=fieldChange(c),date=dayOf(f['added-datetime'])||today,pid;
+  if(['calendar','user','agent'].indexOf(f.author)>=0)return [];
+  if(g&&g.field==='who'){pid=creditByName(people,g.to);return pid?[{date:date,person:pid,kind:'linked',item:it.id}]:[];}
+  pid=f.sender?creditById(people,f.sender):creditByName(people,it.meta.who);
+  return pid?[{date:date,person:pid,kind:'comment',item:it.id}]:[];}
+function doneEvents(it,people,date){var pid=creditByName(people,it.meta.who);return pid?[{date:date,person:pid,kind:'done',item:it.id}]:[];}
+function linkedEvents(pid,id,date){return pid?[{date:date,person:pid,kind:'linked',item:id}]:[];}
 // ---- Merge: a duplicate Item d folded into the Item s it duplicates, which keeps its ID. Meetings never merge.
 function canMerge(s,d){return !!s&&!!d&&s.id!==d.id&&s.meta.type!=='meeting'&&d.meta.type!=='meeting';}
 // due a before due b: the earlier day, and on the same day a time before none or a later one
@@ -870,9 +1096,10 @@ function mergeItem(s,d,at){
   cs.forEach(function(c){placeSub(s,{k:'comment',f:Object.assign({},c.f),v:c.v},ITEM_RANK);});
   addComment(s,{at:at,author:'user',text:'Merged '+d.id+' into this.'},ITEM_RANK);
   return s;}
-// the lines of RELATIONSHIPS.md ('rels'), ASK-AGENT.md ('asks', the entries as aParse keeps them), ASK-AGENT-LOG.md ('log') or
-// IGNORED.md ('ignored') that name d, made to name s. A Relationship or a No to one that would then repeat another, or join s to
-// itself, goes. -> {lines, swaps: [[the old line, the new one or null, where the old one was]]}
+// the lines of RELATIONSHIPS.md ('rels'), ASK-AGENT.md ('asks', the entries as aParse keeps them), ASK-AGENT-LOG.md ('log'),
+// IGNORED.md ('ignored') or INTERACTIONS.md ('interactions') that name d, made to name s. A Relationship or a No to one that would then
+// repeat another, or join s to itself, goes, as does an event of a kind there's one of per Item.
+// -> {lines, swaps: [[the old line, the new one or null, where the old one was]]}
 var IGN_REL_RE=/^(- rel\|)((?:T|P|PRJ|SYS)-\d+)\|((?:T|P|PRJ|SYS)-\d+)( \{[^{}]*\})$/;
 function mergeRefs(kind,lines,d,s){
   function to(x){return x===d?s:x;}
@@ -882,10 +1109,12 @@ function mergeRefs(kind,lines,d,s){
     if(kind==='asks'&&(m=NOTE_RE.exec(ln))&&m[1]===d)return '- '+s+ln.slice(2+d.length);
     if(kind==='log'&&(m=LOG_RE.exec(ln))&&m[1]===d)return '- '+s+ln.slice(2+d.length);
     if(kind==='ignored'&&(m=IGN_REL_RE.exec(ln))&&(m[2]===d||m[3]===d)){if(to(m[2])===to(m[3]))return null;return m[1]+to(m[2])+'|'+to(m[3])+m[4];}
+    if(kind==='interactions'&&ln.slice(0,2)==='- '&&(m=interactionOf(ln))&&m.item===d)return ln.replace(' '+m.kind+' '+d,' '+m.kind+' '+s);
     return undefined;}
   function key(ln){var m;
     if(kind==='rels'&&(m=REL_RE.exec(ln)))return m[2]==='~'?[m[1],m[3]].sort().join('~'):m[1]+'->'+m[3];
     if(kind==='ignored'&&(m=IGN_REL_RE.exec(ln)))return [m[2],m[3]].sort().join('|');
+    if(kind==='interactions'&&ln.slice(0,2)==='- '&&(m=interactionOf(ln))&&INTER_ONCE.indexOf(m.kind)>=0)return m.person+'|'+m.kind+'|'+m.item;
     return null;}
   var seen={},swaps=[],out=[];
   lines.forEach(function(ln){if(moved(ln)===undefined){var k=key(ln);if(k)seen[k]=1;}});
@@ -895,9 +1124,9 @@ function mergeRefs(kind,lines,d,s){
     if(n===null||(k&&seen[k])){swaps.push([ln,null,at]);return;}
     if(k)seen[k]=1;out.push(n);swaps.push([ln,n,at]);});
   return {lines:out,swaps:swaps};}
-// The data folder files the page reads and writes; `discern serve` serves these and no others.
-var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', asklog: 'ASK-AGENT-LOG.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md', settings: 'SOURCES.md' };
-var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
+// The data folder files the page reads and writes; `discern serve` serves these, and SETTINGS_FILE for reading, and no others.
+var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', asklog: 'ASK-AGENT-LOG.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md', settings: 'SOURCES.md', interactions: 'INTERACTIONS.md' };
+var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md', 'INTERACTIONS.md'];
 // The header the page writes when it creates a missing RELATIONSHIPS.md, DISMISSED.md or ASK-AGENT.md: the starter file's, word for word.
 var REL_HEAD = ['# Relationships',
   '<!-- One line per Relationship, stored once (shown on both):',
@@ -924,7 +1153,7 @@ var EDEF = {
 };
 // a Record's type or status as the page shows it: the file's lowercase value with a capital first letter
 function cap(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
-var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, asklog: function (t) { return { text: String(t || '') }; }, ignored: function (t) { return { text: String(t || '') }; }, dismissed: function (t) { return { text: String(t || '') }; }, settings: function (t) { return { text: String(t || '') }; } };
+var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, asklog: function (t) { return { text: String(t || '') }; }, ignored: function (t) { return { text: String(t || '') }; }, dismissed: function (t) { return { text: String(t || '') }; }, settings: function (t) { return { text: String(t || '') }; }, interactions: function (t) { return { text: String(t || '').replace(/\r\n/g, '\n') }; } };
 function serKey(k, m) {
   if (k === 'tasks' || k === 'inbox' || k === 'done') return serialize(m);
   if (k === 'people') { ensurePIds(m); return pSerialize(m); }
@@ -950,7 +1179,7 @@ var S = {
   m: null, ver: 0, ready: false, lost: false, moved: false, lastSync: 0, fresh: new Set(), folder: '',
   folderPath: '', folderErr: '', folderSugs: [], folderBusy: false,
   view: 'today', entity: null, sel: null, panel: false, tab: 'details',
-  group: lsGet('discerny-group', 'project'), pf: 'all', pq: '', pgroup: lsGet('discerny-pgroup', 'none'),
+  group: lsGet('discerny-group', 'project'), pf: 'all', pq: '', psort: 'name', pgroup: lsGet('discerny-pgroup', 'none'),
   wb: Object.assign({ group: 'urg', sort: 'urg', tag: '' }, lsJson('discerny-wb', {})), wq: '',
   qa: '', qaType: null, qaMore: false, qaUrg: '', qaDesc: '', palette: false, palQ: '', palI: 0, dialog: null,
   composer: {}, introOn: {}, subDraft: '', cmtDraft: '', cmtEdit: null, cmtEditText: '', tagDraft: '', newPrj: '', linkQ: '', linkMode: 'related', linkKind: 'All', linkDone: false, sysQ: '', suggestOn: {},
@@ -985,6 +1214,9 @@ async function idbSet(k, v) {
 
 /* ===================== file input/output ===================== */
 var lastMod = {};
+// SETTINGS.toml as it was when the page opened the folder: a change to the file applies on the next reload. The page never writes it.
+var SET = readSettings('');
+function pauseDays() { return SET.values.priority['pause-days']; }
 // Set when the page is served by node tools/discern.mjs serve: {folder, name, version, session, problem, canSwitch}
 // from /api/info. The four functions below then go through the server instead of the folder handle.
 var srv = null;
@@ -1070,7 +1302,8 @@ function countOf(k, m) {
   if (k === 'people') return m.people.length;
   if (k === 'projects' || k === 'systems') return m.ents.length;
   if (k === 'rels' || k === 'asks') return m.lines.length;
-  return String(m.text || '').split('\n').length;
+  var t = String(m.text || '');
+  return t.trim() ? t.split('\n').length : 0;
 }
 function looksWrong(k, text, m) {
   var b = BASE[k];
@@ -1103,7 +1336,7 @@ async function loadAll() {
     people: pParse(t['PEOPLE.md']), projects: eParse(t['PROJECTS.md']), systems: eParse(t['SYSTEMS.md']),
     rels: rParse(t['RELATIONSHIPS.md']), asks: aParse(t['ASK-AGENT.md']),
     log: logParse(t['ASK-AGENT-LOG.md']), sources: parseSources(t['SOURCES.md']),
-    drafts: await readDrafts(), asklog: { text: t['ASK-AGENT-LOG.md'] }, ignored: { text: '' }, dismissed: { text: '' }, settings: { text: t['SOURCES.md'] }
+    drafts: await readDrafts(), asklog: { text: t['ASK-AGENT-LOG.md'] }, ignored: { text: '' }, dismissed: { text: '' }, settings: { text: t['SOURCES.md'] }, interactions: PARSE.interactions(t['INTERACTIONS.md'])
   };
   keys.forEach(function (k) { BASE[k] = countOf(k, out[k]); });
   return out;
@@ -1115,7 +1348,9 @@ async function loadAll() {
    written only when the operation changed them. */
 function op(label, keys, fn) { return { label: label, keys: keys, fn: fn }; }
 var ANY = ['tasks', 'inbox', 'done'];
-var MERGE_KEYS = ['tasks', 'inbox', 'done', 'rels', 'asks', 'asklog', 'ignored'];
+var MERGE_KEYS = ['tasks', 'inbox', 'done', 'rels', 'asks', 'asklog', 'ignored', 'interactions'];
+// What an operation that writes to the Interaction log also needs: who can get credit, and the log.
+var LOG_KEYS = ['people', 'interactions'];
 function fItem(M, id) {
   id = rid(id);
   for (var a = 0; a < ANY.length; a++) {
@@ -1228,12 +1463,41 @@ function ensureProject(m, name, wants) {
 }
 function entIn(M, kind, id) { var x = rid(id); return M[EDEF[kind].key].ents.filter(function (e) { return e.meta.id === x; })[0]; }
 
+/* The Interaction log. An operation writes its events here and keeps the lines it wrote in st.logged, so its undo takes back exactly
+   those. Each run overwrites st.logged, so what stays is what the last run, the save, wrote to the files. */
+function logEvents(M, st, events) {
+  if (!M.interactions || !events.length) return;
+  var r = addInteractions(M.interactions.text, events);
+  M.interactions.text = r.text;
+  if (st) st.logged = (st.logged || []).concat(r.added);
+}
+function logBack(M, st) { if (st && st.logged && st.logged.length) M.interactions.text = dropInteractions(M.interactions.text, st.logged); }
+// A decision about a Priority person, with the score and breakdown at this moment, before anything else this action writes.
+function logDecision(M, st, pid, decision, today) {
+  var line = decisionLine(today, pid, decision, interactionScore(M.interactions.text, pid, SET.values, today), SET.values.score['half-life-days']);
+  M.interactions.text = interactionAdd(interactionText(M.interactions.text), line);
+  st.logged = (st.logged || []).concat([line]);
+}
+// A new involves Relationship is the User tying a Person to an Item, once the Item is past the Inbox.
+function involvesLine(line) { var m = REL_RE.exec(line); return !!m && m[4].trim() === 'involves'; }
+function logInvolves(M, st, line, today) {
+  var m = REL_RE.exec(remapLine(line));
+  if (!m || m[4].trim() !== 'involves') return;
+  var f = fItem(M, m[1]);
+  if (f && f.k !== 'inbox') logEvents(M, st, linkedEvents(creditById(M.people.people, m[3]), f.it.id, today));
+}
+
 var OPS = {
   meta: function (id, patch) {
-    return op('Edit ' + id, ANY, function (M) {
+    var who = patch.who !== undefined, day = who ? todayStr() : '';
+    return op('Edit ' + id, who ? ANY.concat(LOG_KEYS) : ANY, function (M) {
       var f = fItem(M, id);
       if (!f) return;
+      var was = f.it.meta.who || '';
       Object.keys(patch).forEach(function (k) { var v = patch[k] == null ? '' : String(patch[k]).replace(/[{}]/g, '').trim(); if (v === '') delete f.it.meta[k]; else f.it.meta[k] = v; });
+      // The User setting or changing who is linked for the new one, and the old one keeps their events. A Proposal counts when it's accepted.
+      if (who && f.k === 'inbox') whoByUser(f.it, was);
+      else if (who && (f.it.meta.who || '') !== was) logEvents(M, null, linkedEvents(creditByName(M.people.people, f.it.meta.who), f.it.id, day));
     });
   },
   title: function (id, t) { return op('Rename ' + id, ANY, function (M) { var f = fItem(M, id); if (f && t) f.it.title = t; }); },
@@ -1270,11 +1534,24 @@ var OPS = {
       if (list[idx]) r.x.subs.splice(r.x.subs.indexOf(list[idx]), 0, b); else placeSub(r.x, b, r.rank);
     });
   },
-  // Acknowledged clears the Comments to acknowledge it names ([idx, text] each); on, the undo, marks them again
-  ack: function (id, which, on) {
-    return op((on ? 'Undo acknowledge on ' : 'Acknowledge comments on ') + id, recKeys(id), function (M) {
+  // Acknowledged clears the Comments to acknowledge it names ([idx, text] each), and an Item's are logged once it's past the Inbox;
+  // on, the undo, marks them again and takes back what that wrote, with the same st
+  ack: function (id, which, on, st) {
+    var isItem = kindOf(id) === 'T', day = todayStr();
+    st = st || {};
+    return op((on ? 'Undo acknowledge on ' : 'Acknowledge comments on ') + id, isItem ? recKeys(id).concat(LOG_KEYS) : recKeys(id), function (M) {
       var r = recIn(M, id);
-      if (r) which.forEach(function (w) { var c = findComment(r.x, w[0], w[1]); if (!c) return; if (on) c.f.acknowledged = 'no'; else delete c.f.acknowledged; });
+      if (!on) st.logged = [];
+      if (!r) return;
+      var past = isItem && fItem(M, id).k !== 'inbox';
+      which.forEach(function (w) {
+        var c = findComment(r.x, w[0], w[1]);
+        if (!c) return;
+        if (on) { c.f.acknowledged = 'no'; return; }
+        if (past && toAck(c)) logEvents(M, st, ackEvents(r.x, c, M.people.people, day));
+        delete c.f.acknowledged;
+      });
+      if (on) logBack(M, st);
     });
   },
   // Undo of a Skill's field change: the field back to value, and the change Comments it names ([idx, text] each) acknowledged.
@@ -1306,17 +1583,62 @@ var OPS = {
   },
   // Yes to a Priority person: their ID added to priority-people; st.had says it was there already, for the undo
   prioYes: function (c, st) {
-    return op('Make ' + c.name + ' a Priority person', ['inbox', 'settings'], function (M) {
+    var day = todayStr();
+    return op('Make ' + c.name + ' a Priority person', ['inbox', 'settings', 'interactions'], function (M) {
+      st.logged = [];
       if (!dropChange(M.inbox, c.line)) return;
       var t = setPriority(M.settings.text, rid(c.id), true);
       if (st.had === undefined) st.had = t === M.settings.text;
       M.settings.text = t;
+      logDecision(M, st, rid(c.id), 'yes', day);
     });
   },
   prioUnyes: function (c, st) {
-    return op('Undo Priority person', ['inbox', 'settings'], function (M) {
+    return op('Undo Priority person', ['inbox', 'settings', 'interactions'], function (M) {
       putChange(M.inbox, c.lines);
       if (st.had === false) M.settings.text = setPriority(M.settings.text, rid(c.id), false);
+      logBack(M, st);
+    });
+  },
+  // Promote by hand, which also answers a Priority person Proposal waiting for them. st keeps what the undo must put back;
+  // each run overwrites it, so what stays is what the last run, the save, found in the files.
+  promote: function (id, st) {
+    var day = todayStr();
+    return op('Promote ' + id, ['inbox', 'settings', 'interactions'], function (M) {
+      var t = setPriority(M.settings.text, rid(id), true), cs = changesOf(M.inbox.post).filter(function (c) { return c.type === 'priority' && rid(c.id) === rid(id); });
+      st.had = t === M.settings.text;
+      M.settings.text = t;
+      st.lines = cs.map(function (c) { return c.lines; });
+      cs.forEach(function (c) { dropChange(M.inbox, c.line); });
+      st.logged = [];
+      logDecision(M, st, rid(id), 'promote', day);
+    });
+  },
+  unpromote: function (id, st) {
+    return op('Undo promote ' + id, ['inbox', 'settings', 'interactions'], function (M) {
+      (st.lines || []).forEach(function (l) { putChange(M.inbox, l); });
+      if (st.had === false) M.settings.text = setPriority(M.settings.text, rid(id), false);
+      logBack(M, st);
+    });
+  },
+  // Demote by hand starts a Priority pause, with the line a No writes. addLines won't repeat a line, so st.added says whether this one is ours to undo.
+  demote: function (id, line, st) {
+    var day = todayStr();
+    return op('Demote ' + id, ['settings', 'ignored', 'interactions'], function (M) {
+      var t = setPriority(M.settings.text, rid(id), false), g = addLines(M.ignored.text, [line]);
+      st.had = t !== M.settings.text;
+      st.added = g !== M.ignored.text;
+      M.settings.text = t;
+      M.ignored.text = g;
+      st.logged = [];
+      logDecision(M, st, rid(id), 'demote', day);
+    });
+  },
+  undemote: function (id, line, st) {
+    return op('Undo demote ' + id, ['settings', 'ignored', 'interactions'], function (M) {
+      if (st.had) M.settings.text = setPriority(M.settings.text, rid(id), true);
+      if (st.added) M.ignored.text = dropLines(M.ignored.text, [line]);
+      logBack(M, st);
     });
   },
   addSub: function (id, text) {
@@ -1379,8 +1701,9 @@ var OPS = {
       if (ds.length) f.it.meta.dependencies = ds.join(', '); else delete f.it.meta.dependencies;
     });
   },
-  complete: function (id, date) {
-    return op('Complete ' + id, ['done', 'tasks'], function (M) {
+  // back, the undo of a reopen, puts back the done events that reopen took out, in place of writing one
+  complete: function (id, date, back) {
+    return op('Complete ' + id, ['done', 'tasks'].concat(LOG_KEYS), function (M) {
       var x = rid(id), k = M.tasks.items.findIndex(function (i) { return i.id === x; });
       if (k < 0) return;
       var it = M.tasks.items[k], dup = M.done.items.filter(function (i) { return i.id === x; })[0];
@@ -1389,12 +1712,18 @@ var OPS = {
       it.done = true; it.meta['done-date'] = date; delete it.meta.status;
       M.done.items = M.done.items.filter(function (i) { return i.id !== x; });
       M.done.items.push(it);
+      if (back) M.interactions.text = restoreInteractions(M.interactions.text, back.removed);
+      else logEvents(M, null, doneEvents(it, M.people.people, date));
     });
   },
-  reopen: function (id, st) {
-    return op('Reopen ' + id, ['tasks', 'done'], function (M) {
+  // Reopening an Item takes out its done events, which back keeps for the undo
+  reopen: function (id, st, back) {
+    return op('Reopen ' + id, ['tasks', 'done', 'interactions'], function (M) {
       var x = rid(id), k = M.done.items.findIndex(function (i) { return i.id === x; });
       if (k < 0) return;
+      var gone = removeInteractions(M.interactions.text, function (e) { return e.kind === 'done' && e.item === x; });
+      M.interactions.text = gone.text;
+      if (back) back.removed = gone.removed;
       var it = M.done.items[k], dup = M.tasks.items.filter(function (i) { return i.id === x; })[0];
       if (dup && dup.title !== it.title) throw clash(x, dup.title, it.title);
       M.done.items.splice(k, 1);
@@ -1404,9 +1733,13 @@ var OPS = {
       insertById(M.tasks.items, it);
     });
   },
-  accept: function (id, relLines) {
-    return op('Accept ' + id, ['tasks', 'inbox', 'rels'], function (M) {
-      var k = M.inbox.items.findIndex(function (i) { return i.id === id; });
+  // st keeps the lines it logged, for unaccept. Getting past the Inbox is when the Proposal's interaction, and any involves Relationship it has, count.
+  accept: function (id, relLines, st) {
+    var day = todayStr();
+    st = st || {};
+    return op('Accept ' + id, ['tasks', 'inbox', 'rels'].concat(LOG_KEYS), function (M) {
+      var k = M.inbox.items.findIndex(function (i) { return i.id === id; }), came = null;
+      st.logged = [];
       if (k >= 0) {
         var it = M.inbox.items[k], dup = M.tasks.items.filter(function (i) { return i.id === id; })[0];
         if (dup && dup.title !== it.title) throw clash(id, dup.title, it.title);
@@ -1415,14 +1748,19 @@ var OPS = {
         insertById(M.tasks.items, it);
         var n = idNum(id) + 1;
         if (n > nextId(M.tasks)) setNextId(M.tasks, n);
+        came = it;
       } else if (!M.tasks.items.some(function (i) { return i.id === id; })) return;
       var R = M.rels, added = false;
       relLines.map(remapLine).forEach(function (l) { if (R.lines.indexOf(l) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); added = true; } });
       if (added) relRefresh(R);
+      if (!came) return;
+      logEvents(M, st, acceptEvents(came, M.people.people, day));
+      R.rels.filter(function (r) { return r.a === id; }).forEach(function (r) { logInvolves(M, st, r.raw, day); });
     });
   },
-  unaccept: function (id, relLines) {
-    return op('Undo accept ' + id, ['inbox', 'tasks', 'rels'], function (M) {
+  unaccept: function (id, relLines, st) {
+    return op('Undo accept ' + id, ['inbox', 'tasks', 'rels', 'interactions'], function (M) {
+      logBack(M, st);
       var k = M.tasks.items.findIndex(function (i) { return i.id === id; });
       if (k >= 0) {
         var it = M.tasks.items[k], dup = M.inbox.items.filter(function (i) { return i.id === id; })[0];
@@ -1456,25 +1794,35 @@ var OPS = {
     });
   },
   /* change Proposals: each answer drops the Proposal from the Inbox and makes the change, or logs a No in IGNORED.md */
-  relYes: function (c, line) {
-    return op('Relate ' + c.a + ' and ' + c.b, ['inbox', 'rels'], function (M) {
+  relYes: function (c, line, st) {
+    var day = todayStr(), logs = involvesLine(line);
+    return op('Relate ' + c.a + ' and ' + c.b, logs ? ['inbox', 'rels', 'tasks', 'done'].concat(LOG_KEYS) : ['inbox', 'rels'], function (M) {
+      st.logged = [];
       if (!dropChange(M.inbox, c.line)) return;
       var R = M.rels, l = remapLine(line);
-      if (R.lines.indexOf(l) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); }
+      if (R.lines.indexOf(l) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); if (logs) logInvolves(M, st, l, day); }
     });
   },
-  relUnyes: function (c, line) {
-    return op('Undo relate', ['inbox', 'rels'], function (M) {
+  relUnyes: function (c, line, st) {
+    return op('Undo relate', involvesLine(line) ? ['inbox', 'rels', 'interactions'] : ['inbox', 'rels'], function (M) {
       putChange(M.inbox, c.lines);
       var R = M.rels, k = R.lines.indexOf(remapLine(line));
       if (k >= 0) { R.lines.splice(k, 1); relRefresh(R); }
+      logBack(M, st);
     });
   },
-  changeNo: function (c) {
-    return op('No to a change', ['inbox', 'ignored'], function (M) { if (dropChange(M.inbox, c.line)) M.ignored.text = addLines(M.ignored.text, [noLine(c)]); });
+  // A No to a Priority person is a decision, logged with the score at this moment
+  changeNo: function (c, st) {
+    var prio = c.type === 'priority', day = todayStr();
+    return op('No to a change', prio ? ['inbox', 'ignored', 'interactions'] : ['inbox', 'ignored'], function (M) {
+      st.logged = [];
+      if (!dropChange(M.inbox, c.line)) return;
+      M.ignored.text = addLines(M.ignored.text, [noLine(c)]);
+      if (prio) logDecision(M, st, rid(c.id), 'no', day);
+    });
   },
-  changeUnno: function (c, line) {
-    return op('Undo no', ['inbox', 'ignored'], function (M) { putChange(M.inbox, c.lines); M.ignored.text = dropLines(M.ignored.text, [line]); });
+  changeUnno: function (c, line, st) {
+    return op('Undo no', c.type === 'priority' ? ['inbox', 'ignored', 'interactions'] : ['inbox', 'ignored'], function (M) { putChange(M.inbox, c.lines); M.ignored.text = dropLines(M.ignored.text, [line]); logBack(M, st); });
   },
   // st keeps what the Person had before, for the undo
   emailYes: function (c, date, st) {
@@ -1504,8 +1852,9 @@ var OPS = {
     if (o.intro) spec = { title: 'Set up an introduction meeting with ' + c.name, meta: { type: 'task', who: c.name, urgency: 'this week', priority: 'medium', 'received-datetime': o.now }, description: '', newProjects: [], date: o.date };
     var at = spec ? OPS.addTask(spec, task) : null, items = csv(c.fields.items);
     st.whos = []; st.rels = [];
-    var keys = ['inbox', 'people', 'tasks', 'done', 'rels'].concat(o.priority ? ['settings'] : []);
+    var keys = ['inbox', 'people', 'tasks', 'done', 'rels', 'interactions'].concat(o.priority ? ['settings'] : []);
     return op('Add ' + c.name, keys, function (M) {
+      st.logged = [];
       if (!dropChange(M.inbox, c.line)) return;
       var had = M.people.people.some(function (x) { return x.name.toLowerCase() === c.name.toLowerCase(); });
       ap.fn(M);
@@ -1517,27 +1866,39 @@ var OPS = {
       if (c.fields.company && !p.meta.company) p.meta.company = cleanName(c.fields.company);
       if (c.fields.title && !p.meta.title) p.meta.title = cleanName(c.fields.title);
       p.meta['checked-date'] = o.date;
-      items.forEach(function (x) { var f = fItem(M, x); if (f && f.k !== 'done' && !realWho(f.it)) { f.it.meta.who = p.name; if (st.whos.indexOf(f.it.id) < 0) st.whos.push(f.it.id); } });
+      if (o.priority) logDecision(M, st, p.meta.id, 'yes', o.date);
+      items.forEach(function (x) {
+        var f = fItem(M, x);
+        if (!f || f.k === 'done' || realWho(f.it)) return;
+        var was = f.it.meta.who || '';
+        f.it.meta.who = p.name;
+        if (st.whos.indexOf(f.it.id) < 0) st.whos.push(f.it.id);
+        // One still in the Inbox counts when it's accepted
+        if (f.k === 'inbox') whoByUser(f.it, was);
+        else logEvents(M, st, linkedEvents(creditById(M.people.people, p.meta.id), f.it.id, o.date));
+      });
       if (o.priority) M.settings.text = setPriority(M.settings.text, p.meta.id, true);
       if (!at) return;
       at.fn(M);
       st.task = task.id;
+      st.logged = st.logged.concat(task.logged || []);
       var R = M.rels, n = R.lines.length;
       items.forEach(function (x) { var f = fItem(M, x), r = f ? relLine(task.id, f.it.id) : {}; if (r.line && R.lines.indexOf(r.line) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(r.line); if (st.rels.indexOf(r.line) < 0) st.rels.push(r.line); } });
       if (R.lines.length !== n) relRefresh(R);
     });
   },
   personUnadd: function (c, o, st) {
-    var keys = ['inbox', 'people', 'tasks', 'done', 'rels'].concat(o.priority ? ['settings'] : []);
+    var keys = ['inbox', 'people', 'tasks', 'done', 'rels', 'interactions'].concat(o.priority ? ['settings'] : []);
     return op('Undo add ' + c.name, keys, function (M) {
       putChange(M.inbox, c.lines);
+      logBack(M, st);
       var pid = rid(st.pid), p = M.people.people.filter(function (x) { return x.meta.id === pid; })[0];
       if (p && st.created) {
         var hw = pNextId(M.people);
         M.people.people = M.people.people.filter(function (x) { return x !== p; });
         pSetNextId(M.people, hw);
       } else if (p) withEmail(p, c.email, false);
-      st.whos.forEach(function (x) { var f = fItem(M, x); if (f && p && f.it.meta.who === p.name) delete f.it.meta.who; });
+      st.whos.forEach(function (x) { var f = fItem(M, x); if (f && p && f.it.meta.who === p.name) { delete f.it.meta.who; if (f.k === 'inbox') whoByUser(f.it, p.name); } });
       if (o.priority && pid) M.settings.text = setPriority(M.settings.text, pid, false);
       if (st.task) { var t = rid(st.task); M.tasks.items = M.tasks.items.filter(function (i) { return !(i.id === t && getSub(i, 'origin').some(function (b) { return /^Added /.test(b.v); })); }); }
       var R = M.rels, n = R.lines.length, drop = st.rels.map(remapLine);
@@ -1576,6 +1937,16 @@ var OPS = {
       if (nextId(M.tasks) < hw) setNextId(M.tasks, hw);
       mergeItem(s.it, d.it, at);
       if (s.k === 'done' && !s.it.done) { M.done.items.splice(M.done.items.indexOf(s.it), 1); insertById(M.tasks.items, s.it); }
+      // The events move with the rest. A survivor left open has no done event, as if it had been reopened.
+      var L = M.interactions, lr = mergeRefs('interactions', String(L.text || '').split('\n'), dx, sx);
+      if (!s.it.done) lr.lines = lr.lines.filter(function (ln, at) {
+        var e = ln.slice(0, 2) === '- ' ? interactionOf(ln) : null;
+        if (!e || e.kind !== 'done' || e.item !== sx) return true;
+        var w = lr.swaps.filter(function (y) { return y[1] === ln; })[0];
+        if (w) w[1] = null; else lr.swaps.push([ln, null, at]);
+        return false;
+      });
+      if (lr.swaps.length) { L.text = lr.lines.join('\n'); st.swaps.interactions = lr.swaps; }
       ANY.forEach(function (k) {
         M[k].items.forEach(function (i) {
           var ds = depList(i);
@@ -1626,15 +1997,17 @@ var OPS = {
       }
       if (st.swaps.rels) { M.rels.lines = back(M.rels.lines, st.swaps.rels); relRefresh(M.rels); }
       if (st.swaps.asks) { M.asks.lines = back(M.asks.lines, st.swaps.asks); askRefresh(M.asks); }
-      ['asklog', 'ignored'].forEach(function (k) { if (st.swaps[k] && M[k]) M[k].text = back(String(M[k].text || '').split('\n'), st.swaps[k]).join('\n'); });
+      ['asklog', 'ignored', 'interactions'].forEach(function (k) { if (st.swaps[k] && M[k]) M[k].text = back(String(M[k].text || '').split('\n'), st.swaps[k]).join('\n'); });
       if (st.swaps.asklog && M.log) M.log = logParse(M.asklog.text);
       st.post.forEach(function (w) { var p = M.inbox.post || [], k = w[1] === null ? -1 : p.indexOf(w[1]); if (k >= 0) p[k] = w[0][0]; else putChange(M.inbox, w[0]); });
     });
   },
+  // An Item added by hand with a who ties that Person to it; out keeps the Item's ID, and the lines logged for removeAdded.
   addTask: function (spec, out) {
-    var keys = spec.newProjects.length ? ['projects', 'tasks', 'inbox', 'done'] : ['tasks', 'inbox', 'done'];
+    var keys = (spec.newProjects.length ? ['projects', 'tasks', 'inbox', 'done'] : ['tasks', 'inbox', 'done']).concat(spec.meta.who ? LOG_KEYS : []);
     spec.prjWant = spec.prjWant || {};
     return op('Add task', keys, function (M) {
+      if (out) out.logged = [];
       var prj = csv(spec.meta.projects).map(rid);
       spec.newProjects.forEach(function (name) { var pid = ensureProject(M.projects, name, spec.prjWant); if (prj.indexOf(pid) < 0) prj.push(pid); });
       var want = spec.want ? rid(spec.want) : null, f = want ? fItem(M, want) : null;
@@ -1649,19 +2022,31 @@ var OPS = {
       M.tasks.items.push(it);
       setNextId(M.tasks, Math.max(n, idNum(id) + 1));
       if (out) out.id = id;
+      if (meta.who) logEvents(M, out, linkedEvents(creditByName(M.people.people, meta.who), id, spec.date));
     });
   },
-  removeAdded: function (id) {
-    return op('Undo add', ['tasks'], function (M) {
+  removeAdded: function (id, out) {
+    return op('Undo add', ['tasks', 'interactions'], function (M) {
       var x = rid(id);
       M.tasks.items = M.tasks.items.filter(function (i) { return !(i.id === x && getSub(i, 'origin').some(function (b) { return /^Added /.test(b.v); })); });
+      logBack(M, out);
     });
   },
-  addRel: function (line) {
-    return op('Relate', ['rels'], function (M) { var R = M.rels, l = remapLine(line); if (R.lines.indexOf(l) >= 0) return; if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); });
+  // Given st, this is the User adding a Relationship, which an involves one logs; without it, the undo of taking one out, which logs nothing.
+  addRel: function (line, st) {
+    var logs = !!st && involvesLine(line), day = logs ? todayStr() : '';
+    return op('Relate', logs ? ['rels'].concat(ANY, LOG_KEYS) : ['rels'], function (M) {
+      if (st) st.logged = [];
+      var R = M.rels, l = remapLine(line);
+      if (R.lines.indexOf(l) >= 0) return;
+      if (!R.lines.length) R.lines = REL_HEAD.slice();
+      R.lines.push(l);
+      relRefresh(R);
+      if (logs) logInvolves(M, st, l, day);
+    });
   },
-  removeRel: function (line) {
-    return op('Unlink', ['rels'], function (M) { var R = M.rels, k = R.lines.indexOf(remapLine(line)); if (k >= 0) { R.lines.splice(k, 1); relRefresh(R); } });
+  removeRel: function (line, st) {
+    return op('Unlink', st ? ['rels', 'interactions'] : ['rels'], function (M) { var R = M.rels, k = R.lines.indexOf(remapLine(line)); if (k >= 0) { R.lines.splice(k, 1); relRefresh(R); } if (st) logBack(M, st); });
   },
   addAsk: function (line) {
     return op('Queue for the agent', ['asks'], function (M) { var A = M.asks, l = remapLine(line); if (A.lines.indexOf(l) >= 0) return; if (!A.lines.length) A.lines = ASK_HEAD.slice(); A.lines.push(l); askRefresh(A); });
@@ -1702,18 +2087,32 @@ var OPS = {
       pSetNextId(M.people, Math.max(pNextId(M.people), idNum(p.meta.id) + 1));
     });
   },
-  removePerson: function (name) {
-    return op('Remove ' + name, ['people'], function (M) {
-      var hw = pNextId(M.people);
-      M.people.people = M.people.people.filter(function (x) { return x.name !== name; });
-      if (pNextId(M.people) < hw || !M.people.pre.some(function (l) { return /next-id:/.test(l); })) pSetNextId(M.people, hw);
+  // Add to People from an Item that names them: the User has tied them to that Item, so it's linked once it's past the Inbox. Undo is removePerson, which takes the line out.
+  addPersonOn: function (name, id, today) {
+    var ap = OPS.addPerson(name, 'Other');
+    return op('Add ' + name, ANY.concat(LOG_KEYS), function (M) {
+      ap.fn(M);
+      var f = fItem(M, id);
+      if (f && f.k !== 'inbox' && f.it.meta.who === name) logEvents(M, null, linkedEvents(creditByName(M.people.people, name), f.it.id, today));
     });
   },
-  restorePerson: function (text, grp, idx) {
-    return op('Restore person', ['people'], function (M) {
+  // Deleting a Person takes their lines out of the log, which st keeps for restorePerson
+  removePerson: function (name, st) {
+    return op('Remove ' + name, LOG_KEYS, function (M) {
+      var hw = pNextId(M.people), who = M.people.people.filter(function (x) { return x.name === name; })[0], pid = who && who.meta.id;
+      M.people.people = M.people.people.filter(function (x) { return x.name !== name; });
+      if (pNextId(M.people) < hw || !M.people.pre.some(function (l) { return /next-id:/.test(l); })) pSetNextId(M.people, hw);
+      var gone = removeInteractions(M.interactions.text, function (e) { return !!pid && e.person === pid; });
+      M.interactions.text = gone.text;
+      if (st) st.removed = gone.removed;
+    });
+  },
+  restorePerson: function (text, grp, idx, st) {
+    return op('Restore person', LOG_KEYS, function (M) {
       var p = pParse('## ' + grp + '\n' + text).people[0];
       if (!p || M.people.people.some(function (x) { return x.name === p.name; })) return;
       M.people.people.splice(Math.min(idx, M.people.people.length), 0, p);
+      if (st) M.interactions.text = restoreInteractions(M.interactions.text, st.removed);
     });
   },
   /* projects and systems */
@@ -2086,7 +2485,15 @@ function listName(i) {
   if (i.meta.type === 'fyi') return 'FYI';
   return 'Next actions';
 }
-function homeView(i) { return { Inbox: 'inbox', Done: 'done', 'Waiting for': 'waiting', Upcoming: 'upcoming', FYI: 'fyi', 'Next actions': 'next' }[listName(i)]; }
+// the View a bare Item ID opens on: a Meeting or FYI that is also waiting goes to its own View
+function homeView(i) {
+  var w = whereOf(i.id);
+  if (w === 'inbox') return 'inbox';
+  if (w === 'done') return 'done';
+  if (i.meta.type === 'meeting') return 'upcoming';
+  if (i.meta.type === 'fyi') return 'fyi';
+  return isWaiting(i) ? 'waiting' : 'next';
+}
 function srcKind(i) {
   var s = srcOf(i)[0] || '';
   if (/^Email .* sent to /.test(s)) return 'an email you sent';
@@ -2145,6 +2552,39 @@ function todayItems() {
 /* ===================== people, projects and systems ===================== */
 function isExt(p) { return p.meta.external === 'yes'; }
 function isMe(p) { return p.meta.id === USER_ID; }
+function prioOf(p) { return priorityStatus(S.m.people.people, priorityIds(S.m.settings.text), p); }
+function isPrio(p) { var s = prioOf(p); return s === 'on' || s === 'manager'; }
+function prioMark(p) { return isPrio(p) ? badge('Priority', 'flag prio-m') : ''; }
+// The Interaction scores and the review filters, worked out from the log once for each version of the model and each day.
+var SCORED = null;
+function scored() {
+  var today = todayStr();
+  if (SCORED && SCORED.ver === S.ver && SCORED.m === S.m && SCORED.today === today) return SCORED;
+  var events = interactionsOf(S.m.interactions.text), scores = interactionScores(events, SET.values, today), top = 0;
+  S.m.people.people.forEach(function (p) { var s = scores[p.meta.id]; if (s && scoreable(p) && s.total > top) top = s.total; });
+  SCORED = { ver: S.ver, m: S.m, today: today, events: events, scores: scores, top: top, lists: reviewLists(S.m.people.people, priorityIds(S.m.settings.text), scores, SET.values) };
+  return SCORED;
+}
+function scoreOf(p) { var s = scored().scores[p.meta.id]; return s ? s.total : 0; }
+function scoreText(n) { return tenths(n).toFixed(1); }
+// A row's number and bar. The bar is out of the highest score anywhere, so that a filter doesn't change what it means.
+function scoreCell(p) {
+  if (!scoreable(p)) return '<div class="score"></div>';
+  var n = scoreOf(p), top = scored().top, pct = top ? Math.round(n / top * 100) : 0;
+  return '<div class="score"><span class="sr">Interaction score </span><span class="score-n">' + scoreText(n) + '</span><span class="score-bar" aria-hidden="true"><span style="width:' + pct + '%"></span></span></div>';
+}
+function scoreFact(p) {
+  if (!scoreable(p)) return fact('Interaction score', [fv(isMe(p) ? 'Not scored: this is you' : p.meta.status === 'left' ? 'Not scored: they have left' : 'Not scored')]);
+  return fact('Interaction score', [fv(scoreText(scoreOf(p))), '<span class="hint">' + esc(scoreExplanation(scored().events, p.meta.id, SET.values, todayStr())) + '</span>']);
+}
+// The Promote or Demote button: locked on the User's manager, and absent on the User, on anyone with no ID and on someone who has left, unless they're still listed
+function prioToggle(p, cls) {
+  var s = prioOf(p), c = (cls ? cls + ' ' : '') + 'prio-t';
+  if (s === 'manager') return '<button type="button" class="btn ' + c + '" aria-disabled="true" aria-label="' + esc(p.name + ' is your manager, and always counts as a Priority person') + '" title="Your manager always counts as a Priority person">' + ic('lock', 's') + 'Always</button>';
+  if (s === 'user' || !p.meta.id || (s === 'off' && p.meta.status === 'left')) return '';
+  var label = s === 'on' ? 'Demote ' + p.name + ', so they are no longer a Priority person' : 'Promote ' + p.name + ' to a Priority person';
+  return bt(s === 'on' ? 'Demote' : 'Promote', s === 'on' ? 'demote' : 'promote', { id: p.meta.id, cls: c, attrs: ' aria-label="' + esc(label) + '" title="' + esc(label) + '"' });
+}
 function gaps(p) {
   if (p.meta.status === 'left') return [];
   var need = isExt(p) ? ['company', 'title'] : ['company', 'department', 'title', 'manager'];
@@ -2420,8 +2860,11 @@ function search(qs) {
   if (ents.length) groups.push({ title: 'Projects and systems', items: ents.slice(0, 5), more: ents.length - 5, lab: ents[0].lab });
   var c = cmds.filter(function (x) { return has(x.label); });
   if (c.length) groups.push({ title: 'Commands', items: c, lab: true });
-  /* whichever group matched on its name or title comes first */
-  return groups.map(function (g, k) { return { g: g, k: k }; }).sort(function (a, b) { return (b.g.lab - a.g.lab) || (a.k - b.k); }).map(function (x) { return x.g; });
+  /* whichever group matched on its name or title comes first, after a Link */
+  groups = groups.map(function (g, k) { return { g: g, k: k }; }).sort(function (a, b) { return (b.g.lab - a.g.lab) || (a.k - b.k); }).map(function (x) { return x.g; });
+  var link = linkResult(qs);
+  if (link) groups.unshift({ title: 'Link', items: [link] });
+  return groups;
 }
 function flatResults(groups) { var out = []; groups.forEach(function (g) { g.items.forEach(function (it) { out.push(it); }); }); return out; }
 
@@ -2440,6 +2883,7 @@ function opts(list, cur) {
 }
 function pressed(on) { return ' aria-pressed="' + (on ? 'true' : 'false') + '"'; }
 var ICONS = {
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   today: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/>',
   next: '<path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17M11 6h10M11 12h10M11 18h10"/>',
@@ -2458,6 +2902,7 @@ var ICONS = {
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   back: '<path d="m15 18-6-6 6-6"/>',
   ext: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   keys: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -2920,13 +3365,13 @@ function viewPerson(id) {
   }
   var reports = S.m.people.people.filter(function (x) { return x.meta.manager === p.name && x.meta.status !== 'left'; });
   var owns = systemsOwnedBy(p), g = gaps(p);
-  var pills = (isExt(p) ? badge('External', 'info') : '') + (p.meta.status === 'left' ? badge('Left') : '') +
+  var pills = prioMark(p) + (isExt(p) ? badge('External', 'info') : '') + (p.meta.status === 'left' ? badge('Left') : '') +
     (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : (p.meta.status === 'left' ? '' : badge('Details complete', 'ok'))) + (p.grp ? badge(p.grp, 'soft') : '') + '<span class="sp">' + copyId(id) + '</span>';
   var facts = fact('Organisation', [fv([p.meta.company, p.meta.department].filter(Boolean).join(' › ') || 'Not set')]) +
     fact('Reports to', chain.length ? chain : [fv(isExt(p) ? 'External' : 'Not set')]) +
     fact('Direct reports', reports.length ? reports.map(function (x) { return fv(x.name, x.meta.id ? 'person' : '', x.meta.id); }) : [fv('None')]) +
     fact('Owns', owns.length ? owns.map(function (x) { return fv(x.name, 'ent', x.meta.id); }) : [fv('No systems')]) +
-    fact('Last checked', [fv(p.meta['checked-date'] ? fmtY(p.meta['checked-date']) : 'Never')]);
+    fact('Last checked', [fv(p.meta['checked-date'] ? fmtY(p.meta['checked-date']) : 'Never')]) + scoreFact(p);
   var hist = getSub(p, 'history');
   var box = '<div class="entity" data-k="entity"><div class="pills">' + pills + '</div>' + vDescText(p) +
     '<div class="facts">' + facts + '</div>' + vAsksBox(id) +
@@ -2950,7 +3395,7 @@ function viewPerson(id) {
   if (mentioned.length) b += vSec('pmn', 'Mentioned in', rowsOf(mentioned), { hint: 'name appears in notes or sub-tasks' });
   var dn = theirs.filter(function (i) { return whereOf(i.id) === 'done'; });
   if (dn.length) b += vSec('pd', 'Done with ' + first, rowsOf(dn, { hidePerson: true }));
-  var tools = entTools(id) + (p.meta.status === 'left' ? '' : bt('Mark details checked', 'check-person', { id: id, icon: 'check' }));
+  var tools = prioToggle(p) + entTools(id) + (p.meta.status === 'left' ? '' : bt('Mark details checked', 'check-person', { id: id, icon: 'check' }));
   return { title: name + (isMe(p) ? ' (you)' : ''), sub: [p.meta.title, [p.meta.company, p.meta.department].filter(Boolean).join(' › ')].filter(Boolean).join(' · '), crumb: ['People', 'people'], tools: tools, body: box + '<div class="list">' + b + '</div>' };
 }
 // a history line as the page shows it: "Mon 6 Oct 2026: Job title: Buyer → Senior buyer"
@@ -3019,27 +3464,34 @@ function viewSystems() {
 }
 function viewPeople() {
   var all = S.m.people.people, act = activePeople();
-  var defs = [['all', 'All', act.length], ['internal', 'Internal', act.filter(function (p) { return !isExt(p); }).length], ['external', 'External', act.filter(isExt).length], ['gaps', 'Missing details', act.filter(function (p) { return gaps(p).length; }).length], ['left', 'Left', all.filter(function (p) { return p.meta.status === 'left'; }).length]];
+  var review = scored().lists, bySc = S.psort === 'score';
+  var defs = [['all', 'All', act.length], ['internal', 'Internal', act.filter(function (p) { return !isExt(p); }).length], ['external', 'External', act.filter(isExt).length], ['priority', 'Priority', act.filter(isPrio).length], ['high', 'High score, not Priority', review.high.length], ['low', 'Priority, low score', review.low.length], ['gaps', 'Missing details', act.filter(function (p) { return gaps(p).length; }).length], ['left', 'Left', all.filter(function (p) { return p.meta.status === 'left'; }).length]];
   var list = S.pf === 'left' ? all.filter(function (p) { return p.meta.status === 'left'; }) : act;
   if (S.pf === 'internal') list = list.filter(function (p) { return !isExt(p); });
   if (S.pf === 'external') list = list.filter(isExt);
+  if (S.pf === 'priority') list = list.filter(isPrio);
+  if (S.pf === 'high') list = list.filter(function (p) { return review.high.indexOf(p.meta.id) >= 0; });
+  if (S.pf === 'low') list = list.filter(function (p) { return review.low.indexOf(p.meta.id) >= 0; });
   if (S.pf === 'gaps') list = list.filter(function (p) { return gaps(p).length; });
   var q = S.pq.trim().toLowerCase();
   if (q) list = list.filter(function (p) { return (p.name + ' ' + Object.keys(p.meta).map(function (k) { return p.meta[k]; }).join(' ') + ' ' + p.grp + ' ' + wordsOf(p)).toLowerCase().indexOf(q) >= 0; });
   var tb = '<div class="toolbar" data-k="toolbar"><div class="pills" role="group" aria-label="Filter people">' + defs.map(function (f) { return '<button type="button" class="chipbtn" data-act="pf" data-v="' + f[0] + '"' + pressed(S.pf === f[0]) + '>' + f[1] + ' ' + f[2] + '</button>'; }).join('') + '</div>' +
     '<label class="sr" for="people-q">Search people</label><input id="people-q" class="in" type="search" autocomplete="off" data-in="pq" value="' + esc(S.pq) + '" placeholder="Search name, role, organisation…">' +
     '<label class="sr" for="people-g">Group people by</label><select id="people-g" class="in" data-ch="pgroup">' + opts([['none', 'No grouping'], ['co', 'By organisation'], ['dept', 'By department'], ['grp', 'By group']], S.pgroup) + '</select>' +
+    '<label class="sr" for="people-s">Sort people by</label><select id="people-s" class="in" data-ch="psort">' + opts([['name', 'Sort by: Name'], ['score', 'Sort by: Interaction score']], S.psort) + '</select>' +
     '<span class="sp"></span>' + (S.adding === 'P' ? '' : bt('Add person', 'add-open', { v: 'P', cls: 'primary', icon: 'plus' })) + '</div>';
   if (S.adding === 'P') tb += '<form class="addform" data-sub="add-person" data-k="addform"><label class="fl" for="add-name">Full name<input id="add-name" class="in" type="text" autocomplete="off" data-in="addName" value="' + esc(S.addName) + '" required></label>' +
     '<label class="fl" for="add-grp">Group<input id="add-grp" class="in" type="text" list="dl-pgrp" autocomplete="off" data-in="addGrp" value="' + esc(S.addGrp) + '" placeholder="Other"></label><button type="submit" class="btn primary">Add person</button>' + bt('Cancel', 'add-cancel', { cls: 'quiet' }) + '</form>';
   var row = function (p) {
     var g = gaps(p), pid = p.meta.id || '';
-    return '<div class="tr" role="listitem" data-k="p-' + esc(pid || p.name) + '"><div><button type="button" class="nm" data-act="person" data-id="' + esc(pid) + '"' + (pid ? '' : ' disabled') + '>' + esc(p.name + (isMe(p) ? ' (you)' : '')) + '</button><div class="hint">' + esc(p.meta.title || 'No job title') + '</div></div>' +
+    return '<div class="tr" role="listitem" data-k="p-' + esc(pid || p.name) + '"><div><button type="button" class="nm" data-act="person" data-id="' + esc(pid) + '"' + (pid ? '' : ' disabled') + '>' + esc(p.name + (isMe(p) ? ' (you)' : '')) + '</button>' + (isPrio(p) ? ' ' + prioMark(p) : '') + '<div class="hint">' + esc(p.meta.title || 'No job title') + '</div></div>' +
       '<div class="c2">' + esc([p.meta.company, p.meta.department].filter(Boolean).join(' › ') || 'Not set') + (isExt(p) ? ' ' + badge('External', 'info') : '') + '</div>' +
-      '<div class="c3">' + esc(p.meta.manager || (isExt(p) ? 'External' : 'Not set')) + '</div>' +
-      '<div class="r">' + (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : '') + (p.meta.status === 'left' ? badge('Left') : '') + '<span class="hint">' + personOpenCount(p) + ' open</span></div></div>';
+      '<div class="c3">' + esc(p.meta.manager || (isExt(p) ? 'External' : 'Not set')) + '</div>' + (bySc ? scoreCell(p) : '') +
+      '<div class="r">' + (g.length ? badge('Missing ' + g.map(function (k) { return GAP_LABEL[k]; }).join(', '), 'warn') : '') + (p.meta.status === 'left' ? badge('Left') : '') + '<span class="hint">' + personOpenCount(p) + ' open</span>' + prioToggle(p, 'sm') + '</div></div>';
   };
-  var sorted = list.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+  // By score, the User and anyone who has left come last, having no score
+  var rank = function (p) { return scoreable(p) ? scoreOf(p) : -1; };
+  var sorted = list.slice().sort(function (a, b) { return (bySc ? rank(b) - rank(a) : 0) || a.name.localeCompare(b.name); });
   var body = '';
   if (S.pgroup === 'none') body = sorted.map(row).join('');
   else {
@@ -3049,7 +3501,9 @@ function viewPeople() {
     order.sort(function (a, b) { return (/^No /.test(a) - /^No /.test(b)) || a.localeCompare(b); });
     body = order.map(function (k) { return '<div class="grp-h" role="presentation" data-k="g-' + esc(k) + '">' + esc(k) + ' <span class="hint">' + groups[k].length + '</span></div>' + groups[k].map(row).join(''); }).join('');
   }
-  var tbl = '<div class="tbl" data-k="tbl"><div class="tr th" aria-hidden="true"><span>Name and role</span><span class="c2">Organisation</span><span class="c3">Reports to</span><span class="r">Open items</span></div><div role="list" aria-label="People">' + body + '</div>' + (sorted.length ? '' : '<div class="empty" style="padding:12px 14px">Nobody matches.</div>') + '</div>';
+  var short = (S.pf === 'high' || S.pf === 'low') && !review.enough;
+  var none = short ? 'There isn\'t enough history yet to compare people. It takes ' + plural(review.needs, 'person', 'people') + ' with Interactions, and so far there ' + (review.scored === 1 ? 'is 1' : 'are ' + review.scored) + '.' : 'Nobody matches.';
+  var tbl = '<div class="tbl' + (bySc ? ' by-score' : '') + '" data-k="tbl"><div class="tr th" aria-hidden="true"><span>Name and role</span><span class="c2">Organisation</span><span class="c3">Reports to</span>' + (bySc ? '<span class="score-h">Score</span>' : '') + '<span class="r">Open items</span></div><div role="list" aria-label="People">' + body + '</div>' + (sorted.length ? '' : '<div class="empty" style="padding:12px 14px">' + esc(none) + '</div>') + '</div>';
   var extra = '';
   var unk = (S.pf === 'all' || S.pf === 'gaps') && !q ? unknownWhos() : [];
   if (unk.length) extra = '<div class="list" style="margin-top:22px">' + vSec('unknown', 'On your tasks but not in People', unk.map(function (u) {
@@ -3106,6 +3560,7 @@ function panelHead(id, kindText, openPage) {
   return '<div class="ph">' + copyId(id) +
     '<span class="hint" style="flex:1;min-width:0">' + esc(kindText) + '</span>' + (S.fresh.has(id) ? badge('Updated', 'info') : '') +
     (openPage ? '<button type="button" class="btn sm quiet" data-act="any-page" data-id="' + esc(id) + '">Open page</button>' : '') +
+    '<button type="button" class="xbtn" data-act="copy-link" data-id="' + esc(id) + '" aria-label="Copy link" title="Copy link">' + ic('link') + '</button>' +
     '<button type="button" class="xbtn" data-act="close" aria-label="Close details" title="Close (Esc)">' + ic('x') + '</button></div>';
 }
 function vTabs(id, nLinks, nAsks) {
@@ -3247,6 +3702,7 @@ function panelTask(i) {
   var h = panelHead(id, (inbox ? 'Proposal · ' : '') + (TYPE_WORD[i.meta.type || 'task'] || i.meta.type) + ' · ' + listName(i), false);
   if (inbox) h += '<div class="note" data-k="note-inbox">Proposed by the agent from ' + esc(srcKind(i)) + (got ? ' on ' + esc(fmtDT(got)) : '') + '. Correct anything below, then accept or dismiss.</div>';
   if (done) h += '<div class="note ok" data-k="note-done" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">Done on ' + esc(i.meta['done-date'] ? fmt(i.meta['done-date']) : 'an earlier date') + '.</span>' + bt('Reopen', 'reopen', { id: id, cls: 'sm' }) + '</div>';
+  if (offView === id) h += '<div class="note warn" data-k="note-off-view" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">' + id + ' isn’t on this View.</span>' + bt('Go to ' + navName(homeView(i)), 'home-view', { id: id, cls: 'sm' }) + '</div>';
   h += '<label class="sr" for="f-title">Title</label><textarea id="f-title" class="title-in" rows="2" data-ch="title" data-kd="title" data-id="' + id + '">' + esc(i.title) + '</textarea>';
   if (!done) h += '<div class="pills" data-k="row-status"><div class="seg" data-k="seg-status" role="group" aria-label="Status">' + STATUS.map(function (x) { return '<button type="button" data-act="status" data-id="' + id + '" data-v="' + esc(x) + '"' + pressed((i.meta.status || '') === x) + '>' + esc(STATUS_LABEL[x]) + '</button>'; }).join('') + '</div>' + doneBtn(i, '') + '</div>';
   h += vTabs(id, rels.length + deps.length, asks.length);
@@ -3272,7 +3728,7 @@ function panelTask(i) {
     if (TYPES.indexOf(ty) < 0) tyl.push([ty, ty]);
     f += fRow('Type', 'f-ty', '<select id="f-ty" class="in" data-ch="ty" data-id="' + id + '">' + opts(tyl, ty) + '</select>');
     f += fRow(whoLabel(i), 'f-who', '<input id="f-who" class="in" type="text" list="dl-people" autocomplete="off" data-ch="who" data-id="' + id + '" value="' + esc(who) + '">' +
-      (known ? '' : '<div class="hint" style="flex-basis:100%">Not in People yet. ' + lk('Add ' + who + ' to People', 'add-person', { v: who }) + '</div>'), !known);
+      (known ? '' : '<div class="hint" style="flex-basis:100%">Not in People yet. ' + lk('Add ' + who + ' to People', 'add-person', { v: who, id: id }) + '</div>'), !known);
     var ps = prjOf(i), pq = S.newPrj.trim(), hit = pq ? resolvePrj(pq) : null;
     var chips = ps.map(function (p) {
       var e = entById(p);
@@ -3387,6 +3843,7 @@ var NAV = [
   ['Knowledge base', [['projects', 'Projects'], ['people', 'People'], ['systems', 'Systems']]],
   ['Reflect', [['review', 'Weekly review'], ['done', 'Done'], ['claude', 'Agent']]]
 ];
+function navName(v) { return NAV.reduce(function (a, g) { return a.concat(g[1]); }, []).filter(function (n) { return n[0] === v; })[0][1]; }
 var NAV_COUNTS = { today: 1, inbox: 1, next: 1, waiting: 1, fyi: 1, review: 1, claude: 1 };
 function navOn(k) { var v = S.view; return v === k || (k === 'projects' && v === 'project') || (k === 'people' && v === 'person') || (k === 'systems' && v === 'system'); }
 function saveState() {
@@ -3426,6 +3883,11 @@ function vBanner() {
   if (S.confirm === 'discard') return '<div class="banner err" role="alert" data-k="banner"><span class="grow">Discard ' + plural(n, 'unsaved change') + '? The screen will go back to what is in your files.</span>' + bt('Discard', 'discard-yes', { cls: 'danger sm' }) + bt('Keep them', 'discard-no', { cls: 'sm' }) + '</div>';
   return '<div class="banner err" role="alert" data-k="banner"><span class="grow">Couldn’t save “' + esc(Q.blocked.job.label || 'change') + '”: ' + esc(Q.blocked.msg) + '. ' + plural(n, 'change') + ' waiting, still shown on screen.</span>' + bt('Try again', 'retry', { cls: 'primary sm' }) + bt('Discard…', 'discard', { cls: 'sm' }) + '</div>';
 }
+// A setting SETTINGS.toml gets wrong costs the User its default and this notice, and nothing else.
+function vSettingsNotice() {
+  if (!SET.errors.length) return '';
+  return '<div class="banner" role="status" data-k="settings-notice"><span class="grow"><strong>Discerny ignored ' + (SET.errors.length === 1 ? 'a line' : SET.errors.length + ' lines') + ' in ' + esc(SETTINGS_FILE) + ':</strong> ' + SET.errors.map(function (e) { return esc(e.message.replace(SETTINGS_FILE + ' ', '')); }).join('; ') + '. Correct the file, then reload.</span>' + bt('Reload', 'reload', { cls: 'sm' }) + '</div>';
+}
 function viewFor() {
   switch (S.view) {
     case 'today': return viewToday();
@@ -3452,8 +3914,8 @@ function vMain(c) {
   var head = '<header class="head' + (S.scrolled ? ' scrolled' : '') + '" data-k="head"><div class="head-in"><div style="min-width:0">' +
     (v.crumb ? '<button type="button" class="crumb" data-act="go" data-v="' + v.crumb[1] + '">' + ic('back', 's') + esc(v.crumb[0]) + '</button>' : '') +
     '<div class="titles"><h1 id="page-title" tabindex="-1">' + esc(v.title) + '</h1>' + (v.sub ? '<div class="sub">' + esc(v.sub) + '</div>' : '') + '</div></div>' +
-    (v.tools ? '<div class="head-tools">' + v.tools + '</div>' : '') + '</div></header>';
-  return '<main class="main" id="main" data-k="main" aria-labelledby="page-title">' + head + '<div class="wrap" data-k="wrap-' + S.view + '">' + vBanner() + (v.qa ? vQuick() : '') + (v.cards ? vCards() : '') + v.body + '</div></main>';
+    '<div class="head-tools">' + (v.tools || '') + '<button type="button" class="btn sm quiet" data-act="copy-link">' + ic('link', 's') + 'Copy link</button></div></div></header>';
+  return '<main class="main" id="main" data-k="main" aria-labelledby="page-title">' + head + '<div class="wrap" data-k="wrap-' + S.view + '">' + vBanner() + vSettingsNotice() + (v.qa ? vQuick() : '') + (v.cards ? vCards() : '') + v.body + '</div></main>';
 }
 function vToasts() {
   return '<div class="toasts" data-k="toasts" role="region" aria-label="Messages" aria-live="polite">' + S.toasts.map(function (t) {
@@ -3469,7 +3931,7 @@ function vPalette() {
       return '<div class="res" role="option" id="pal-i-' + n + '" aria-selected="' + (n === idx) + '" data-act="pal-pick" data-i="' + n + '"><span class="grow"><span>' + esc(it.label) + '</span><span class="sub">' + esc(it.sub) + '</span></span>' + (it.id ? '<span class="id">' + esc(it.id) + '</span>' : '') + '</div>';
     }).join('') + '</div>';
   }).join('');
-  if (!flat.length) body = '<div class="empty" style="padding:12px">No matches.</div>';
+  if (!flat.length) { var gone = missingId(S.palQ); body = '<div class="empty" style="padding:12px">' + (gone ? esc(gone) + ' isn’t in this Data folder.' : 'No matches.') + '</div>'; }
   return '<div class="dlg-scrim" data-k="dlg-pal" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-label="Search and commands"><div class="dlg-h">' + ic('search') +
     '<label class="sr" for="pal-q">Search tasks, people, projects and systems</label><input id="pal-q" class="in" type="text" autocomplete="off" spellcheck="false" data-in="palQ" data-kd="pal" value="' + esc(S.palQ) + '" placeholder="Search everything, or type a command" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list"' + (flat.length ? ' aria-activedescendant="pal-i-' + idx + '"' : '') + '>' +
     bt('Esc', 'dlg-close', { cls: 'sm', attrs: ' aria-label="Close search"' }) + '</div><div class="dlg-b" id="pal-list" role="listbox" aria-label="Results">' + body + '</div>' +
@@ -3641,7 +4103,6 @@ function renderNow() {
   }
   afterRender();
 }
-var VIEW_TITLE = { today: 'Today', inbox: 'Inbox', next: 'Next actions', waiting: 'Waiting for', upcoming: 'Upcoming', fyi: 'FYI', projects: 'Projects', project: 'Project', people: 'People', person: 'Person', systems: 'Systems', system: 'System', review: 'Weekly review', done: 'Done', claude: 'Agent' };
 function afterRender() {
   if (S.focusSel) {
     var el = document.querySelector(S.focusSel);
@@ -3653,8 +4114,11 @@ function afterRender() {
     S.scrollRow = null;
     if (r && r.scrollIntoView) r.scrollIntoView({ block: 'nearest' });
   }
-  var n = S.ready && S.m ? inboxCount() : 0;
-  var title = (S.ready ? VIEW_TITLE[S.view] + ' · ' : '') + 'Discerny' + (n ? ' (' + n + ' in inbox)' : '');
+  if (offView && document.querySelector('.main [data-row="' + offView + '"], .main [data-k="ack-' + offView + '"]')) { offView = null; render(); }
+  var n = S.ready && S.m ? inboxCount() : 0, h1 = document.getElementById('page-title');
+  if (S.ready && S.m) syncLink();
+  var it = S.ready && S.m ? linkItem() : null;
+  var title = (it ? item(it).title + ' · ' : '') + (S.ready && h1 ? h1.textContent + ' · ' : '') + 'Discerny' + (n ? ' (' + n + ' in inbox)' : '');
   if (document.title !== title) document.title = title;
 }
 function focusLater(sel) {
@@ -3666,13 +4130,186 @@ function focusLater(sel) {
 }
 function forceClear(id) { forced.add(id); }
 
+/* ===================== links ===================== */
+// A Link is the page's hash after "#/": a View's Link name, or a Record's ID for its page, then "/" and the ID of
+// the Item open in the Side panel, if the User opened one, then the View's state after "?" as key=value pairs. Link names
+// last across versions, so they are kept apart from the code's own View names by this two-way table.
+var LINK_VIEW = { today: 'today', inbox: 'inbox', 'next-actions': 'next', 'waiting-for': 'waiting', upcoming: 'upcoming', fyi: 'fyi', 'all-items': 'all', done: 'done', projects: 'projects', people: 'people', systems: 'systems', 'weekly-review': 'review', agent: 'claude' };
+var VIEW_LINK = {};
+Object.keys(LINK_VIEW).forEach(function (k) { VIEW_LINK[LINK_VIEW[k]] = k; });
+var RECORD_VIEW = { P: 'person', PRJ: 'project', SYS: 'system' };
+// A View's state in its Link: search or filter text, and grouping, each key written only when it differs from its default,
+// so a Link without one opens with the default. Where a key has a vals table, Link values map to the code's own like Link names.
+// Scroll position and how many done Items are loaded stay out.
+function stateKey(get, set, def, vals) { return { get: get, set: set, def: def, vals: vals || null }; }
+var ENT_Q = stateKey(function () { return S.eq; }, function (v) { S.eq = v; forceClear('ent-q'); }, '');
+var LINK_STATE = {
+  next: { group: stateKey(function () { return S.group; }, function (v) { S.group = v; }, 'project', { project: 'project', kind: 'kind', 'one-list': 'none' }) },
+  all: {
+    q: stateKey(function () { return S.wq; }, function (v) { S.wq = v; forceClear('wb-q'); }, ''),
+    group: stateKey(function () { return S.wb.group; }, function (v) { S.wb.group = v; }, 'urg', { urgency: 'urg', type: 'type', person: 'person', project: 'project', tag: 'tag' }),
+    sort: stateKey(function () { return S.wb.sort; }, function (v) { S.wb.sort = v; }, 'urg', { urgency: 'urg', 'due-date': 'due', newest: 'new', oldest: 'old' }),
+    tag: stateKey(function () { return S.wb.tag; }, function (v) { S.wb.tag = v; }, '')
+  },
+  people: {
+    q: stateKey(function () { return S.pq; }, function (v) { S.pq = v; forceClear('people-q'); }, ''),
+    show: stateKey(function () { return S.pf; }, function (v) { S.pf = v; }, 'all', { all: 'all', internal: 'internal', external: 'external', priority: 'priority', 'high-score': 'high', 'low-score': 'low', 'missing-details': 'gaps', left: 'left' }),
+    group: stateKey(function () { return S.pgroup; }, function (v) { S.pgroup = v; }, 'none', { none: 'none', organisation: 'co', department: 'dept', group: 'grp' }),
+    sort: stateKey(function () { return S.psort; }, function (v) { S.psort = v; }, 'name', { name: 'name', 'interaction-score': 'score' })
+  },
+  projects: { q: ENT_Q },
+  systems: { q: ENT_Q }
+};
+// the Side panel's tab, written beside an Item the Link names
+var TAB_LINK = { details: 'details', relationships: 'links', agent: 'claude' };
+function linkValue(vals, v) { return Object.keys(vals).filter(function (k) { return vals[k] === v; })[0]; }
+function linkQuery(it) {
+  var keys = LINK_STATE[S.view] || {}, out = [];
+  Object.keys(keys).forEach(function (k) {
+    var d = keys[k], v = d.get();
+    if (v === d.def) return;
+    if (d.vals) v = linkValue(d.vals, v);
+    if (v) out.push(k + '=' + encodeURIComponent(v));
+  });
+  if (it && S.tab !== 'details') out.push('tab=' + linkValue(TAB_LINK, S.tab));
+  return out.length ? '?' + out.join('&') : '';
+}
+// the hash's state as [[key, value]], in the order written
+function stateOfHash(h) {
+  var s = String(h || ''), at = s.indexOf('?');
+  if (at < 0) return [];
+  var dec = function (x) { try { return decodeURIComponent(x); } catch (e) { return x; } };
+  return s.slice(at + 1).split('&').filter(Boolean).map(function (p) {
+    var e = p.indexOf('=');
+    return e < 0 ? [dec(p), ''] : [dec(p.slice(0, e)), dec(p.slice(e + 1))];
+  });
+}
+// sets the View's state from the Link, a key it leaves out to its default, and names what this version doesn't know.
+// -> the Side panel's tab for the Item the Link names
+function openState(pairs, withItem) {
+  var keys = LINK_STATE[S.view] || {}, own = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); }, tab = 'details', bad = [];
+  Object.keys(keys).forEach(function (k) { keys[k].set(keys[k].def); });
+  pairs.forEach(function (p) {
+    var k = p[0], v = p[1], d = own(keys, k) ? keys[k] : null;
+    if (k === 'tab' && withItem && own(TAB_LINK, v)) tab = TAB_LINK[v];
+    else if (d && (!d.vals || own(d.vals, v))) d.set(d.vals ? d.vals[v] : v);
+    else bad.push(k + (v ? '=' + v : ''));
+  });
+  if (bad.length) toastShow('This version doesn’t know ' + bad.join(', ') + ' in this Link, so it opened without ' + (bad.length > 1 ? 'them.' : 'it.'));
+  return tab;
+}
+// linkPush: the next hash write adds a history entry; hashOwn: the hash the UI wrote last, whose hashchange it ignores;
+// autoOpen: the Item the Inbox opened by itself, which the Link leaves out; offView: the Item a Link opened on a View it isn't on
+var linkPush = false, hashOwn = '', landing = false, autoOpen = null, offView = null;
+// the Item the Link and the document title name: one open in the Side panel that the User opened
+function linkItem() { return S.panel && S.sel && kindOf(S.sel) === 'T' && S.sel !== autoOpen && item(S.sel) ? S.sel : null; }
+function linkNow(it) {
+  var v = S.entity || VIEW_LINK[S.view] || 'today';
+  return it ? v + '/' + it : v;
+}
+function linkOfHash(h) {
+  var s = String(h || '').replace(/^#\/?/, '');
+  s = s.split('?')[0];
+  try { s = decodeURIComponent(s); } catch (e) { /* keep it as typed */ }
+  return s.trim();
+}
+// the Item an ID was merged into, found by its Comment
+function mergedInto(id) {
+  var said = 'Merged ' + id + ' into this.', s = allItems().filter(function (i) { return commentsOf(i).some(function (c) { return c.v.trim() === said; }); })[0];
+  return s ? s.id : null;
+}
+// the Item an ID in a Link names now: itself, or the Item it was merged into, and says so
+function linkTarget(id) {
+  if (whereOf(id)) return id;
+  var to = mergedInto(id);
+  if (to) toastShow(id + ' was merged into ' + to + ', so here’s ' + to + '.');
+  return to;
+}
+function idShaped(s) { return /^(T|P|PRJ|SYS)-\d+$/.test(s); }
+// the Link in text in Ctrl K: the text itself, or what follows the #/ of a whole address
+function linkText(text) {
+  var s = String(text || '').trim(), at = s.indexOf('#/');
+  return at >= 0 ? s.slice(at + 2).trim() : s;
+}
+// the ID to name when Ctrl K finds nothing for an ID, or a whole address holding one; otherwise null
+function missingId(text) {
+  var id = linkOfHash(linkText(text)).toUpperCase();
+  return idShaped(id) ? id : null;
+}
+// "Go to …" for text in Ctrl K that is a Link, or a whole address holding one, when the View it names is here; otherwise null.
+// A bare ID with nothing behind it stays a search: it may be an ID half typed.
+function linkResult(text) {
+  var s = linkText(text);
+  var parts = linkOfHash(s).split('/'), head = parts[0], id = head.toUpperCase(), it = (parts[1] || '').toUpperCase(), sub;
+  if (parts.length > 2) return null;
+  var itemSub = function (i) { var to = whereOf(i) ? i : mergedInto(i); return to && labelOf(to); };
+  if (!it && /^T-\d+$/.test(id)) sub = itemSub(id);
+  else {
+    var isView = Object.prototype.hasOwnProperty.call(LINK_VIEW, head.toLowerCase()), isRec = RECORD_VIEW[kindOf(id)] && /^[A-Z]+-\d+$/.test(id) && exists(id);
+    if (!isView && !isRec) return null;
+    sub = it ? itemSub(it) || (idShaped(it) && !exists(it) && it + ' isn’t in this Data folder') : isRec ? labelOf(id) : 'View';
+  }
+  return sub ? { label: 'Go to ' + s, sub: sub, id: '', act: 'link', arg: s } : null;
+}
+// a View's own rows hold what is on it. The Item's home View counts whatever it shows: Done loads only some of its Items.
+function onThisView(id) {
+  var b = viewFor().body;
+  return S.view === homeView(item(id)) || b.indexOf('data-row="' + id + '"') >= 0 || b.indexOf('data-k="ack-' + id + '"') >= 0;
+}
+function openLink(link, state) {
+  var parts = link.split('/'), it = (parts[1] || '').toUpperCase(), bare = parts[0].toUpperCase(), tab, to;
+  if (!it && kindOf(bare) === 'T' && /^T-\d+$/.test(bare)) {
+    to = linkTarget(bare);
+    if (to) { go(homeView(item(to))); tab = openState(state, true); select(to, { tab: tab }); }
+    else { go('today'); toastShow(bare + ' isn’t in this Data folder, so here’s Today.'); openState(state, true); }
+    return;
+  }
+  var named = openView(parts[0]);
+  tab = openState(state, !!it);
+  if (!it) return;
+  to = linkTarget(it);
+  if (!to) { toastShow(it + ' isn’t in this Data folder.'); return; }
+  select(to, { tab: tab });
+  if (named && !onThisView(to)) offView = to;
+}
+// -> whether the View the Link names is the one that opened
+function openView(link) {
+  if (!link) { go('today'); return false; }
+  var v = LINK_VIEW[link.toLowerCase()];
+  if (v) { go(v); return true; }
+  var id = link.toUpperCase(), rv = RECORD_VIEW[kindOf(id)];
+  if (rv && /^[A-Z]+-\d+$/.test(id)) {
+    if (exists(id)) { go(rv, id); return true; }
+    go('today'); toastShow(id + ' isn’t in this Data folder, so here’s Today.');
+    return false;
+  }
+  go('today'); toastShow('There’s no View called “' + link + '”, so here’s Today.');
+  return false;
+}
+// goes to the Link in the hash; the browser has already made its history entry, so this replaces rather than adds one
+function land() {
+  hashOwn = location.hash; linkPush = false;
+  landing = true;
+  try { openLink(linkOfHash(location.hash), stateOfHash(location.hash)); } finally { landing = false; }
+}
+function syncLink() {
+  // the User has just gone somewhere and its hashchange is still on the way: that lands on it, so a frame before it mustn't write over it
+  if (location.hash !== hashOwn) return;
+  var it = linkItem(), h = '#/' + linkNow(it) + linkQuery(it), push = linkPush;
+  linkPush = false; hashOwn = h;
+  if (location.hash === h) return;
+  if (push) location.hash = h; else location.replace(h);
+}
+
 /* ===================== navigation and selection ===================== */
 function go(view, entity) {
   var changed = S.view !== view || S.entity !== (entity || null);
+  if (changed && !landing) linkPush = true;
   S.view = view; S.entity = entity || null;
   S.panel = false; S.sel = null; S.cur = null; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.confirm = null; S.adding = null; S.linkQ = ''; S.tab = 'details'; S.editAsk = null; S.dialog = null;
-  if (changed) { S.eq = ''; S.pq = ''; S.pf = 'all'; S.doneLimit = 60; }
-  if (view === 'inbox' && !isDrawer()) { var l = inboxList(); if (l.length) { S.sel = l[0].id; S.panel = true; S.cur = l[0].id; } }
+  if (changed) { S.eq = ''; S.pq = ''; S.pf = 'all'; S.psort = 'name'; S.doneLimit = 60; }
+  autoOpen = null; offView = null;
+  if (view === 'inbox' && !isDrawer()) { var l = inboxList(); if (l.length) { S.sel = autoOpen = l[0].id; S.panel = true; S.cur = l[0].id; } }
   if (changed) { var m = document.getElementById('main'); if (m) m.scrollTop = 0; S.scrolled = false; }
   focusLater('#page-title');
 }
@@ -3686,10 +4323,12 @@ function goAny(id) {
 function select(id, o) {
   o = o || {};
   if (S.sel !== id) {
+    if (!landing && !o.move && kindOf(id) === 'T') linkPush = true;
+    offView = null;
     S.tab = o.tab || 'details';
     S.subDraft = ''; S.cmtDraft = ''; S.cmtEdit = null; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.mergeQ = ''; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
   } else if (o.tab) S.tab = o.tab;
-  S.sel = id; S.panel = true;
+  S.sel = id; S.panel = true; autoOpen = null;
   if (kindOf(id) === 'T') S.cur = id;
   S.fresh.delete(id);
   if (o.focus === false) render();
@@ -3717,7 +4356,7 @@ function moveCursor(step) {
   S.scrollRow = rows[k];
   var rowEl = document.querySelector('.main [data-row="' + rows[k] + '"]');
   if (rowEl && rowEl.scrollIntoView) rowEl.scrollIntoView({ block: 'nearest' });
-  if (S.panel && S.sel && kindOf(S.sel) === 'T') { select(rows[k], { focus: '.main [data-row="' + rows[k] + '"] .t' }); return; }
+  if (S.panel && S.sel && kindOf(S.sel) === 'T') { select(rows[k], { move: true, focus: '.main [data-row="' + rows[k] + '"] .t' }); return; }
   focusLater('.main [data-row="' + rows[k] + '"] .t');
 }
 function targetId() {
@@ -3740,20 +4379,20 @@ function toggleDone(id, viaKey) {
     var prevSt = i.meta.status || '';
     commit(OPS.complete(id, todayStr()), { toast: 'Done: ' + clip(i.title, 60), undo: OPS.reopen(id, prevSt) });
   } else if (w === 'done') {
-    var prevDone = i.meta['done-date'] || todayStr();
-    commit(OPS.reopen(id));
-    toastShow('Reopened ' + id + '. It is back in ' + listName(item(id)) + '.', OPS.complete(id, prevDone));
+    var prevDone = i.meta['done-date'] || todayStr(), gone = {};
+    commit(OPS.reopen(id, '', gone));
+    toastShow('Reopened ' + id + '. It is back in ' + listName(item(id)) + '.', OPS.complete(id, prevDone, gone));
   } else return;
   if (viaKey) {
     S.cur = nb;
-    if (S.panel && S.sel === id) { if (nb) { select(nb, { focus: '.main [data-row="' + nb + '"] .t' }); return; } S.panel = false; S.sel = null; }
+    if (S.panel && S.sel === id) { if (nb) { select(nb, { move: true, focus: '.main [data-row="' + nb + '"] .t' }); return; } S.panel = false; S.sel = null; }
     if (nb) focusLater('.main [data-row="' + nb + '"] .t');
   }
 }
 function nextInbox(id) { var l = inboxList(), k = l.map(function (x) { return x.id; }).indexOf(id), rest = l.filter(function (x) { return x.id !== id; }); return rest.length ? rest[Math.min(Math.max(k, 0), rest.length - 1)].id : null; }
 function afterTriage(id, nextSel) {
   if (S.view === 'inbox') {
-    if (nextSel) { select(nextSel, { focus: S.panel ? '#panel-top' : '.main [data-row="' + nextSel + '"] .t' }); return; }
+    if (nextSel) { select(nextSel, { move: true, focus: S.panel ? '#panel-top' : '.main [data-row="' + nextSel + '"] .t' }); return; }
     S.panel = false; S.sel = null; S.cur = null; focusLater('#page-title');
     return;
   }
@@ -3764,21 +4403,21 @@ function accept(id) {
   if (!i || whereOf(id) !== 'inbox') return;
   var rl = [];
   suggestions(i).forEach(function (g) { if (S.suggestOn[id + '|' + g.id]) { var r = relLine(id, g.id); if (r.line) rl.push(r.line); } });
-  var nx = nextInbox(id);
+  var nx = nextInbox(id), st = {};
   S.dismissFor = null;
-  commit(OPS.accept(id, rl));
-  toastShow('Accepted ' + id + ' into ' + listName(item(id)) + (rl.length ? ', related to ' + rl.length + ' item' + (rl.length > 1 ? 's' : '') : '') + '.', OPS.unaccept(id, rl));
+  commit(OPS.accept(id, rl, st));
+  toastShow('Accepted ' + id + ' into ' + listName(item(id)) + (rl.length ? ', related to ' + rl.length + ' item' + (rl.length > 1 ? 's' : '') : '') + '.', OPS.unaccept(id, rl, st));
   afterTriage(id, nx);
 }
 // a Proposal done in two minutes: accepted and marked done in one step, keeping its ID
 function acceptDone(id) {
   var i = item(id);
   if (!i || whereOf(id) !== 'inbox') return;
-  var a = OPS.accept(id, []), c = OPS.complete(id, todayStr()), nx = nextInbox(id);
-  var un = OPS.unaccept(id, []), ro = OPS.reopen(id);
+  var st = {}, a = OPS.accept(id, [], st), c = OPS.complete(id, todayStr()), nx = nextInbox(id);
+  var un = OPS.unaccept(id, [], st), ro = OPS.reopen(id);
   S.dismissFor = null;
-  commit(op('Accept and complete ' + id, ['tasks', 'inbox', 'rels', 'done'], function (M) { a.fn(M); c.fn(M); }));
-  toastShow('Done: ' + clip(i.title, 60), op('Undo done ' + id, ['tasks', 'done', 'inbox', 'rels'], function (M) { ro.fn(M); un.fn(M); }));
+  commit(op('Accept and complete ' + id, ['tasks', 'inbox', 'rels', 'done'].concat(LOG_KEYS), function (M) { a.fn(M); c.fn(M); }));
+  toastShow('Done: ' + clip(i.title, 60), op('Undo done ' + id, ['tasks', 'done', 'inbox', 'rels'].concat(LOG_KEYS), function (M) { ro.fn(M); un.fn(M); }));
   afterTriage(id, nx);
 }
 function doneNow(id) {
@@ -3817,19 +4456,21 @@ function mergeItems(sid, did) {
   forceClear('f-mergeq');
   commit(OPS.merge(sid, did, nowStamp(), st), { toast: 'Merged ' + did + ' into ' + sid + '. ' + did + ' now finds ' + sid + '.', undo: OPS.unmerge(sid, did, st) });
   if (triage) { afterTriage(did, nx); return; }
-  if (S.sel === did) select(sid);
+  if (S.sel === did) select(sid, { move: true });
 }
 // Answers to change Proposals. Each says what it did, with an undo; a No is for good.
 function relYes(line) {
   var c = changeByLine(line), r = c && relOf(c);
   if (!r || !exists(c.a) || !exists(c.b)) return;
-  commit(OPS.relYes(c, r.line), { toast: 'Related ' + c.a + ' and ' + c.b + '.', undo: OPS.relUnyes(c, r.line) });
+  var st = {};
+  commit(OPS.relYes(c, r.line, st), { toast: 'Related ' + c.a + ' and ' + c.b + '.', undo: OPS.relUnyes(c, r.line, st) });
 }
 function changeNo(line) {
   var c = changeByLine(line);
   if (!c) return;
-  var what = c.type === 'relationship' ? c.a + ' and ' + c.b + ' won’t be proposed as related again.' : c.type === 'priority' ? c.name + ' won’t be proposed as a Priority person for ' + PRIORITY_PAUSE + ' days.' : c.email + ' won’t be proposed again.';
-  commit(OPS.changeNo(c), { toast: 'No: ' + what, undo: OPS.changeUnno(c, noLine(c)) });
+  var what = c.type === 'relationship' ? c.a + ' and ' + c.b + ' won’t be proposed as related again.' : c.type === 'priority' ? c.name + ' won’t be proposed as a Priority person for ' + plural(pauseDays(), 'day') + '.' : c.email + ' won’t be proposed again.';
+  var st = {};
+  commit(OPS.changeNo(c, st), { toast: 'No: ' + what, undo: OPS.changeUnno(c, noLine(c), st) });
 }
 function emailYes(line) {
   var c = changeByLine(line), st = {};
@@ -3840,6 +4481,17 @@ function prioYes(line) {
   var c = changeByLine(line), st = {};
   if (!c || c.type !== 'priority' || !personById(c.id)) return;
   commit(OPS.prioYes(c, st), { toast: c.name + ' is a Priority person now.', undo: OPS.prioUnyes(c, st) });
+}
+function promotePerson(id) {
+  var p = personById(id), st = {};
+  if (!p || prioOf(p) !== 'off') return;
+  commit(OPS.promote(id, st), { toast: p.name + ' is a Priority person now.', undo: OPS.unpromote(id, st) });
+}
+function demotePerson(id) {
+  var p = personById(id), st = {};
+  if (!p || prioOf(p) !== 'on') return;
+  var line = noLine({ type: 'priority', id: rid(id) });
+  commit(OPS.demote(id, line, st), { toast: p.name + ' is no longer a Priority person, and won’t be proposed as one for ' + plural(pauseDays(), 'day') + '.', undo: OPS.undemote(id, line, st) });
 }
 // Undo on a Skill's latest change to a field puts back the value from before its first unacknowledged change, and acknowledges them all
 function undoChange(id, field) {
@@ -3852,9 +4504,9 @@ function undoChange(id, field) {
 function markDoneAck(id) {
   var i = item(id), w = whereOf(id);
   if (!i || (w !== 'open' && w !== 'inbox')) return;
-  var list = commentsOf(i), which = list.filter(toAck).map(function (c) { return [list.indexOf(c), c.v]; }), keys = ['tasks', 'inbox', 'done', 'rels'];
-  var steps = (w === 'inbox' ? [OPS.accept(id, [])] : []).concat([OPS.complete(id, todayStr()), OPS.ack(id, which, false)]);
-  var back = [OPS.ack(id, which, true), OPS.reopen(id, i.meta.status || '')].concat(w === 'inbox' ? [OPS.unaccept(id, [])] : []);
+  var list = commentsOf(i), which = list.filter(toAck).map(function (c) { return [list.indexOf(c), c.v]; }), keys = ['tasks', 'inbox', 'done', 'rels'].concat(LOG_KEYS), st = {}, sa = {};
+  var steps = (w === 'inbox' ? [OPS.accept(id, [], st)] : []).concat([OPS.complete(id, todayStr()), OPS.ack(id, which, false, sa)]);
+  var back = [OPS.ack(id, which, true, sa), OPS.reopen(id, i.meta.status || '')].concat(w === 'inbox' ? [OPS.unaccept(id, [], st)] : []);
   commit(op('Mark done ' + id, keys, function (M) { steps.forEach(function (s) { s.fn(M); }); }),
     { toast: 'Done: ' + clip(i.title, 60), undo: op('Undo done ' + id, keys, function (M) { back.forEach(function (s) { s.fn(M); }); }) });
 }
@@ -3899,7 +4551,7 @@ function addQuick() {
   commit(OPS.addTask({ title: it0.title, meta: it0.meta, date: todayStr(), description: it0.description, newProjects: q.prjNew }, out));
   S.qa = ''; S.qaType = null; S.qaUrg = ''; S.qaDesc = ''; S.qaMore = false; forceClear('qa-in'); forceClear('qa-desc');
   var it = out.id ? item(out.id) : null;
-  if (it) toastShow('Added ' + out.id + ' to ' + listName(it) + ' · ' + when(it).label + (q.prjNew.length ? ' · new project ' + q.prjNew.join(', ') : ''), OPS.removeAdded(out.id));
+  if (it) toastShow('Added ' + out.id + ' to ' + listName(it) + ' · ' + when(it).label + (q.prjNew.length ? ' · new project ' + q.prjNew.join(', ') : ''), OPS.removeAdded(out.id, out));
   render();
 }
 function setItemDue(id, date, time) {
@@ -3951,14 +4603,19 @@ function addLink(id, other) {
     if (dependsOn(other, id)) { toastShow(other + ' already depends on ' + id + '. That would make a loop.'); return; }
     commit(OPS.addDep(id, other), { toast: id + ' now depends on ' + other + '.', undo: OPS.removeDep(id, other) });
   } else {
-    var r = relLine(id, other);
+    var r = relLine(id, other), st = {};
     if (r.err) { toastShow(r.err); return; }
-    commit(OPS.addRel(r.line), { toast: 'Relationship added.', undo: OPS.removeRel(r.line) });
+    commit(OPS.addRel(r.line, st), { toast: 'Relationship added.', undo: OPS.removeRel(r.line, st) });
   }
   S.linkQ = ''; forceClear('f-linkq');
   focusLater('#f-linkq');
 }
 function personOf(id) { return personById(id); }
+function rowAfter(el, filters) {
+  var tr = filters.indexOf(S.pf) >= 0 ? el.closest('.tr') : null, rows = tr ? Array.prototype.slice.call(document.querySelectorAll('.main .tr[data-k^="p-"]')) : [], k = rows.indexOf(tr);
+  return rows[k + 1] || rows[k - 1] || null;
+}
+function focusRow(tr) { focusLater('.main .tr[data-k="' + tr.getAttribute('data-k') + '"] .nm'); }
 function entSnapshot(id) {
   var kind = kindOf(id), D = EDEF[kind], ents = entsOf(kind), e = entById(id);
   return {
@@ -3997,7 +4654,8 @@ function runResult(it) {
   if (!it) return;
   S.dialog = null; S.dlgReturn = null;
   if (it.act === 'go') { if (it.arg === 'people-gaps') { go('people'); S.pf = 'gaps'; } else go(it.arg); return; }
-  if (it.act === 'open') { select(it.arg); return; }
+  if (it.act === 'open') { openLink(it.arg, []); return; }
+  if (it.act === 'link') { openLink(linkOfHash(it.arg), stateOfHash(it.arg)); return; }
   if (it.act === 'all') { S.wq = it.arg; forceClear('wb-q'); go('all'); return; }
   if (it.act === 'person' && it.arg) { go('person', it.arg); return; }
   if (it.act === 'ent') { goAny(it.arg); return; }
@@ -4035,13 +4693,19 @@ var ACT = {
   open: function (el) { var id = did(el); if (kindOf(id) === 'T') { if (S.panel && S.sel === id && !isDrawer()) { focusLater('#panel-top'); return; } select(id); } else goAny(id); },
   any: function (el) { goAny(did(el)); },
   'any-page': function (el) { goAny(did(el)); },
+  'home-view': function (el) { var id = did(el); go(homeView(item(id))); select(id); },
   person: function (el) { if (did(el)) go('person', did(el)); },
   ent: function (el) { goAny(did(el)); },
   close: function () { closePanel(); },
   tab: function (el) { S.tab = dvv(el); S.linkQ = ''; S.editAsk = null; focusLater('#tab-' + S.tab); },
   copy: function (el) {
     var id = did(el), done = function () { S.copied = id; render(); setTimeout(function () { if (S.copied === id) { S.copied = null; render(); } }, 1500); };
-    try { navigator.clipboard.writeText(id).then(done, function () { fallbackCopy(id); done(); }); } catch (e) { fallbackCopy(id); done(); }
+    copyText(id, done);
+  },
+  // with an ID, from the Side panel: an Item on this View, or a Record's own page
+  'copy-link': function (el) {
+    var id = did(el), link = !id ? linkNow() + linkQuery() : kindOf(id) === 'T' ? linkNow(id) + linkQuery(id) : id;
+    copyText(link, function (ok) { toastShow(ok ? 'Copied the Link ' + link : 'Couldn’t reach the clipboard. The Link is ' + link); });
   },
   status: function (el) { patch(did(el), { status: dvv(el) || '' }); },
   accept: function (el) { accept(did(el)); },
@@ -4087,7 +4751,8 @@ var ACT = {
     var id = did(el), x = recOf(id);
     if (!x) return;
     var list = commentsOf(x), which = list.filter(toAck).map(function (c) { return [list.indexOf(c), c.v]; });
-    if (which.length) commit(OPS.ack(id, which, false), { toast: 'Acknowledged ' + plural(which.length, 'comment') + ' on ' + id + '.', undo: OPS.ack(id, which, true) });
+    var st = {};
+    if (which.length) commit(OPS.ack(id, which, false, st), { toast: 'Acknowledged ' + plural(which.length, 'comment') + ' on ' + id + '.', undo: OPS.ack(id, which, true, st) });
   },
   'sub-del': function (el) {
     var id = did(el), k = +el.getAttribute('data-i'), i = item(id), s = i ? subsOf(i)[k] : null;
@@ -4099,7 +4764,7 @@ var ACT = {
     var name = cleanName(dvv(el));
     if (!name) return;
     if (personByName(name)) { toastShow(name + ' is already in People.'); return; }
-    commit(OPS.addPerson(name, 'Other'), { toast: 'Added ' + name + ' to People. Fill in their details.', undo: OPS.removePerson(name) });
+    commit(did(el) ? OPS.addPersonOn(name, did(el), todayStr()) : OPS.addPerson(name, 'Other'), { toast: 'Added ' + name + ' to People. Fill in their details.', undo: OPS.removePerson(name) });
     var p = personByName(name);
     if (p && p.meta.id && (S.view === 'people' || !S.panel)) select(p.meta.id);
   },
@@ -4146,6 +4811,9 @@ var ACT = {
   'wb-tag': function (el) { var t = dvv(el); setWb({ tag: S.wb.tag === t ? '' : t }); if (S.view !== 'all') go('all'); },
   'qa-more': function () { S.qaMore = !S.qaMore; render(); if (S.qaMore) focusLater('#qa-urg'); },
   pf: function (el) { S.pf = dvv(el); render(); },
+  // Under a filter it would leave, a Promote or Demote takes the row away, so focus moves to the next one
+  promote: function (el) { var nb = rowAfter(el, ['high']); promotePerson(did(el)); if (nb) focusRow(nb); },
+  demote: function (el) { var nb = rowAfter(el, ['priority', 'low']); demotePerson(did(el)); if (nb) focusRow(nb); },
   'add-open': function (el) { S.adding = dvv(el); S.addName = ''; S.addGrp = ''; S.addType = ''; focusLater('#add-name'); },
   'add-cancel': function () { S.adding = null; render(); },
   'review-reset': function () { lsSet('discerny-review', JSON.stringify({ week: isoWeek(todayStr()), done: {} })); render(); },
@@ -4166,10 +4834,10 @@ var ACT = {
   'p-remove': function (el) {
     var p = personOf(did(el));
     if (!p) return;
-    var text = pSerItem(p), grp = p.grp, idx = S.m.people.people.indexOf(p), name = p.name;
+    var text = pSerItem(p), grp = p.grp, idx = S.m.people.people.indexOf(p), name = p.name, st = {};
     S.panel = false; S.sel = null;
     if (S.view === 'person' && S.entity === did(el)) go('people');
-    commit(OPS.removePerson(name), { toast: 'Removed ' + name + ' from People.', undo: OPS.restorePerson(text, grp, idx) });
+    commit(OPS.removePerson(name, st), { toast: 'Removed ' + name + ' from People.', undo: OPS.restorePerson(text, grp, idx, st) });
   },
   'e-del': function (el) { S.confirm = 'del:' + did(el); render(); },
   'e-del-no': function () { S.confirm = null; render(); },
@@ -4192,8 +4860,16 @@ var ACT = {
   srvretry: function () { openFolder(); },
   regrant: function () { regrant(); }
 };
+// done(whether it reached the clipboard)
+function copyText(text, done) {
+  var older = function () { done(fallbackCopy(text)); };
+  try { navigator.clipboard.writeText(text).then(function () { done(true); }, older); } catch (e) { older(); }
+}
 function fallbackCopy(text) {
-  try { var ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); } catch (e) { /* ignore */ }
+  var ok = false, back = document.activeElement;
+  try { var ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); document.body.removeChild(ta); } catch (e) { /* ignore */ }
+  if (back && back.focus) back.focus();
+  return ok;
 }
 
 /* ===================== field changes (committed when you leave the field) ===================== */
@@ -4231,6 +4907,7 @@ var CH = {
   'e-owner': function (el) { var e = entById(did(el)), v = cleanName(el.value); if (e && v !== (e.meta.owner || '')) commit(OPS.patchEnt('SYS', did(el), { owner: v })); },
   'e-grp': function (el) { var e = entById(did(el)), v = cleanName(el.value); if (e && v !== e.grp) commit(OPS.entGroup(kindOf(did(el)), did(el), v)); },
   pgroup: function (el) { S.pgroup = el.value; lsSet('discerny-pgroup', S.pgroup); render(); },
+  psort: function (el) { S.psort = el.value; render(); },
   'wb-sort': function (el) { setWb({ sort: el.value }); },
   'wb-tag': function (el) { setWb({ tag: el.value }); },
   'qa-urg': function (el) { S.qaUrg = el.value; render(); },
@@ -4409,7 +5086,7 @@ function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && (ev.key === 'k' || ev.key === 'K')) { ev.preventDefault(); if (S.dialog === 'palette') closeDialog(); else openPalette(); return; }
   if (ev.key === 'Escape') { handleEsc(ev); return; }
   if (S.dialog) { if (ev.key === 'Tab') trapTab(ev); return; }
-  if (t && t.getAttribute && t.getAttribute('role') === 'tab' && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft')) {
+  if (t && t.getAttribute && t.getAttribute('role') === 'tab' && !ev.altKey && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft')) {
     ev.preventDefault();
     var tabs = ['details', 'links', 'claude'], k = tabs.indexOf(S.tab) + (ev.key === 'ArrowRight' ? 1 : -1);
     S.tab = tabs[(k + 3) % 3]; S.linkQ = '';
@@ -4494,6 +5171,7 @@ async function openFolder() {
   try {
     var g = await formatGate();
     if (g) { S.gate = g; render(); return; }
+    SET = readSettings(await readText(SETTINGS_FILE));
     var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now();
   }
   catch (e) {
@@ -4503,7 +5181,7 @@ async function openFolder() {
     S.gate = isPermErr(e) ? { mode: srv ? 'srvdown' : 'reconnect', msg: '' } : { mode: 'error', msg: errText(e) }; render(); return;
   }
   S.ready = true;
-  if (S.view === 'inbox') go('inbox');
+  land();
   startTimers();
   focusLater('#page-title');
   if (Q.jobs.length) kick();
@@ -4538,6 +5216,8 @@ async function boot() {
     if (s !== S.scrolled) { S.scrolled = s; var h = m.querySelector('.head'); if (h) h.classList.toggle('scrolled', s); }
   }, true);
   window.addEventListener('resize', render);
+  // Back, Forward, an edited address or a bookmark; before the folder is read, openFolder lands on the Link instead
+  window.addEventListener('hashchange', function () { if (S.ready && S.m && location.hash !== hashOwn) land(); });
   window.addEventListener('beforeunload', function (ev) { if (Q.jobs.some(function (j) { return !j.sync; })) { ev.preventDefault(); ev.returnValue = ''; } });
   // Served by node tools/discern.mjs serve: the server reads and writes the folder, so no picker or permission.
   if (location.protocol === 'http:' && (await serverInfo())) { openFolder(); return; }

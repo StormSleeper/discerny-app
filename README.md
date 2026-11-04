@@ -82,6 +82,28 @@ Serve the page when you want a browser other than Chrome or Edge, or when your a
 
 You can have more than one data folder, for example one to try things out in. Switch the UI with *Change folder*, and your agent with `node tools/discern.mjs connect <folder>` in the app folder, which records it as `data_folder` in `config.toml` there; `node tools/discern.mjs connect` on its own shows which folder is connected.
 
+## Links
+
+Every view in the UI, and every item you open in the side panel, has a short Link. The UI keeps it in the address, after `#/`, so bookmarks, reloads and new tabs bring you back to the same place, whether you opened the page as a file or served it.
+
+| Link | Opens |
+|---|---|
+| `today`, `next-actions`, `waiting-for` | That view, named as you see it |
+| `PRJ-0003`, `P-0007`, `SYS-0002` | That project's, person's or system's page |
+| `T-0142` | That item, on the view it belongs on |
+| `waiting-for/T-0142` | That item, on that view |
+| `next-actions?group=kind` | That view as you had set it up: its search or filter text, its grouping, and the side panel's tab |
+
+**Copy link**, in the header of each view and of the side panel, copies the Link to where you are. It's the short Link, so you can paste it into a note, a chat or your agent.
+
+**Pasting into Ctrl K** goes straight there. Paste an ID, a Link or a whole address, from either way of opening the UI or from another computer, and the first result is "Go to …": press Enter. If the View is here but the ID isn’t, "Go to" opens the View and names the ID; an ID on its own that isn’t here says so. Anything else you type searches as usual, and an Item you find opens on the View it belongs to. When your agent points you at something, it gives you an ID or a Link to paste here.
+
+**Back and Forward** in the browser retrace the views you moved between and the items you opened. Moving through items with J and K, or closing the side panel, adds no step, so one Back still takes you off the view.
+
+**The installed app** has no address bar, but works the same: Copy link and Ctrl K keep and return to places, and Alt+← and Alt+→, or your mouse's side buttons, go Back and Forward.
+
+A Link's view and item keep working in later versions of the app. If the item has been merged, it opens the item it was merged into and says so. If the ID isn't in your data folder, it says that. If the item is no longer on the view the Link names, it opens anyway, with a notice and a button to where it belongs now. A Link opens in whichever data folder is connected, and is never written into your files.
+
 ## What's in the folders
 
 ### Your data folder
@@ -96,6 +118,8 @@ You can have more than one data folder, for example one to try things out in. Sw
 | `REFERENCE.md` | Web addresses, people's details and other things you look up often |
 | `ASK-AGENT.md`, `ASK-AGENT-LOG.md` | The agent queue: requests waiting for your agent, and a record of what it did with them |
 | `SOURCES.md`, `IGNORED.md`, `DISMISSED.md` | Bookkeeping for source skills: shared settings such as your time zone, how far each source has been read, what was ignored, so it's never proposed again, and what you dismissed, so the same message isn't proposed twice |
+| `INTERACTIONS.md` | A log of your dealings with people: what you let through the inbox, who you tied to what, and your decisions about Priority people. Discerny keeps it up to date, and it stays on your machine |
+| `SETTINGS.toml` | Settings you edit by hand: how long someone isn't proposed as a Priority person after you demote them or say No (`pause-days`), and how the Interaction score counts. A setting that's missing or invalid uses its default, `discern check` reports an invalid one, and the UI tells you which it ignored. Discerny never writes this file, and a change applies when you reload the page |
 | `REFRESH-LOG.md` | A record of each source-skill run, created on the first run |
 | `drafts/` | Messages your agent drafted for you. They are never sent |
 
@@ -110,9 +134,23 @@ You can have more than one data folder, for example one to try things out in. Sw
 | `tools/` | `discern.mjs`, the helper: it connects the app to a data folder (`connect`, `new`), serves the UI in any browser (`serve`), upgrades one written by an older app (`upgrade`) and does the fiddly parts for source skills. Also its tests (`node --test tools/test/discern.test.mjs`) and `evals/`, recorded connector responses for testing the skills. Both run on a copy of the Example, a fictional company called Pennywhistle Puppet Works: [discerny-example](https://github.com/StormSleeper/discerny-example), cloned beside the app folder and read as of its last commit, or the folder named in `DISCERNY_TEST_DATA` |
 | `migrations/` | One folder per change to the way a data folder is written, which `discern upgrade` runs in order. Its `README.md` is for whoever writes one |
 | `new_discerny_repo/` | The blank starter files a new data folder is copied from |
-| `config.toml` | The app folder's settings. `data_folder` says where your data folder is, so your agent and the skills can find it; `discern connect` and `discern new` write it, and leave the rest of the file as you wrote it |
+| `config.toml` | The app folder's settings, per computer. Settings for how your data is read are in `SETTINGS.toml`, in your data folder. `data_folder` says where your data folder is, so your agent and the skills can find it; `discern connect` and `discern new` write it, and leave the rest of the file as you wrote it |
 
 `discerny.html` is the UI: Today, Inbox, Next actions, Waiting for, Upcoming, FYI, All items, Projects, People, Systems, Weekly review, Done and an Agent page, with search (Ctrl K), undo and dark mode.
+
+You choose your Priority people, whose messages source skills always capture. Promote or Demote anyone on the People page or their record, and filter People to see who's on the list. Your manager always counts. Skills can propose adding someone, but never removing them, and they won't propose someone again for a while after you demote them or say No: 28 days, unless you change `pause-days` in `SETTINGS.toml`.
+
+Discerny also keeps a log of your dealings with people in `INTERACTIONS.md`. An entry is written once something is past the inbox: when you accept a proposal or acknowledge news, when you tie someone to an item yourself by setting its person or adding an `involves` relationship, and when you complete an item with a person. Undo takes an entry back. Dismissed messages leave no trace, and a meeting on your calendar counts for nothing unless you tie someone to it yourself. The log also records your Promote, Demote, Yes and No decisions, with what the score was at the time. An Upgrade builds a first log from your existing items, marking each line `inferred: yes`, and shows you what it will write first.
+
+The log gives each person an Interaction score: how much you've been dealing with them lately, with older entries counting for less. It's a sorting aid rather than a judgement of who matters, which is what Priority people are for. Sort the People page by it to see each person's score and a small bar. Otherwise it stays off the list, so sharing your screen doesn't rank your colleagues. A person's record always shows their score and explains it, such as "4 messages, 2 comments, 1 linked, mostly this month".
+
+Two filters on the People page use the score to suggest changes to your Priority people. "High score, not Priority" shows the top fifth of people with a score who aren't Priority people. "Priority, low score" shows Priority people below the middle score, including anyone with no entries, but never your manager, who always counts. You and anyone who has left aren't scored. Until 10 people have a score, both filters say there isn't enough history yet.
+
+The half-life, weights, top share and minimum are in `SETTINGS.toml`. A change applies when you reload the page, and the log isn't rewritten: the score is worked out from it each time, so it's never stored.
+
+To see how those settings are working for you, run `node tools/discern.mjs score --report`. It prints, as JSON, each kind of entry's share of all scores, the people with the highest scores and what makes up each one, and how the scores logged with your Yes and Promote decisions compare with those logged with your No and Demote decisions. It needs at least 5 of each to compare, and says so until then. Decisions recorded when the log began, and any with no score, are left out, and it says how many. With `--exclude-inferred`, it works out the scores without the entries an Upgrade inferred. It also shows the settings it used, and any invalid one as `discern check` would report it.
+
+The report stays on your machine: it changes no file, sends nothing anywhere, and Discerny never tunes the settings itself. Use it to change `SETTINGS.toml` yourself, or ask your agent to suggest changes, which it makes only if you ask. An agent you ask reads the report as it reads your other files.
 
 ### Version
 
