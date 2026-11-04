@@ -352,7 +352,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 .score-n{min-width:2.4em;text-align:right}
 .score-bar{flex:1;min-width:24px;height:6px;border-radius:999px;background:var(--line);overflow:hidden}
 .score-bar>span{display:block;height:6px;border-radius:999px;background:var(--accent)}
-@container (max-width:640px){.tr{grid-template-columns:minmax(0,1fr) auto}.tbl.by-score .tr{grid-template-columns:minmax(0,1fr) 84px auto}.tr .c2,.tr .c3{display:none}}
+@container (max-width:640px){.tr{grid-template-columns:minmax(0,1fr) 132px}.tbl.by-score .tr{grid-template-columns:minmax(0,1fr) 84px 132px}.tr .c2,.tr .c3{display:none}.tr .r .b{white-space:normal;border-radius:10px}}
 .grp-h{font-size:12.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3);padding:12px 14px 6px;border-top:1px solid var(--line)}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px}
 .toolbar .sp{margin-left:auto}
@@ -435,7 +435,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.4.0.7'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.4.0.8'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.4.0.2'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
