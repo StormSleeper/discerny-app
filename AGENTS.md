@@ -63,7 +63,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `config.toml` | The app folder's settings. `data_folder` is the path of the connected data folder, written by `discern connect` and `discern new` | when Node is missing |
 | `new_discerny_repo/` | The blank starter files for a new data folder | never, unless asked |
 | `discerny.html` | The UI: the page, which loads the files in `ui/` | never |
-| `ui/` | The UI's parts, loaded in order by plain tags with no build step: `core.js`, the parser for the data folder's files, which the helper also uses, and `discerny.css`, the styles | never |
+| `ui/` | The UI's parts, loaded in order by plain tags with no build step: `core.js`, the parser for the data folder's files, which the helper also uses; `files.js`, which reaches the data folder through a folder handle or the server and runs the save queue, and holds the hooks a lower part fires so that a higher one can act, knowing nothing of items, state or the page; and `discerny.css`, the styles | never |
 | `icons/` | The UI's icons | never |
 | `manifest.webmanifest` | What a browser needs to install the served UI as an app | never |
 | `AGENTS.md`, `CLAUDE.md`, `README.md`, `LICENSE` | Instructions and documentation | this file only |

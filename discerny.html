@@ -27,6 +27,7 @@ if (location.protocol === 'http:' || location.protocol === 'https:') { var mf = 
 <div id="app"></div>
 <noscript><p style="padding:24px">Discerny needs JavaScript. Open it in Chrome or Edge.</p></noscript>
 <script src="ui/core.js"></script>
+<script src="ui/files.js"></script>
 <script>
 'use strict';
 
@@ -72,102 +73,10 @@ var S = {
   gate: { mode: 'pick', msg: '' }, side: lsGet('discerny-side', 'auto'), theme: lsGet('discerny-theme', 'system')
 };
 
-/* ===================== folder handle ===================== */
-var dir = null;
-function idb() {
-  return new Promise(function (res, rej) {
-    var r = indexedDB.open('discerny', 1);
-    r.onupgradeneeded = function () { r.result.createObjectStore('h'); };
-    r.onsuccess = function () { res(r.result); };
-    r.onerror = function () { rej(r.error); };
-  });
-}
-async function idbGet(k) {
-  try {
-    var d = await idb();
-    return await new Promise(function (res) { var q = d.transaction('h').objectStore('h').get(k); q.onsuccess = function () { res(q.result); }; q.onerror = function () { res(null); }; });
-  } catch (e) { return null; }
-}
-async function idbSet(k, v) {
-  try {
-    var d = await idb();
-    await new Promise(function (res, rej) { var t = d.transaction('h', 'readwrite'); t.objectStore('h').put(v, k); t.oncomplete = res; t.onerror = function () { rej(t.error); }; t.onabort = function () { rej(t.error); }; });
-    return true;
-  } catch (e) { return false; }
-}
-
 /* ===================== file input/output ===================== */
-var lastMod = {};
 // SETTINGS.toml as it was when the page opened the folder: a change to the file applies on the next reload. The page never writes it.
 var SET = readSettings('');
 function pauseDays() { return SET.values.priority['pause-days']; }
-// Set when the page is served by node tools/discern.mjs serve: {folder, name, version, session, problem, canSwitch}
-// from /api/info. The four functions below then go through the server instead of the folder handle.
-var srv = null;
-// Every request names the folder this page opened, so a server since switched to another folder refuses it (412).
-async function api(path, opts) {
-  opts = Object.assign({}, opts);
-  if (srv && srv.session) opts.headers = Object.assign({ 'X-Discerny-Session': srv.session }, opts.headers);
-  try { return await fetch(path, opts); }
-  catch (e) { var err = new Error('the Discerny server isn’t running'); err.name = 'ServerDown'; throw err; }
-}
-async function apiError(r) {
-  var e = new Error((await r.text()) || 'the server answered ' + r.status);
-  e.name = r.status === 409 ? 'ConflictError' : r.status === 412 ? 'FolderChanged' : 'ServerError';
-  return e;
-}
-async function serverInfo() {
-  try { var r = await fetch('/api/info'); if (!r.ok) return false; srv = await r.json(); return true; } catch (e) { return false; }
-}
-async function serverMtimes() {
-  var r = await api('/api/mtimes');
-  if (!r.ok) throw await apiError(r);
-  return await r.json();
-}
-async function readText(name) {
-  if (srv) {
-    var r = await api('/api/file/' + name);
-    if (r.status === 404) { lastMod[name] = 0; return ''; }
-    if (!r.ok) throw await apiError(r);
-    lastMod[name] = Number(r.headers.get('X-Mtime'));
-    return await r.text();
-  }
-  try { var h = await dir.getFileHandle(name); var f = await h.getFile(); lastMod[name] = f.lastModified; return await f.text(); }
-  catch (e) { if (e && e.name === 'NotFoundError') { lastMod[name] = 0; return ''; } throw e; }
-}
-async function writeText(name, text) {
-  if (srv) {
-    var hd = { 'Content-Type': 'text/plain; charset=utf-8' };
-    if (lastMod[name] !== undefined) hd['If-Mtime'] = String(lastMod[name]);
-    var r = await api('/api/file/' + name, { method: 'PUT', headers: hd, body: text });
-    if (!r.ok) throw await apiError(r);
-    lastMod[name] = (await r.json()).mtime;
-    return;
-  }
-  var h = await dir.getFileHandle(name, { create: true });
-  var w = await h.createWritable();
-  try { await w.write(text); await w.close(); } catch (e) { try { await w.abort(); } catch (e2) { /* ignore */ } throw e; }
-  var f = await h.getFile();
-  lastMod[name] = f.lastModified;
-}
-async function modOf(name) {
-  if (srv) return (await serverMtimes())[name] || 0;
-  try { var h = await dir.getFileHandle(name); return (await h.getFile()).lastModified; }
-  catch (e) { if (e && e.name === 'NotFoundError') return 0; throw e; }
-}
-async function readDrafts() {
-  if (srv) { var r = await api('/api/drafts'); if (!r.ok) throw await apiError(r); return await r.json(); }
-  var out = [];
-  var d;
-  try { d = await dir.getDirectoryHandle('drafts'); } catch (e) { return out; }
-  for await (var entry of d.entries()) {
-    var name = entry[0], h = entry[1];
-    if (h.kind !== 'file' || !/\.(md|txt)$/i.test(name)) continue;
-    try { var f = await h.getFile(); out.push({ name: name, text: await f.text(), mod: f.lastModified }); } catch (e) { /* skip unreadable */ }
-  }
-  out.sort(function (a, b) { return a.name < b.name ? -1 : 1; });
-  return out;
-}
 function parseSources(text) {
   var out = [], cur = null;
   String(text || '').replace(/\r/g, '').split('\n').forEach(function (ln) {
@@ -199,10 +108,10 @@ function looksWrong(k, text, m) {
 }
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 async function readStable(k, first) {
-  var text = first != null ? first : await readText(FILES[k]), m = PARSE[k](text), why = looksWrong(k, text, m);
+  var text = first != null ? first : await D.files.readText(FILES[k]), m = PARSE[k](text), why = looksWrong(k, text, m);
   for (var i = 0; why && i < 4; i++) {
     await sleep(300 * (i + 1));
-    var t2 = await readText(FILES[k]), m2 = PARSE[k](t2), w2 = looksWrong(k, t2, m2);
+    var t2 = await D.files.readText(FILES[k]), m2 = PARSE[k](t2), w2 = looksWrong(k, t2, m2);
     if (!w2) return { text: t2, m: m2 };
     if (t2 === text && t2.trim()) return { text: t2, m: m2 };
     text = t2; m = m2; why = w2;
@@ -212,7 +121,7 @@ async function readStable(k, first) {
 }
 async function loadAll() {
   var t = {};
-  for (var i = 0; i < WATCH.length; i++) t[WATCH[i]] = await readText(WATCH[i]);
+  for (var i = 0; i < WATCH.length; i++) t[WATCH[i]] = await D.files.readText(WATCH[i]);
   var keys = ['tasks', 'inbox', 'done', 'people', 'projects', 'systems', 'rels', 'asks'];
   for (var j = 0; j < keys.length; j++) { var k = keys[j]; if (looksWrong(k, t[FILES[k]], PARSE[k](t[FILES[k]]))) t[FILES[k]] = (await readStable(k, t[FILES[k]])).text; }
   var out = {
@@ -220,7 +129,7 @@ async function loadAll() {
     people: pParse(t['PEOPLE.md']), projects: eParse(t['PROJECTS.md']), systems: eParse(t['SYSTEMS.md']),
     rels: rParse(t['RELATIONSHIPS.md']), asks: aParse(t['ASK-AGENT.md']),
     log: logParse(t['ASK-AGENT-LOG.md']), sources: parseSources(t['SOURCES.md']),
-    drafts: await readDrafts(), asklog: { text: t['ASK-AGENT-LOG.md'] }, ignored: { text: '' }, dismissed: { text: '' }, settings: { text: t['SOURCES.md'] }, interactions: PARSE.interactions(t['INTERACTIONS.md'])
+    drafts: await D.files.readDrafts(), asklog: { text: t['ASK-AGENT-LOG.md'] }, ignored: { text: '' }, dismissed: { text: '' }, settings: { text: t['SOURCES.md'] }, interactions: PARSE.interactions(t['INTERACTIONS.md'])
   };
   keys.forEach(function (k) { BASE[k] = countOf(k, out[k]); });
   return out;
@@ -1061,27 +970,24 @@ function needsIds(m) {
     m.systems.ents.some(function (e) { return !/^SYS-\d+$/.test(e.meta.id || ''); });
 }
 
-/* ===================== the save queue =====================
-   Operations are saved strictly one after another. Nothing is ever dropped: if a save fails the
-   queue stops, the screen says so, and Retry carries on from the failed change. */
-var Q = { jobs: [], running: false, blocked: null, wrote: false, lastSaved: 0, syncT: 0 };
+/* ===================== saving a change ===================== */
 function commit(job, opts) {
   opts = opts || {};
   try { job.fn(S.m); } catch (e) { console.error('Could not apply change on screen', e); }
   S.ver++;
   applyAliasNews();
-  Q.jobs.push(job);
+  D.files.Q.jobs.push(job);
   if (opts.toast) toastShow(opts.toast, opts.undo || null);
   render();
-  kick();
+  D.files.kick();
 }
-function requestSync(external) {
-  var pend = Q.jobs.filter(function (j) { return j.sync; })[0];
-  if (pend) { if (external) pend.external = true; return; }
-  Q.jobs.push({ sync: true, external: !!external });
-  kick();
+// One job from the queue: a change to save, or a sync, which reads the folder again.
+async function runJob(job) {
+  if (!job.sync) return persist(job);
+  var m = await loadAll();
+  applyLoaded(m);
+  S.lastSync = Date.now();
 }
-function scheduleSync(ms) { clearTimeout(Q.syncT); Q.syncT = setTimeout(function () { requestSync(false); }, ms || 600); }
 async function persist(job) {
   for (var attempt = 0; attempt < 3; attempt++) {
     var M = {}, snap = {}, mods = {}, i, k;
@@ -1089,78 +995,37 @@ async function persist(job) {
       k = job.keys[i];
       M[k] = (await readStable(k)).m;
       snap[k] = JSON.stringify(M[k]);
-      mods[k] = lastMod[FILES[k]];
+      mods[k] = D.files.lastMod[FILES[k]];
     }
     job.fn(M);
     var changed = job.keys.filter(function (x) { return JSON.stringify(M[x]) !== snap[x]; }), moved = false;
-    for (i = 0; i < changed.length && !moved; i++) if ((await modOf(FILES[changed[i]])) !== mods[changed[i]]) moved = true;
+    for (i = 0; i < changed.length && !moved; i++) if ((await D.files.modOf(FILES[changed[i]])) !== mods[changed[i]]) moved = true;
     if (moved) continue;
     var wrote = 0;
-    try { for (i = 0; i < changed.length; i++) { await writeText(FILES[changed[i]], serKey(changed[i], M[changed[i]])); wrote++; } }
+    try { for (i = 0; i < changed.length; i++) { await D.files.writeText(FILES[changed[i]], serKey(changed[i], M[changed[i]])); wrote++; } }
     catch (e) { if (e && e.name === 'ConflictError' && !wrote) continue; throw e; }
     job.keys.forEach(function (x) { BASE[x] = countOf(x, M[x]); });
     return;
   }
   throw new Error('another program kept changing the files while this was being saved');
 }
-// Lost access to the folder: the browser's permission, or the server that was serving it.
-function isPermErr(e) { return !!e && (e.name === 'NotAllowedError' || e.name === 'SecurityError' || e.name === 'ServerDown'); }
-// The server now serves another folder than the one this page opened: nothing more is read or saved, and the page offers to reload.
-function isMoved(e) { return !!e && e.name === 'FolderChanged'; }
-function errText(e) { return (e && (e.message || e.name)) || 'unknown error'; }
-// The gate for a folder whose DISCERNY.md records a Format other than this app's, or null when they match.
-async function formatGate() {
-  var v = formatOf(await readText('DISCERNY.md')), is = formatIs(v);
-  return is === 'same' ? null : { mode: v === 'next' ? 'fmtnext' : is === 'older' ? 'fmtold' : 'fmtnew', msg: '', format: v };
-}
-// An open folder whose Format changed (an Upgrade ran while the page was open) is refused, not written to.
-function refuseFormat(g) {
-  if (Q.jobs.some(function (j) { return !j.sync; })) g.msg = 'Changes you had not saved yet were not written to it.';
-  Q.jobs = []; Q.blocked = null; S.ready = false; S.gate = g;
-}
-async function kick() {
-  if (Q.running || Q.blocked) return;
-  Q.running = true;
-  render();
-  while (Q.jobs.length && !Q.blocked) {
-    var job = Q.jobs[0];
-    try {
-      var g = await formatGate();
-      if (g) { refuseFormat(g); break; }
-      if (job.sync) { var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now(); }
-      else { await persist(job); Q.wrote = true; Q.lastSaved = Date.now(); }
-      Q.jobs.shift();
-      applyAliasNews();
-    } catch (e) {
-      console.error(e);
-      if (isMoved(e)) { S.moved = true; Q.blocked = { job: job, msg: errText(e) }; }
-      else if (isPermErr(e)) { S.lost = true; Q.blocked = { job: job, msg: 'The browser no longer has permission to use the folder.' }; }
-      else if (job.sync) { Q.jobs.shift(); toastShow('Couldn’t read the folder: ' + errText(e)); }
-      else Q.blocked = { job: job, msg: errText(e) };
-    }
-  }
-  Q.running = false;
-  if (!Q.jobs.length && !Q.blocked && Q.wrote) { Q.wrote = false; scheduleSync(500); }
-  render();
-}
 async function regainAccess() {
-  if (srv) {
+  if (D.files.srv) {
     // A server started again on another folder: reload rather than save this folder's changes into it.
-    var was = srv.folder;
-    if (!(await serverInfo())) return false;
-    if (srv.folder !== was) { location.reload(); return false; }
+    var was = D.files.srv.folder;
+    if (!(await D.files.serverInfo())) return false;
+    if (D.files.srv.folder !== was) { location.reload(); return false; }
     S.lost = false;
     return true;
   }
-  try { var p = await dir.requestPermission({ mode: 'readwrite' }); if (p === 'granted') { S.lost = false; return true; } } catch (e) { /* not allowed without a click */ }
+  try { var p = await D.files.dir.requestPermission({ mode: 'readwrite' }); if (p === 'granted') { S.lost = false; return true; } } catch (e) { /* not allowed without a click */ }
   return false;
 }
 async function retrySave() {
   if (S.lost && !(await regainAccess())) { render(); return; }
-  Q.blocked = null;
-  kick();
+  D.files.Q.blocked = null;
+  D.files.kick();
 }
-function discardPending() { Q.jobs = []; Q.blocked = null; requestSync(false); }
 
 /* After reading the files again: keep unsaved changes, and mark what changed outside Discerny. */
 function sigs(m) {
@@ -1180,7 +1045,7 @@ function applyLoaded(m) {
   var prev = S.m;
   var before = prev ? sigs(prev) : null;
   S.m = m;
-  for (var i = 1; i < Q.jobs.length; i++) { var j = Q.jobs[i]; if (!j.sync) { try { j.fn(S.m); } catch (e) { /* replay best effort */ } } }
+  for (var i = 1; i < D.files.Q.jobs.length; i++) { var j = D.files.Q.jobs[i]; if (!j.sync) { try { j.fn(S.m); } catch (e) { /* replay best effort */ } } }
   S.ver++;
   if (before) {
     var ids = new Set();
@@ -1194,18 +1059,18 @@ function applyLoaded(m) {
       toastShow('Updated from your files: ' + ids.size + (ids.size === 1 ? ' item changed.' : ' items changed.'));
     }
   }
-  if (needsIds(S.m) && !Q.jobs.some(function (j) { return j.label === 'Assign IDs'; })) { var job = OPS.ensureIds(); job.fn(S.m); S.ver++; Q.jobs.push(job); }
+  if (needsIds(S.m) && !D.files.Q.jobs.some(function (j) { return j.label === 'Assign IDs'; })) { var job = OPS.ensureIds(); job.fn(S.m); S.ver++; D.files.Q.jobs.push(job); }
   applyAliasNews();
 }
 async function poll() {
-  if (!S.ready || S.moved || Q.running || Q.jobs.length || Q.blocked || document.hidden) return;
+  if (!S.ready || S.moved || D.files.Q.running || D.files.Q.jobs.length || D.files.Q.blocked || document.hidden) return;
   try {
     var changed = false;
-    var mt = srv ? await serverMtimes() : null;
-    for (var i = 0; i < WATCH.length; i++) { var t = mt ? mt[WATCH[i]] || 0 : await modOf(WATCH[i]); if (t !== (lastMod[WATCH[i]] || 0)) { changed = true; break; } }
-    if (changed) requestSync(true);
-    else if (Date.now() - (S.lastSync || 0) > 30000) requestSync(false);
-  } catch (e) { if (isMoved(e)) { S.moved = true; render(); } else if (isPermErr(e)) { S.lost = true; render(); } }
+    var mt = D.files.srv ? await D.files.serverMtimes() : null;
+    for (var i = 0; i < WATCH.length; i++) { var t = mt ? mt[WATCH[i]] || 0 : await D.files.modOf(WATCH[i]); if (t !== (D.files.lastMod[WATCH[i]] || 0)) { changed = true; break; } }
+    if (changed) D.files.requestSync(true);
+    else if (Date.now() - (S.lastSync || 0) > 30000) D.files.requestSync(false);
+  } catch (e) { if (D.files.isMoved(e)) { S.moved = true; render(); } else if (D.files.isPermErr(e)) { S.lost = true; render(); } }
 }
 
 /* A record saved under a different number than the screen showed: rename it on screen and follow it. */
@@ -1226,7 +1091,7 @@ function applyAliasNews() {
     if (S.fresh.has(from)) { S.fresh.delete(from); S.fresh.add(to); }
     toastShow('Saved as ' + to + ': ' + from + ' had just been used in your files for something else.');
   });
-  requestSync(false);
+  D.files.requestSync(false);
 }
 
 /* ===================== toasts and undo ===================== */
@@ -2732,8 +2597,8 @@ var NAV_COUNTS = { today: 1, inbox: 1, next: 1, waiting: 1, fyi: 1, review: 1, c
 function navOn(k) { var v = S.view; return v === k || (k === 'projects' && v === 'project') || (k === 'people' && v === 'person') || (k === 'systems' && v === 'system'); }
 function saveState() {
   if (S.moved) return { cls: 'err', text: 'Folder changed' };
-  if (Q.blocked || S.lost) return { cls: 'err', text: S.lost ? (srv ? 'Server not running' : 'No folder access') : 'Not saved' };
-  var n = Q.jobs.filter(function (j) { return !j.sync; }).length;
+  if (D.files.Q.blocked || S.lost) return { cls: 'err', text: S.lost ? (D.files.srv ? 'Server not running' : 'No folder access') : 'Not saved' };
+  var n = D.files.Q.jobs.filter(function (j) { return !j.sync; }).length;
   if (n) return { cls: 'busy', text: 'Saving…' };
   return { cls: '', text: 'All changes saved' };
 }
@@ -2759,13 +2624,13 @@ function vSide(c) {
   return h;
 }
 function vBanner() {
-  if (S.moved) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The Discerny server now serves another folder, so this page no longer reads or saves “' + esc(S.folder) + '”. ' + (Q.jobs.filter(function (j) { return !j.sync; }).length ? 'Your unsaved changes are kept on screen, and were not written to the other folder. ' : '') + 'Reload to open the folder it serves now.</span>' + bt('Reload', 'reload', { cls: 'primary sm' }) + '</div>';
-  if (S.lost && srv) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The Discerny server isn’t running. Nothing is lost. ' + (Q.jobs.filter(function (j) { return !j.sync; }).length ? 'Your unsaved changes are kept on screen. ' : '') + 'Start it again with node tools/discern.mjs serve, then retry.</span>' + bt('Retry', 'reconnect', { cls: 'primary sm' }) + '</div>';
-  if (S.lost) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The browser no longer has permission to use the folder. Nothing is lost: ' + (Q.jobs.filter(function (j) { return !j.sync; }).length ? 'your unsaved changes are kept on screen until you reconnect.' : 'reconnect to carry on.') + '</span>' + bt('Reconnect', 'reconnect', { cls: 'primary sm' }) + '</div>';
-  if (!Q.blocked) return '';
-  var n = Q.jobs.filter(function (j) { return !j.sync; }).length;
+  if (S.moved) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The Discerny server now serves another folder, so this page no longer reads or saves “' + esc(S.folder) + '”. ' + (D.files.Q.jobs.filter(function (j) { return !j.sync; }).length ? 'Your unsaved changes are kept on screen, and were not written to the other folder. ' : '') + 'Reload to open the folder it serves now.</span>' + bt('Reload', 'reload', { cls: 'primary sm' }) + '</div>';
+  if (S.lost && D.files.srv) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The Discerny server isn’t running. Nothing is lost. ' + (D.files.Q.jobs.filter(function (j) { return !j.sync; }).length ? 'Your unsaved changes are kept on screen. ' : '') + 'Start it again with node tools/discern.mjs serve, then retry.</span>' + bt('Retry', 'reconnect', { cls: 'primary sm' }) + '</div>';
+  if (S.lost) return '<div class="banner err" role="alert" data-k="banner"><span class="grow">The browser no longer has permission to use the folder. Nothing is lost: ' + (D.files.Q.jobs.filter(function (j) { return !j.sync; }).length ? 'your unsaved changes are kept on screen until you reconnect.' : 'reconnect to carry on.') + '</span>' + bt('Reconnect', 'reconnect', { cls: 'primary sm' }) + '</div>';
+  if (!D.files.Q.blocked) return '';
+  var n = D.files.Q.jobs.filter(function (j) { return !j.sync; }).length;
   if (S.confirm === 'discard') return '<div class="banner err" role="alert" data-k="banner"><span class="grow">Discard ' + plural(n, 'unsaved change') + '? The screen will go back to what is in your files.</span>' + bt('Discard', 'discard-yes', { cls: 'danger sm' }) + bt('Keep them', 'discard-no', { cls: 'sm' }) + '</div>';
-  return '<div class="banner err" role="alert" data-k="banner"><span class="grow">Couldn’t save “' + esc(Q.blocked.job.label || 'change') + '”: ' + esc(Q.blocked.msg) + '. ' + plural(n, 'change') + ' waiting, still shown on screen.</span>' + bt('Try again', 'retry', { cls: 'primary sm' }) + bt('Discard…', 'discard', { cls: 'sm' }) + '</div>';
+  return '<div class="banner err" role="alert" data-k="banner"><span class="grow">Couldn’t save “' + esc(D.files.Q.blocked.job.label || 'change') + '”: ' + esc(D.files.Q.blocked.msg) + '. ' + plural(n, 'change') + ' waiting, still shown on screen.</span>' + bt('Try again', 'retry', { cls: 'primary sm' }) + bt('Discard…', 'discard', { cls: 'sm' }) + '</div>';
 }
 // A setting SETTINGS.toml gets wrong costs the User its default and this notice, and nothing else.
 function vSettingsNotice() {
@@ -2831,9 +2696,9 @@ function vKeys() {
 // switch, so say how to restart it; otherwise the Change folder form asks the server to switch.
 function srvSwitch() { return 'This server was started on a folder of its own, so it can’t switch. To open another folder, stop the server (Ctrl C where it runs), run node tools/discern.mjs connect <folder> in the Discerny app folder, and start it again with node tools/discern.mjs serve.'; }
 function vFolderForm() {
-  var sugs = S.folderSugs.filter(function (s) { return s.folder !== srv.folder; });
+  var sugs = S.folderSugs.filter(function (s) { return s.folder !== D.files.srv.folder; });
   return '<form class="fform" data-sub="folder-switch" data-k="fform">' +
-    (srv.folder ? '<div><span class="hint">Open now</span><p class="mono" style="margin:2px 0 0;overflow-wrap:anywhere">' + esc(srv.folder) + '</p></div>' : '') +
+    (D.files.srv.folder ? '<div><span class="hint">Open now</span><p class="mono" style="margin:2px 0 0;overflow-wrap:anywhere">' + esc(D.files.srv.folder) + '</p></div>' : '') +
     '<label class="fl" for="folder-path">Folder to open<input id="folder-path" class="in mono" type="text" autocomplete="off" spellcheck="false" data-in="folderPath" value="' + esc(S.folderPath) + '" placeholder="The full path of a folder with TASKS.md in it" required' + (S.folderErr ? ' aria-describedby="folder-err" aria-invalid="true"' : '') + '></label>' +
     (S.folderErr ? '<p class="err-t" id="folder-err" role="alert" style="margin:0">' + esc(S.folderErr) + '</p>' : '') +
     (sugs.length ? '<div class="fsugs"><span class="hint">Suggestions</span>' + sugs.map(function (s) { return '<button type="button" class="chipbtn" data-act="folder-sug" data-v="' + esc(s.folder) + '" title="' + esc(s.folder) + '">' + esc(s.name) + '</button>'; }).join('') + '</div>' : '') +
@@ -2841,9 +2706,9 @@ function vFolderForm() {
     '<div class="acts"><button type="submit" class="btn primary"' + (S.folderBusy ? ' disabled' : '') + '>' + (S.folderBusy ? 'Opening…' : 'Open folder') + '</button></div></form>';
 }
 function vFolder() {
-  return '<div class="dlg-scrim" data-k="dlg-folder" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="folder-h"><div class="dlg-h"><h2 id="folder-h" style="margin:0;flex:1;font-size:16px">' + (srv.canSwitch ? 'Change folder' : 'Your data folder') + '</h2>' +
+  return '<div class="dlg-scrim" data-k="dlg-folder" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-labelledby="folder-h"><div class="dlg-h"><h2 id="folder-h" style="margin:0;flex:1;font-size:16px">' + (D.files.srv.canSwitch ? 'Change folder' : 'Your data folder') + '</h2>' +
     '<button type="button" class="xbtn" data-act="dlg-close" aria-label="Close">' + ic('x') + '</button></div><div class="dlg-pad">' +
-    (srv.canSwitch ? vFolderForm() : '<p class="mono" style="margin:0 0 12px;overflow-wrap:anywhere">' + esc(srv.folder) + '</p><p class="hint" style="margin:0">' + esc(srvSwitch()) + '</p>') + '</div></div></div>';
+    (D.files.srv.canSwitch ? vFolderForm() : '<p class="mono" style="margin:0 0 12px;overflow-wrap:anywhere">' + esc(D.files.srv.folder) + '</p><p class="hint" style="margin:0">' + esc(srvSwitch()) + '</p>') + '</div></div></div>';
 }
 async function loadFolderSugs() {
   try { var r = await fetch('/api/folders'); if (r.ok) { S.folderSugs = await r.json(); render(); } } catch (e) { /* no suggestions */ }
@@ -2874,7 +2739,7 @@ function vGate() {
   var g = GATE[S.gate.mode] || GATE.pick, msg = g[1].replace('%s', S.gate.mode === 'error' ? (S.gate.msg || 'Unknown error') : S.folder).replace('%f', S.gate.format).replace('%a', FORMAT);
   var h = '<div class="gate" data-k="gate"><main class="gate-c" aria-labelledby="gate-h"><div class="brand" style="padding:0"><span class="logo" aria-hidden="true">' + LOGO + '</span><span class="brand-t"><b>Discerny</b><span>Version ' + VERSION + '</span></span></div>' +
     '<h1 id="gate-h">' + esc(g[0]) + '</h1><p>' + esc(msg) + '</p>' + (S.gate.msg && S.gate.mode !== 'error' ? '<p class="err-t">' + esc(S.gate.msg) + '</p>' : '');
-  if (srv && (g[3] === 'refolder' || S.gate.mode === 'nofolder')) h += srv.canSwitch ? vFolderForm() : '<p class="hint">' + esc(srvSwitch()) + '</p>';
+  if (D.files.srv && (g[3] === 'refolder' || S.gate.mode === 'nofolder')) h += D.files.srv.canSwitch ? vFolderForm() : '<p class="hint">' + esc(srvSwitch()) + '</p>';
   else if (g[2]) h += '<div class="acts">' + bt(g[2], g[3], { cls: 'primary lg' }) + (S.gate.mode === 'reconnect' || S.gate.mode === 'denied' ? bt('Choose a different folder', 'pick', { cls: 'lg' }) : '') + '</div>';
   if (S.gate.mode === 'pick' || S.gate.mode === 'reconnect') h += '<p class="hint">Your browser will ask to let this page view and edit files in the folder. If it offers <strong>Allow on every visit</strong>, choose that and Discerny will open straight in next time.</p>';
   return h + '</main></div>' + vToasts();
@@ -2974,7 +2839,7 @@ function renderNow() {
   var root = document.getElementById('app');
   var html;
   try { html = S.ready && S.m ? vApp() : vGate(); }
-  catch (e) { console.error(e); html = '<div class="gate"><main class="gate-c"><h1>Something went wrong drawing the page</h1><p>' + esc(errText(e)) + '</p><p class="hint">Your files are not affected. Reload the page to try again.</p></main></div>'; }
+  catch (e) { console.error(e); html = '<div class="gate"><main class="gate-c"><h1>Something went wrong drawing the page</h1><p>' + esc(D.files.errText(e)) + '</p><p class="hint">Your files are not affected. Reload the page to try again.</p></main></div>'; }
   var t = document.createElement('template');
   t.innerHTML = html;
   var ae = document.activeElement, ss = null, se = null;
@@ -3548,17 +3413,17 @@ function runResult(it) {
     else if (it.arg.indexOf('theme-') === 0) setTheme(it.arg.slice(6));
     else if (it.arg === 'side') toggleSide();
     else if (it.arg === 'keys') openKeys();
-    else if (it.arg === 'sync') { requestSync(true); toastShow('Reading your files again.'); }
+    else if (it.arg === 'sync') { D.files.requestSync(true); toastShow('Reading your files again.'); }
     else render();
   }
 }
-function syncNow() { requestSync(true); }
+function syncNow() { D.files.requestSync(true); }
 async function reconnect() {
   var ok = await regainAccess();
-  if (!ok) { toastShow((srv ? 'The Discerny server still isn’t running.' : 'Permission wasn’t given.') + ' Your changes are still kept on screen.'); render(); return; }
-  Q.blocked = null;
-  requestSync(false);
-  kick();
+  if (!ok) { toastShow((D.files.srv ? 'The Discerny server still isn’t running.' : 'Permission wasn’t given.') + ' Your changes are still kept on screen.'); render(); return; }
+  D.files.Q.blocked = null;
+  D.files.requestSync(false);
+  D.files.kick();
   render();
 }
 
@@ -3688,7 +3553,7 @@ var ACT = {
   retry: function () { S.confirm = null; retrySave(); },
   reconnect: function () { reconnect(); },
   discard: function () { S.confirm = 'discard'; render(); },
-  'discard-yes': function () { S.confirm = null; discardPending(); toastShow('Unsaved changes discarded. Showing what is in your files.'); },
+  'discard-yes': function () { S.confirm = null; D.files.discardPending(); toastShow('Unsaved changes discarded. Showing what is in your files.'); },
   'discard-no': function () { S.confirm = null; render(); },
   group: function (el) { S.group = dvv(el); lsSet('discerny-group', S.group); render(); },
   'wb-group': function (el) { setWb({ group: dvv(el) }); },
@@ -3737,7 +3602,7 @@ var ACT = {
   'e-link-del': function (el) { var id = did(el), v = dvv(el); commit(OPS.removeEntLink(kindOf(id), id, v), { toast: 'URL removed.', undo: OPS.addEntLink(kindOf(id), id, v) }); },
   pick: function () { pickFolder(); },
   // From a folder refused after it was open, switching reloads the page so nothing of it carries over.
-  refolder: function () { if (S.m || srv) changeFolder(); else pickFolder(); },
+  refolder: function () { if (S.m || D.files.srv) changeFolder(); else pickFolder(); },
   folder: function () { changeFolder(); },
   'folder-sug': function (el) { S.folderPath = dvv(el); S.folderErr = ''; render(); focusLater('#folder-path'); },
   reload: function () { location.reload(); },
@@ -3845,12 +3710,12 @@ var SUB = {
   // Asks the server to open another folder, which it also records for the agent, then reloads on it.
   'folder-switch': async function () {
     if (S.folderBusy) return;
-    if (Q.jobs.some(function (j) { return !j.sync; })) { S.folderErr = 'Wait until your changes are saved, then change folder.'; render(); return; }
+    if (D.files.Q.jobs.some(function (j) { return !j.sync; })) { S.folderErr = 'Wait until your changes are saved, then change folder.'; render(); return; }
     var p = S.folderPath.trim();
     if (!p) { focusLater('#folder-path'); return; }
     S.folderErr = ''; S.folderBusy = true; render();
     var r;
-    try { r = await api('/api/folder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) }); }
+    try { r = await D.files.api('/api/folder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) }); }
     catch (e) { S.folderBusy = false; S.folderErr = 'The Discerny server isn’t running. Start it again with node tools/discern.mjs serve, then try again.'; render(); return; }
     if (r.ok) { location.reload(); return; }
     S.folderBusy = false; S.folderErr = (await r.text()) || 'The server answered ' + r.status + '.'; render(); focusLater('#folder-path');
@@ -4005,70 +3870,70 @@ function onKey(ev) {
 async function pickFolder() {
   var h;
   try { h = await window.showDirectoryPicker({ id: 'discerny', mode: 'readwrite' }); }
-  catch (e) { if (e && e.name === 'AbortError') return; S.gate = { mode: 'error', msg: errText(e) }; render(); return; }
-  dir = h; S.folder = h.name;
+  catch (e) { if (e && e.name === 'AbortError') return; S.gate = { mode: 'error', msg: D.files.errText(e) }; render(); return; }
+  D.files.useFolder(h); S.folder = h.name;
   try { await h.getFileHandle('TASKS.md'); }
   catch (e) { if (e && e.name === 'NotFoundError') { S.gate = { mode: 'wrong', msg: '“' + h.name + '” has no TASKS.md.' }; render(); return; } }
-  await idbSet('dir', h);
+  await D.files.idbSet('dir', h);
   openFolder();
 }
 // Switching data folders reloads the page, so nothing from the old folder (undo, selection, timestamps) carries over.
 async function changeFolder() {
-  if (srv) {
+  if (D.files.srv) {
     if (S.dialog !== 'folder') { S.dlgReturn = document.activeElement; S.folderPath = ''; S.folderErr = ''; }
     S.dialog = 'folder'; render();
-    if (srv.canSwitch) { loadFolderSugs(); focusLater('#folder-path'); } else focusLater('.dlg .xbtn');
+    if (D.files.srv.canSwitch) { loadFolderSugs(); focusLater('#folder-path'); } else focusLater('.dlg .xbtn');
     return;
   }
-  if (Q.jobs.some(function (j) { return !j.sync; })) { toastShow('Wait until your changes are saved, then change folder.'); return; }
+  if (D.files.Q.jobs.some(function (j) { return !j.sync; })) { toastShow('Wait until your changes are saved, then change folder.'); return; }
   var h;
   try { h = await window.showDirectoryPicker({ id: 'discerny', mode: 'readwrite' }); }
-  catch (e) { if (!e || e.name !== 'AbortError') toastShow('Couldn’t open the folder: ' + errText(e)); return; }
+  catch (e) { if (!e || e.name !== 'AbortError') toastShow('Couldn’t open the folder: ' + D.files.errText(e)); return; }
   try { await h.getFileHandle('TASKS.md'); }
   catch (e) { toastShow('“' + h.name + '” has no TASKS.md, so it isn’t a Discerny data folder.'); return; }
-  if (!(await idbSet('dir', h))) { toastShow('Couldn’t remember the new folder.'); return; }
+  if (!(await D.files.idbSet('dir', h))) { toastShow('Couldn’t remember the new folder.'); return; }
   location.reload();
 }
 async function regrant() {
-  if (!dir) { pickFolder(); return; }
+  if (!D.files.dir) { pickFolder(); return; }
   try {
-    var p = await dir.requestPermission({ mode: 'readwrite' });
+    var p = await D.files.dir.requestPermission({ mode: 'readwrite' });
     if (p === 'granted') { openFolder(); return; }
     S.gate = { mode: 'denied', msg: '' };
-  } catch (e) { S.gate = { mode: 'error', msg: errText(e) }; }
+  } catch (e) { S.gate = { mode: 'error', msg: D.files.errText(e) }; }
   render();
 }
 async function openFolder() {
-  if (srv && srv.problem === 'none') { S.gate = { mode: 'nofolder', msg: '' }; render(); loadFolderSugs(); focusLater('#folder-path'); return; }
-  if (srv && srv.canSwitch) loadFolderSugs();
-  S.folder = srv ? srv.name : dir.name;
-  if (!srv) try { await dir.getFileHandle('TASKS.md'); }
+  if (D.files.srv && D.files.srv.problem === 'none') { S.gate = { mode: 'nofolder', msg: '' }; render(); loadFolderSugs(); focusLater('#folder-path'); return; }
+  if (D.files.srv && D.files.srv.canSwitch) loadFolderSugs();
+  S.folder = D.files.srv ? D.files.srv.name : D.files.dir.name;
+  if (!D.files.srv) try { await D.files.dir.getFileHandle('TASKS.md'); }
   catch (e) {
-    if (e && e.name === 'NotFoundError') S.gate = { mode: 'wrong', msg: '“' + dir.name + '” has no TASKS.md.' };
-    else if (isPermErr(e)) S.gate = { mode: srv ? 'srvdown' : 'reconnect', msg: '' };
-    else S.gate = { mode: 'error', msg: errText(e) };
+    if (e && e.name === 'NotFoundError') S.gate = { mode: 'wrong', msg: '“' + D.files.dir.name + '” has no TASKS.md.' };
+    else if (D.files.isPermErr(e)) S.gate = { mode: D.files.srv ? 'srvdown' : 'reconnect', msg: '' };
+    else S.gate = { mode: 'error', msg: D.files.errText(e) };
     render();
     return;
   }
   S.gate = { mode: 'loading', msg: '' };
   render();
   try {
-    var g = await formatGate();
+    var g = await D.files.formatGate();
     if (g) { S.gate = g; render(); return; }
-    SET = readSettings(await readText(SETTINGS_FILE));
+    SET = readSettings(await D.files.readText(SETTINGS_FILE));
     var m = await loadAll(); applyLoaded(m); S.lastSync = Date.now();
   }
   catch (e) {
     console.error(e);
     // The server switched folders between /api/info and these reads: open the folder it serves now.
-    if (isMoved(e)) { location.reload(); return; }
-    S.gate = isPermErr(e) ? { mode: srv ? 'srvdown' : 'reconnect', msg: '' } : { mode: 'error', msg: errText(e) }; render(); return;
+    if (D.files.isMoved(e)) { location.reload(); return; }
+    S.gate = D.files.isPermErr(e) ? { mode: D.files.srv ? 'srvdown' : 'reconnect', msg: '' } : { mode: 'error', msg: D.files.errText(e) }; render(); return;
   }
   S.ready = true;
   land();
   startTimers();
   focusLater('#page-title');
-  if (Q.jobs.length) kick();
+  if (D.files.Q.jobs.length) D.files.kick();
 }
 var timersOn = false, lastDay = '';
 function startTimers() {
@@ -4102,13 +3967,13 @@ async function boot() {
   window.addEventListener('resize', render);
   // Back, Forward, an edited address or a bookmark; before the folder is read, openFolder lands on the Link instead
   window.addEventListener('hashchange', function () { if (S.ready && S.m && location.hash !== hashOwn) land(); });
-  window.addEventListener('beforeunload', function (ev) { if (Q.jobs.some(function (j) { return !j.sync; })) { ev.preventDefault(); ev.returnValue = ''; } });
+  window.addEventListener('beforeunload', function (ev) { if (D.files.Q.jobs.some(function (j) { return !j.sync; })) { ev.preventDefault(); ev.returnValue = ''; } });
   // Served by node tools/discern.mjs serve: the server reads and writes the folder, so no picker or permission.
-  if (location.protocol === 'http:' && (await serverInfo())) { openFolder(); return; }
+  if (location.protocol === 'http:' && (await D.files.serverInfo())) { openFolder(); return; }
   if (!('showDirectoryPicker' in window)) { S.gate = { mode: 'nosupport', msg: '' }; render(); return; }
-  var h = await idbGet('dir');
+  var h = await D.files.idbGet('dir');
   if (h && h.kind === 'directory') {
-    dir = h; S.folder = h.name;
+    D.files.useFolder(h); S.folder = h.name;
     var p = 'prompt';
     try { p = await h.queryPermission({ mode: 'readwrite' }); } catch (e) { /* treat as prompt */ }
     if (p === 'granted') { openFolder(); return; }
@@ -4119,6 +3984,12 @@ async function boot() {
   S.gate = { mode: 'pick', msg: '' };
   render();
 }
+// What files sets off, handled here until the concerns that own these have moved.
+D.files.install('redraw', function () { render(); });
+D.files.install('toast', function (text) { toastShow(text); });
+D.files.install('runJob', runJob);
+D.files.install('afterJob', function () { applyAliasNews(); });
+D.files.install('folderState', function (patch) { Object.assign(S, patch); });
 boot();
 </script>
 </body>

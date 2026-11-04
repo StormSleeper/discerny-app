@@ -128,7 +128,7 @@ A Link's view and item keep working in later versions of the app. If the item ha
 | File | What it is |
 |---|---|
 | `discerny.html` | The UI: the page you open |
-| `ui/` | The UI's parts, which the page loads: `core.js`, the parser for the data folder's files, which the helper also uses, and `discerny.css`, the styles. There's nothing to build |
+| `ui/` | The UI's parts, which the page loads: `core.js`, the parser for the data folder's files, which the helper also uses; `files.js`, which reaches the data folder and runs the save queue; and `discerny.css`, the styles. There's nothing to build |
 | `AGENTS.md` | Instructions for AI agents (`CLAUDE.md` points Claude to it) |
 | `SOURCE-SKILLS.md` | The rules every source skill follows |
 | `.claude/skills/` | The Discerny skills for Claude (a hidden folder) |

@@ -24,11 +24,11 @@ const STYLESHEET = 'ui/discerny.css';
 const BEFORE_REGEX = /(^|[(,=:[!&|?{};+\-*%<>~^\n]|\b(?:return|typeof|case|in|of|delete|void|throw|new|else|do))\s*$/;
 
 // The source with comments gone, and each string, template text and regular expression emptied. Code inside a
-// template's ${...} stays, as it runs.
-function codeOf(src) {
+// template's ${...} stays, as it runs. With keepStrings, plain quoted strings stay, for reading hook names.
+function codeOf(src, { keepStrings = false } = {}) {
   const n = src.length;
   let i = 0;
-  const quoted = (q) => { i++; while (i < n && src[i] !== q) { if (src[i] === '\\') i++; i++; } i++; return "''"; };
+  const quoted = (q) => { const from = i; i++; while (i < n && src[i] !== q) { if (src[i] === '\\') i++; i++; } i++; return keepStrings ? src.slice(from, i) : "''"; };
   const template = () => {
     let out = '`';
     i++;
@@ -120,6 +120,18 @@ function namesDeclared(code) {
   return known;
 }
 
+// The names declared at the top level of a piece of code, with nothing from inside a bracket.
+function namesAtTopLevel(code) {
+  let depth = 0, outer = '';
+  for (const c of code) {
+    if ('([{'.includes(c)) { if (!depth) outer += c; depth++; }
+    else if (')]}'.includes(c)) { depth--; if (!depth) outer += c; }
+    else if (!depth) outer += c;
+  }
+  assert.equal(depth, 0, 'brackets should balance, or the code was misread');
+  return namesDeclared(outer);
+}
+
 // ---------------------------------------------------------------- the page's tags and the ui/ folder
 
 // Each <script> and stylesheet in the page, in order: { src } for one in a file, { inline: true } for one in the page.
@@ -172,6 +184,94 @@ function coreProblems(src) {
   return out;
 }
 
+// ---------------------------------------------------------------- rules for every moved concern
+
+// A file's concern: the views- files are all one.
+const concernOf = (file) => path.basename(file, '.js').replace(/^views-.*/, 'views');
+const ORDER = ['core', 'files', 'model', 'ops', 'links', 'views', 'render', 'input', 'main'];
+const movedScripts = () => SCRIPTS.filter(f => fs.existsSync(path.join(REPO, f)));
+const readRepo = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+
+// The page's own script, in the body: what's left of the UI until every concern has moved. The theme snippet in the head is not part of it.
+function inlineScript(html) {
+  const body = html.slice(html.indexOf('<body'));
+  return [...body.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(m => m[1]).join('\n');
+}
+
+// A concern uses only the namespaces before it, and assigns only to its own.
+function namespaceProblems(concern, src) {
+  const out = [], at = ORDER.indexOf(concern);
+  for (const m of codeOf(src).matchAll(/(?<![\w$.])D\.([A-Za-z_$][\w$]*)(\.[A-Za-z_$][\w$]*)?(\s*=(?!=))?/g)) {
+    if (ORDER.indexOf(m[1]) > at || ORDER.indexOf(m[1]) < 0) out.push(`${concern} uses D.${m[1]}, which comes after it`);
+    if (m[3] && m[1] !== concern) out.push(`${concern} assigns to D.${m[1]}${m[2] || ''}, another concern's namespace`);
+  }
+  return out;
+}
+
+// A moved concern calling a function still in the page's own script would be leaning on code that hasn't moved.
+function inlineCallProblems(concern, src, inline) {
+  const code = codeOf(src), out = [];
+  for (const n of namesAtTopLevel(codeOf(inline))) {
+    if (new RegExp(`(?<![\\w$.])${n.replace(/\$/g, '\\$')}\\s*\\(`).test(code)) out.push(`${concern} calls ${n}() bare, from the page's own script`);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- files's rules
+
+// What files may use from the browser, beyond JavaScript's own built-ins. `get` is the word in its accessors.
+const FILES_BROWSER = new Set(['D', 'get', 'fetch', 'indexedDB', 'setTimeout', 'clearTimeout', 'console']);
+
+// What's wrong with files's source: anything from outside itself and core, any mention of state or Items, or the DOM.
+function filesProblems(src, core = CORE) {
+  const code = codeOf(src), out = [];
+  const known = new Set([...namesDeclared(code), ...namesAtTopLevel(codeOf(core))]);
+  for (const n of namesUsed(code)) if (!known.has(n) && !BUILT_INS.has(n) && !FILES_BROWSER.has(n)) out.push(`files uses ${n}, from outside itself and core`);
+  for (const [what, re] of [['S.', /(?<![\w$.])S\./], ['OPS', /(?<![\w$.])OPS\b/], ['.items', /\.items\b/], ['.meta', /\.meta\b/], ['.people', /\.people\b/], ['document', /(?<![\w$.])document\b/], ['window', /(?<![\w$.])window\b/], ['location', /(?<![\w$.])location\b/]]) {
+    if (re.test(code)) out.push(`files mentions ${what}`);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- the hooks
+
+// The whole set. A new hook needs a row here and in files's registry; if the need can be met by moving code, move the code.
+const HOOK_TABLE = {
+  redraw: { firedBy: ['files', 'ops'], installedBy: 'render' },
+  toast: { firedBy: ['files'], installedBy: 'ops' },
+  runJob: { firedBy: ['files'], installedBy: 'ops' },
+  afterJob: { firedBy: ['files'], installedBy: 'ops' },
+  folderState: { firedBy: ['files'], installedBy: 'model' },
+  afterDraw: { firedBy: ['render'], installedBy: 'input' },
+};
+const PAGE_OWN = 'page'; // the page's own script installs what hasn't moved yet, so it's held only to the table's names and the one-installer rule
+
+// Each install(...) and fire(...) call in a source, with the hook's name; a name that isn't a plain string comes back as null.
+function hookCalls(src) {
+  const code = codeOf(src, { keepStrings: true });
+  return [...code.matchAll(/(?<![\w$.])(?:(function)\s+)?(?:D\.files\.)?(install|fire)\s*\(\s*(?:'([^']*)'|"([^"]*)")?/g)]
+    .filter(m => !m[1])
+    .map(m => ({ call: m[2], name: m[3] ?? m[4] ?? null }));
+}
+
+// What's wrong with the hooks across every source, each { concern, src }. Once main has landed, every hook has an installer.
+function hookProblems(sources, { mainLanded = false } = {}) {
+  const out = [], installs = {};
+  for (const { concern, src } of sources) {
+    for (const { call, name } of hookCalls(src)) {
+      const row = Object.hasOwn(HOOK_TABLE, name ?? '') ? HOOK_TABLE[name] : null;
+      if (!row) { out.push(`${concern} calls ${call} with ${name === null ? 'a name that is not a plain string' : `${name}, which isn't in the table`}`); continue; }
+      if (call === 'install') {
+        (installs[name] ||= []).push(concern);
+        if (concern !== PAGE_OWN && row.installedBy !== concern) out.push(`${concern} installs ${name}, which is ${row.installedBy}'s to install`);
+      } else if (concern !== PAGE_OWN && !row.firedBy.includes(concern)) out.push(`${concern} fires ${name}, which only ${row.firedBy.join(' and ')} may fire`);
+    }
+  }
+  for (const [name, who] of Object.entries(installs)) if (who.length > 1) out.push(`${name} is installed more than once: ${who.join(', ')}`);
+  if (mainLanded) for (const name of Object.keys(HOOK_TABLE)) if (!installs[name]) out.push(`${name} has no installer`);
+  return out;
+}
+
 // ---------------------------------------------------------------- the rules hold
 
 test('the page loads the concerns in order, and ui/ holds only what is listed', () => {
@@ -187,6 +287,173 @@ test('core offers only what it has, and the page reaches it through D.core', () 
   assert.deepEqual(Object.keys(D), ['core']);
   assert.deepEqual(Object.keys(D.core).filter(k => D.core[k] === undefined), []);
   assert.equal(D.core.VERSION, /var VERSION='([^']+)'/.exec(CORE)[1]);
+});
+
+test('the page\'s own script is read whole, or the bare-call rule would miss what is in it', () => {
+  const names = namesAtTopLevel(codeOf(inlineScript(PAGE)));
+  for (const n of ['S', 'boot', 'render', 'commit', 'poll']) assert.ok(names.has(n), n);
+  assert.equal(names.has('setThemeColor'), false);
+});
+
+test('every moved concern uses only those before it, and calls nothing bare from the page\'s own script', () => {
+  for (const f of movedScripts().filter(f => f !== 'ui/core.js')) {
+    assert.deepEqual(namespaceProblems(concernOf(f), readRepo(f)), [], f);
+    assert.deepEqual(inlineCallProblems(concernOf(f), readRepo(f), inlineScript(PAGE)), [], f);
+  }
+});
+
+test('files uses only core, and knows nothing of Items, state or the DOM', () => {
+  assert.deepEqual(filesProblems(readRepo('ui/files.js')), []);
+});
+
+test('the hooks keep to the table: who fires each, who installs each, and one installer', () => {
+  const sources = movedScripts().map(f => ({ concern: concernOf(f), src: readRepo(f) })).concat({ concern: PAGE_OWN, src: inlineScript(PAGE) });
+  assert.deepEqual(hookProblems(sources, { mainLanded: fs.existsSync(path.join(UI, 'main.js')) }), []);
+});
+
+test('files\'s registry names exactly the hooks in the table', () => {
+  const m = /var HOOKS = \{([^}]*)\}/.exec(codeOf(readRepo('ui/files.js')));
+  assert.ok(m, 'files declares HOOKS');
+  assert.deepEqual([...m[1].matchAll(/([A-Za-z]+)\s*:/g)].map(x => x[1]).sort(), Object.keys(HOOK_TABLE).sort());
+});
+
+// ---------------------------------------------------------------- files as it runs
+
+const FORMAT_NOW = /var FORMAT='([^']+)'/.exec(CORE)[1];
+
+// A fresh copy of files with its hooks recorded, over a fake folder. A hook's behaviour can be set in `does`.
+function loadFiles({ fetch: fakeFetch, does = {}, folder = { 'DISCERNY.md': `<!-- format: ${FORMAT_NOW} -->\n` } } = {}) {
+  const timers = [], events = [];
+  const load = new Function('fetch', 'setTimeout', 'clearTimeout', 'console', `${CORE}\n${readRepo('ui/files.js')}\n;return D;`);
+  const D = load(fakeFetch, (f, ms) => { timers.push({ f, ms }); return timers.length; }, () => {}, { error() {} });
+  for (const name of ['redraw', 'toast', 'runJob', 'afterJob', 'folderState', 'afterDraw']) {
+    D.files.install(name, (arg) => { events.push(arg === undefined ? name : [name, arg]); return does[name] && does[name](arg, D); });
+  }
+  const notThere = () => { const e = new Error('not there'); e.name = 'NotFoundError'; return e; };
+  D.files.useFolder({
+    name: 'folder',
+    getFileHandle: async (n) => { if (!(n in folder)) throw notThere(); return { getFile: async () => ({ lastModified: 7, text: async () => folder[n] }) }; },
+  });
+  return { D, F: D.files, Q: D.files.Q, events, timers, folder };
+}
+const named = (name) => { const e = new Error(name + ' happened'); e.name = name; return e; };
+
+test('files offers its interface on D.files, and nothing else reaches the global', () => {
+  const { D, F } = loadFiles();
+  assert.deepEqual(Object.keys(D), ['core', 'files']);
+  for (const n of ['dir', 'useFolder', 'srv', 'serverInfo', 'serverMtimes', 'api', 'lastMod', 'readText', 'writeText', 'modOf', 'readDrafts', 'idbGet', 'idbSet', 'Q', 'requestSync', 'scheduleSync', 'kick', 'discardPending', 'isPermErr', 'isMoved', 'errText', 'formatGate', 'install', 'fire']) {
+    assert.ok(n in F, n);
+    assert.notEqual(F[n], undefined, n);
+  }
+  for (const n of ['HOOKS', 'on', 'idb', 'apiError', 'refuseFormat']) assert.equal(n in F, false, n);
+});
+
+test('srv and dir read live, and are set only through serverInfo and useFolder', async () => {
+  const { F } = loadFiles({ fetch: async () => ({ ok: true, json: async () => ({ folder: 'x', session: 's' }) }) });
+  assert.equal(F.srv, null);
+  assert.equal(F.dir.name, 'folder');
+  assert.equal(await F.serverInfo(), true);
+  assert.equal(F.srv.folder, 'x');
+  const other = { name: 'other' };
+  F.useFolder(other);
+  assert.equal(F.dir, other);
+  assert.throws(() => { 'use strict'; F.srv = {}; }, TypeError);
+  assert.throws(() => { 'use strict'; F.dir = {}; }, TypeError);
+});
+
+test('both ways of reaching a folder sit behind readText', async () => {
+  const handle = loadFiles({ folder: { 'A.md': 'by handle' } });
+  assert.equal(await handle.F.readText('A.md'), 'by handle');
+  assert.equal(handle.F.lastMod['A.md'], 7);
+  assert.equal(await handle.F.readText('MISSING.md'), '');
+  assert.equal(handle.F.lastMod['MISSING.md'], 0);
+  const asked = [];
+  const served = loadFiles({ fetch: async (p, o) => { asked.push([p, o && o.headers && o.headers['X-Discerny-Session']]); return p === '/api/info' ? { ok: true, json: async () => ({ session: 's' }) } : { ok: true, status: 200, headers: { get: () => '9' }, text: async () => 'by server' }; } });
+  await served.F.serverInfo();
+  assert.equal(await served.F.readText('A.md'), 'by server');
+  assert.equal(served.F.lastMod['A.md'], 9);
+  assert.deepEqual(asked[1], ['/api/file/A.md', 's']);
+});
+
+test('hooks: install refuses a name not in the set, and a second installer', () => {
+  const load = () => new Function(`${CORE}\n${readRepo('ui/files.js')}\n;return D;`)().files;
+  const F = load();
+  assert.throws(() => F.install('nope', () => {}), /bad hook install: nope/);
+  assert.throws(() => F.install('toString', () => {}), /bad hook install: toString/);
+  F.install('toast', () => 'said');
+  assert.throws(() => F.install('toast', () => {}), /bad hook install: toast/);
+  assert.equal(F.fire('toast', 'x'), 'said');
+  assert.throws(() => F.fire('redraw'), /no hook installed: redraw/);
+});
+
+test('kick hands each job to runJob and tells afterJob once it has left the queue', async () => {
+  let left = null;
+  const t = loadFiles({ does: { afterJob: (_, D) => { left = D.files.Q.jobs.length; } } });
+  const job = { keys: [], label: 'a' };
+  t.Q.jobs.push(job);
+  await t.F.kick();
+  assert.deepEqual(t.events, ['redraw', ['runJob', job], 'afterJob', 'redraw']);
+  assert.equal(left, 0);
+  assert.equal(t.Q.running, false);
+  assert.ok(t.Q.lastSaved > 0);
+  assert.equal(t.timers.at(-1).ms, 500, 'a save is followed by a read');
+});
+
+test('kick waits for runJob\'s promise before the next job', async () => {
+  let finish, order = [];
+  const t = loadFiles({ does: { runJob: (job) => { order.push(job.label); return job.label === 'a' ? new Promise(r => { finish = r; }) : null; } } });
+  t.Q.jobs.push({ label: 'a' }, { label: 'b' });
+  const done = t.F.kick();
+  for (let i = 0; i < 20 && !finish; i++) await new Promise(r => setImmediate(r));
+  assert.deepEqual(order, ['a']);
+  assert.equal(t.Q.jobs.length, 2);
+  finish();
+  await done;
+  assert.deepEqual(order, ['a', 'b']);
+});
+
+test('a sync job doesn\'t count as a save', async () => {
+  const t = loadFiles();
+  t.F.requestSync(false);
+  await new Promise(r => setImmediate(r));
+  for (let i = 0; i < 20 && t.Q.running; i++) await new Promise(r => setImmediate(r));
+  assert.equal(t.Q.lastSaved, 0);
+  assert.equal(t.timers.length, 0);
+});
+
+test('kick reports a lost folder, a moved server and a failed read through the hooks', async () => {
+  const failing = async (err, job) => {
+    const t = loadFiles({ does: { runJob: () => { throw err; } } });
+    t.Q.jobs.push(job);
+    await t.F.kick();
+    return t;
+  };
+  const lost = await failing(named('NotAllowedError'), { label: 'a' });
+  assert.ok(lost.events.some(e => e[0] === 'folderState' && e[1].lost === true));
+  assert.match(lost.Q.blocked.msg, /no longer has permission/);
+  const moved = await failing(named('FolderChanged'), { label: 'a' });
+  assert.ok(moved.events.some(e => e[0] === 'folderState' && e[1].moved === true));
+  assert.ok(moved.Q.blocked);
+  const read = await failing(named('Weird'), { sync: true });
+  assert.ok(read.events.some(e => e[0] === 'toast' && /read the folder: Weird happened/.test(e[1])));
+  assert.equal(read.Q.jobs.length, 0);
+  assert.equal(read.Q.blocked, null);
+  const save = await failing(named('Weird'), { label: 'a' });
+  assert.equal(save.Q.blocked.msg, 'Weird happened');
+  assert.equal(save.events.filter(e => e[0] === 'toast').length, 0);
+  assert.equal(save.events.at(-1), 'redraw');
+});
+
+test('a folder whose Format changed is refused through folderState, and pending jobs are dropped', async () => {
+  const t = loadFiles({ folder: { 'DISCERNY.md': '<!-- format: 0.0.1.5 -->\n' } });
+  t.Q.jobs.push({ label: 'a' });
+  await t.F.kick();
+  const said = t.events.find(e => e[0] === 'folderState');
+  assert.equal(said[1].ready, false);
+  assert.equal(said[1].gate.mode, 'fmtold');
+  assert.match(said[1].gate.msg, /not written/);
+  assert.equal(t.Q.jobs.length, 0);
+  assert.equal(t.events.filter(e => e[0] === 'runJob').length, 0);
 });
 
 // ---------------------------------------------------------------- and the test would catch it if they didn't
@@ -253,4 +520,71 @@ test('core: words in strings, comments, regular expressions and property names a
 
 test('core: code inside a template runs, so it counts', () => {
   assert.match(coreProblems(`${goodCore}var t = \`x \${document.title} y\`;\n`).join(), /core uses document/);
+});
+
+const goodFiles = "(function () { 'use strict'; var Q = { jobs: [] }; function f(a) { setTimeout(f, 1); return fetch(a); } D.files = { get Q() { return Q; }, f: f }; })();\n";
+const smallCore = 'var D = { core: {} };\nfunction parse(t) { return t; }\n';
+
+test('files: a good file passes', () => {
+  assert.deepEqual(filesProblems(goodFiles, smallCore), []);
+  assert.deepEqual(filesProblems(`${goodFiles}var x = parse('document.title and S.m');\n`, smallCore), []);
+});
+
+test('files: fails when it knows of state or Items, uses the DOM, or uses anything outside itself and core', () => {
+  for (const use of ['S.m', 'S', 'OPS.x', 'j.items', 'j.meta', 'm.people', 'document.title', 'window.x', 'location.reload()', 'render()', 'toastShow(a)', 'localStorage.x', 'parseFake(a)'])
+    assert.ok(filesProblems(`${goodFiles}function g(a) { return ${use}; }\n`, smallCore).length, use);
+});
+
+test('namespaces: a concern fails when it uses one after it, or assigns to another\'s', () => {
+  assert.deepEqual(namespaceProblems('files', 'D.core.parse(x); D.files = {}; D.files.kick();'), []);
+  assert.match(namespaceProblems('files', 'D.model.S;').join(), /uses D\.model/);
+  assert.match(namespaceProblems('model', 'D.input.go();').join(), /uses D\.input/);
+  assert.match(namespaceProblems('model', 'D.files = {};').join(), /assigns to D\.files/);
+  assert.match(namespaceProblems('model', 'D.files.kick = f;').join(), /assigns to D\.files\.kick/);
+  assert.deepEqual(namespaceProblems('model', 'D.files.Q.blocked = null; if (D.files.srv == null) f();'), []);
+  assert.deepEqual(namespaceProblems('files', "var a = 'D.model.S'; // D.model.S\n"), []);
+});
+
+test('bare calls: a concern fails when it calls a function from the page\'s own script', () => {
+  const inline = 'var S = {}; function render() { function inner() {} return inner(); }';
+  assert.match(inlineCallProblems('files', 'render();', inline).join(), /calls render\(\) bare/);
+  assert.deepEqual(inlineCallProblems('files', 'x.render(); inner(); var a = "render()";', inline), []);
+});
+
+test('hooks: the table\'s own firers and installers pass, and the page\'s script may stand in', () => {
+  const good = [
+    { concern: 'files', src: "function fire(name, arg) { return on[name](arg); } function install(name, fn) {} fire('redraw'); fire('toast', 'x'); fire('runJob', j); fire('afterJob'); fire('folderState', {});" },
+    { concern: 'ops', src: "D.files.fire('redraw'); D.files.install('toast', f);" },
+    { concern: 'model', src: "D.files.install('folderState', f);" },
+    { concern: 'page', src: "D.files.install('redraw', f);" },
+  ];
+  assert.deepEqual(hookProblems(good), []);
+});
+
+test('hooks: fails on a name not in the table, or one that is not a plain string', () => {
+  assert.match(hookProblems([{ concern: 'files', src: "fire('nope');" }]).join(), /nope, which isn't in the table/);
+  assert.match(hookProblems([{ concern: 'page', src: "D.files.install('nope', f);" }]).join(), /nope, which isn't in the table/);
+  assert.match(hookProblems([{ concern: 'files', src: 'fire(name);' }]).join(), /not a plain string/);
+  assert.match(hookProblems([{ concern: 'files', src: "fire('constructor');" }]).join(), /constructor, which isn't in the table/);
+});
+
+test('hooks: fails when a concern fires or installs a hook its row doesn\'t name', () => {
+  assert.match(hookProblems([{ concern: 'model', src: "D.files.fire('redraw');" }]).join(), /model fires redraw/);
+  assert.match(hookProblems([{ concern: 'ops', src: "D.files.fire('toast', 'x');" }]).join(), /ops fires toast/);
+  assert.match(hookProblems([{ concern: 'input', src: "D.files.install('redraw', f);" }]).join(), /input installs redraw/);
+  for (const concern of ['core', 'views', 'main'])
+    assert.match(hookProblems([{ concern, src: "D.files.fire('redraw');" }]).join(), new RegExp(`${concern} fires redraw`));
+});
+
+test('hooks: fails when a hook is installed twice across the concerns and the page\'s own script', () => {
+  assert.match(hookProblems([{ concern: 'render', src: "D.files.install('redraw', f);" }, { concern: 'page', src: "D.files.install('redraw', g);" }]).join(), /redraw is installed more than once/);
+});
+
+test('hooks: once main has landed, every hook needs an installer', () => {
+  assert.match(hookProblems([], { mainLanded: true }).join(), /afterDraw has no installer/);
+  assert.deepEqual(hookProblems([]), []);
+});
+
+test('hooks: a mention in a comment isn\'t a call', () => {
+  assert.deepEqual(hookProblems([{ concern: 'views', src: "// fire('redraw')\nvar a = 1; /* install('nope', f) */" }]), []);
 });
