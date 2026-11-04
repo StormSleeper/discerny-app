@@ -435,7 +435,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.4.0.9'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.4.0.10'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.4.0.2'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -4287,10 +4287,13 @@ function openView(link) {
 }
 // goes to the Link in the hash; the browser has already made its history entry, so this replaces rather than adds one
 function land() {
+  hashOwn = location.hash; linkPush = false;
   landing = true;
   try { openLink(linkOfHash(location.hash), stateOfHash(location.hash)); } finally { landing = false; }
 }
 function syncLink() {
+  // the User has just gone somewhere and its hashchange is still on the way: that lands on it, so a frame before it mustn't write over it
+  if (location.hash !== hashOwn) return;
   var it = linkItem(), h = '#/' + linkNow(it) + linkQuery(it), push = linkPush;
   linkPush = false; hashOwn = h;
   if (location.hash === h) return;
