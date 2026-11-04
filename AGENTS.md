@@ -269,7 +269,7 @@ The ID is the item or record the request is about. A request with only a date ha
 | `comment` | News in a Comment to acknowledge on an item | When acknowledged | `added-datetime` | Its `sender`, else the item's `who` |
 | `linked` | A transcript's action item | On Accept or Already handled | `received-datetime` | The item's `who` then |
 | `linked` | A change of `who` a skill made | When acknowledged | `added-datetime` | The new `who` |
-| `linked` | The user tying a person to an item by hand: adding an item with a `who`, setting `who`, adding or saying Yes to an `involves` Relationship, or adding a proposed new person whose items get `who` | When it happens | Today | That person |
+| `linked` | The user tying a person to an item by hand: adding an item with a `who`, setting `who`, adding or saying Yes to an `involves` Relationship, adding a proposed new person whose items get `who`, or adding someone to People from the item that names them | When it happens | Today | That person |
 | `done` | An item with a `who` completed | When completed | Today | The item's `who` |
 
 - There's at most one `message`, one `linked` and one `done` for each person on each item. `comment` and `reply` can repeat.

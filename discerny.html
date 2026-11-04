@@ -435,7 +435,7 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.4.0.5'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.4.0.6'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.4.0.2'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
@@ -2075,6 +2075,15 @@ var OPS = {
       pSetNextId(M.people, Math.max(pNextId(M.people), idNum(p.meta.id) + 1));
     });
   },
+  // Add to People from an Item that names them: the User has tied them to that Item, so it's linked once it's past the Inbox. Undo is removePerson, which takes the line out.
+  addPersonOn: function (name, id, today) {
+    var ap = OPS.addPerson(name, 'Other');
+    return op('Add ' + name, ANY.concat(LOG_KEYS), function (M) {
+      ap.fn(M);
+      var f = fItem(M, id);
+      if (f && f.k !== 'inbox' && f.it.meta.who === name) logEvents(M, null, linkedEvents(creditByName(M.people.people, name), f.it.id, today));
+    });
+  },
   // Deleting a Person takes their lines out of the log, which st keeps for restorePerson
   removePerson: function (name, st) {
     return op('Remove ' + name, LOG_KEYS, function (M) {
@@ -3707,7 +3716,7 @@ function panelTask(i) {
     if (TYPES.indexOf(ty) < 0) tyl.push([ty, ty]);
     f += fRow('Type', 'f-ty', '<select id="f-ty" class="in" data-ch="ty" data-id="' + id + '">' + opts(tyl, ty) + '</select>');
     f += fRow(whoLabel(i), 'f-who', '<input id="f-who" class="in" type="text" list="dl-people" autocomplete="off" data-ch="who" data-id="' + id + '" value="' + esc(who) + '">' +
-      (known ? '' : '<div class="hint" style="flex-basis:100%">Not in People yet. ' + lk('Add ' + who + ' to People', 'add-person', { v: who }) + '</div>'), !known);
+      (known ? '' : '<div class="hint" style="flex-basis:100%">Not in People yet. ' + lk('Add ' + who + ' to People', 'add-person', { v: who, id: id }) + '</div>'), !known);
     var ps = prjOf(i), pq = S.newPrj.trim(), hit = pq ? resolvePrj(pq) : null;
     var chips = ps.map(function (p) {
       var e = entById(p);
@@ -4740,7 +4749,7 @@ var ACT = {
     var name = cleanName(dvv(el));
     if (!name) return;
     if (personByName(name)) { toastShow(name + ' is already in People.'); return; }
-    commit(OPS.addPerson(name, 'Other'), { toast: 'Added ' + name + ' to People. Fill in their details.', undo: OPS.removePerson(name) });
+    commit(did(el) ? OPS.addPersonOn(name, did(el), todayStr()) : OPS.addPerson(name, 'Other'), { toast: 'Added ' + name + ' to People. Fill in their details.', undo: OPS.removePerson(name) });
     var p = personByName(name);
     if (p && p.meta.id && (S.view === 'people' || !S.panel)) select(p.meta.id);
   },
