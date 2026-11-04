@@ -16,6 +16,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - Items you find with Ctrl K now open on the View they belong to, and an ID that isn't in your Data folder is named instead of showing "No matches".
 - Promote or Demote anyone as a Priority person from the People page or their record, and filter People to see who's on the list.
 - Set how long someone isn't proposed as a Priority person after a No or a Demote in a new file in your data folder, SETTINGS.toml: a mistake in it is reported and costs you only that setting's default.
+- Discerny now keeps a log of your dealings with people in a new file, INTERACTIONS.md, and an Upgrade builds a first one from your existing items, showing you what it will write first.
 
 ## 0.3.0.8 (2026-10-25)
 

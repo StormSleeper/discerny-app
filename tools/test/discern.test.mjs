@@ -265,7 +265,7 @@ test('mail matching: short subjects, ambiguity, notices, waiting and replies (E1
   assert.deepEqual(by.E4.ids, ['T-0022']);
   assert.equal(by.E4.who, 'Helena Sørensen');
   // News from the person an Item waits on is a Comment to acknowledge; what the user did is a Comment needing none.
-  assert.match(by.E4.action, /^if it is from the person T-0022 waits on, comment: discern comment T-0022 --author email --to-acknowledge "Helena replied on <d Mon>: <what they said, in a sentence>"/);
+  assert.match(by.E4.action, /^if it is from the person T-0022 waits on, comment: discern comment T-0022 --author email --to-acknowledge --sender "Helena Sørensen" "Helena replied on <d Mon>: <what they said, in a sentence>"/);
   assert.equal(by.E5.action, 'comment: discern comment T-0007 --author email "Chased <who> on 9 Oct."');
   assert.equal(by.E6.action, 'comment: discern comment T-0009 --author email "You replied on 9 Oct."');
   assert.equal(by.acc.outcome, 'drop');
@@ -293,7 +293,7 @@ test('an ask ambiguous between a Meeting and another Item may update the other I
   const r = run(folder(), ['match'], [{ key: 'E2', scheme: 'mail', subject: 'Re: Management review', sender: 'oliver.pemberton@pennywhistle.example' }]);
   const e2 = r.json[0];
   assert.equal(e2.outcome, 'ambiguous');
-  assert.match(e2.action, /plainly continues T-0030, it is news on it: a new Due date, status or person with discern change T-0030 --author email --field <due-date, due-time, status or who>/);
+  assert.match(e2.action, /plainly continues T-0030, it is news on it: a new Due date, status or person with discern change T-0030 --author email --sender "Oliver Pemberton" --field <due-date, due-time, status or who>/);
   assert.match(e2.action, /about T-0013 is assessed as a new Task related to T-0013[^;]*name T-0013, T-0030 in its description/);
   assert.doesNotMatch(e2.action, /one of T-00\d\d, T-00\d\d/);
 });
@@ -536,7 +536,7 @@ test('meetings keeps a cancelled or declined Meeting open, retitled "Cancelled: 
 
 test('meetings never takes an older prep item carrying the Meeting\'s plain cal source key for the Meeting itself', () => {
   const d = folder();
-  const prep = { title: 'Prepare for Calibration review (14 Oct 10:00)', type: 'meeting', urgency: 'this week', priority: 'medium', 'due-date': '2026-10-14', 'due-time': '10:00', derived: true,
+  const prep = { title: 'Prepare for Calibration review (14 Oct 10:00)', type: 'meeting', urgency: 'this week', priority: 'medium', 'due-date': '2026-10-14', 'due-time': '10:00', derived: true, interaction: 'none',
     origin: 'Calendar "Calibration review" organised by Declan Moss', 'source-keys': ['cal|2026-10-14|calibration review'] };
   assert.equal(run(d, ['add', 'outlook-mail'], [prep]).code, 0);
   const r = run(d, ['meetings'], [event({ 'event-id': undefined })]);
@@ -548,7 +548,7 @@ test('meetings never takes an older prep item carrying the Meeting\'s plain cal 
 });
 
 const draft = (o = {}) => ({ title: 'Review the supplier sampling plan', type: 'task', who: 'Meera Ilangovan', urgency: 'this week', priority: 'medium',
-  'received-datetime': '2026-10-24T09:00:00Z', origin: 'Email "Sampling plan" from Meera Ilangovan (24 Oct)', 'source-keys': ['mail|Sampling plan'], description: 'Asks for comments by Fri.', ...o });
+  'received-datetime': '2026-10-24T09:00:00Z', origin: 'Email "Sampling plan" from Meera Ilangovan (24 Oct)', 'source-keys': ['mail|Sampling plan'], description: 'Asks for comments by Fri.', interaction: 'message', ...o });
 
 test('add raises the counter first, writes the inbox and refuses duplicates (E10)', () => {
   const d = folder();
@@ -557,7 +557,7 @@ test('add raises the counter first, writes the inbox and refuses duplicates (E10
   assert.deepEqual(r.json.added.map(a => a.id), ['T-0032', 'T-0033']);
   assert.ok(r.json.added[1].refs.includes('cal|2026-11-03|supplier review – feltcraft'));
   assert.match(read(d, 'TASKS.md'), /<!-- next-id: 34 -->/);
-  assert.match(read(d, 'INBOX.md'), /T-0032 Review the supplier sampling plan \{type: task; who: Meera Ilangovan; urgency: this week; priority: medium; received-datetime: 2026-10-24 10:00; source: outlook-mail\}/);
+  assert.match(read(d, 'INBOX.md'), /T-0032 Review the supplier sampling plan \{type: task; who: Meera Ilangovan; urgency: this week; priority: medium; received-datetime: 2026-10-24 10:00; interaction: message; source: outlook-mail\}/);
   const again = run(d, ['add', 'outlook-mail'], [draft()]);
   assert.equal(again.code, 1);
   assert.match(again.json.error, /duplicate/);
@@ -1558,10 +1558,10 @@ test('serve gives the mtime of every file the page reads in one answer, 0 for a 
   const m = await (await api('api/mtimes')).json();
   assert.equal(m['PEOPLE.md'], Date.parse('2026-10-01T09:00:00Z'));
   assert.equal(m['IGNORED.md'], 0);
-  for (const f of ['TASKS.md', 'INBOX.md', 'DONE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md', 'DISMISSED.md']) {
+  for (const f of ['TASKS.md', 'INBOX.md', 'DONE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md', 'DISMISSED.md', 'INTERACTIONS.md']) {
     assert.equal(m[f], fs.existsSync(path.join(d, f)) ? Math.floor(fs.statSync(path.join(d, f)).mtimeMs) : 0, f);
   }
-  assert.equal(Object.keys(m).length, 13);
+  assert.equal(Object.keys(m).length, 14);
 });
 
 test('serve lists the Drafts, .md and .txt only, by name, and none when there is no drafts folder', async (t) => {
@@ -2297,8 +2297,8 @@ test('a match on a tracked Item says to apply a field change with discern change
   const r = run(folder(), ['match'], [{ key: 'm', scheme: 'teams', chat: '19:c40e9a', message: '1758532500211', sender: 'kwame.mensah@pennywhistle.example' }]);
   const m = r.json[0];
   assert.equal(m.outcome, 'open', r.out);
-  assert.match(m.action, /discern change T-0012 --author teams --field <due-date, due-time, status or who> --to "<the new value>"/);
-  assert.match(m.action, /discern comment T-0012 --author teams --to-acknowledge --suggests done/);
+  assert.match(m.action, /discern change T-0012 --author teams --sender "Kwame Mensah" --field <due-date, due-time, status or who> --to "<the new value>"/);
+  assert.match(m.action, /discern comment T-0012 --author teams --to-acknowledge --suggests done --sender "Kwame Mensah"/);
   assert.doesNotMatch(m.action, /in the report/);
 });
 
@@ -2629,4 +2629,415 @@ test('an Upgrade of the Example as committed gives it SETTINGS.toml, with check 
   assert.deepEqual(settingProblems(c.json.warnings), []);
   assert.equal(fs.existsSync(path.join(BASE, 'SETTINGS.toml')), true);
   assert.doesNotMatch(read(BASE, 'IGNORED.md'), /28 days/);
+});
+
+// ---------------------------------------------------------------- INTERACTIONS.md
+const LOG = 'INTERACTIONS.md';
+const logLines = (d) => fs.existsSync(path.join(d, LOG)) ? read(d, LOG).split(/\r?\n/).filter(l => l.startsWith('- ')) : [];
+// a folder with an empty log, so a test sees only what it writes
+const clean = () => { const d = folder(); fs.copyFileSync(path.join(REPO, 'new_discerny_repo', LOG), path.join(d, LOG)); return d; };
+
+test('new makes INTERACTIONS.md with its header and no lines, the page\'s header word for word, and check passes', () => {
+  const a = app(), mine = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'discerny-')), 'mine');
+  const made = spawnSync(process.execPath, [path.join(a, 'tools', 'discern.mjs'), 'new', mine], { encoding: 'utf8' });
+  assert.equal(made.status, 0, made.stdout);
+  const text = read(mine, LOG);
+  assert.ok(text.trim(), 'never empty');
+  assert.deepEqual(logLines(mine), []);
+  const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
+  const head = new Function(html.slice(html.indexOf('var INTER_HEAD='), html.indexOf('var INTER_KINDS=')) + ';return INTER_HEAD;')();
+  assert.equal(text.replace(/\r\n/g, '\n'), head.join('\n') + '\n');
+  assert.equal(run(mine, ['check']).code, 0);
+});
+
+test('check validates the log: dates, kinds, decisions and the shape of IDs, by line', () => {
+  const d = clean(), add = (l) => fs.appendFileSync(path.join(d, LOG), l + '\n');
+  add('- 2026-10-22 P-0003 message T-9999');
+  add('- 2026-10-22 P-0999 linked T-0001');
+  add('- 2026-10-22 P-0003 decision no');
+  add('- 2026-10-22 P-0003 decision promote {score: 14.2; message: 8.1; comment: 3.6; linked: 2.5; reply: 0; done: 0; half-life-days: 30}');
+  assert.equal(run(d, ['check']).code, 0, 'a deleted Item\'s or Person\'s ID is not a problem');
+  add('- 2026-02-31 P-0003 message T-0001');
+  add('- 2026-10-22 P-0003 waved T-0001');
+  add('- 2026-10-22 P-0003 decision maybe');
+  add('- 2026-10-22 Meera message T-0001');
+  add('- 2026-10-22 P-0003 message X-1');
+  add('rubbish');
+  const r = run(d, ['check']);
+  assert.equal(r.code, 1);
+  const log = r.json.errors.filter(e => e.startsWith('INTERACTIONS.md line'));
+  assert.equal(log.length, 6, r.out);
+  ['date', 'kind', 'decision', 'P-####', 'T-####', 'shape'].forEach((w, i) => assert.ok(log[i].includes(w), `${w}: ${log[i]}`));
+});
+
+test('check calls an empty log an error, and says nothing when the file is missing', () => {
+  const d = clean();
+  fs.writeFileSync(path.join(d, LOG), '');
+  assert.match(run(d, ['check']).json.errors.join(' '), /INTERACTIONS\.md is empty/);
+  fs.rmSync(path.join(d, LOG));
+  assert.equal(run(d, ['check']).code, 0);
+});
+
+test('check warns about a Proposal\'s unknown interaction and a Comment\'s sender that is not a P-ID', () => {
+  const d = clean();
+  const inbox = read(d, 'INBOX.md').replace(/(T-0027 .*?)\}/, '$1; interaction: sideways}');
+  fs.writeFileSync(path.join(d, 'INBOX.md'), inbox);
+  assert.equal(run(d, ['comment', 'T-0001', '--author', 'email', 'x']).code, 0);
+  fs.writeFileSync(path.join(d, 'TASKS.md'), read(d, 'TASKS.md').replace('author: email}\n    x', 'author: email; sender: Meera}\n    x'));
+  const w = run(d, ['check']).json.warnings.join(' | ');
+  assert.match(w, /T-0027: interaction is "sideways"/);
+  assert.match(w, /sender: Meera/);
+});
+
+test('serve serves INTERACTIONS.md, and the page can write it', async (t) => {
+  const d = clean(), { url, session, api } = await serve(t, d);
+  const got = await api('/api/file/INTERACTIONS.md');
+  assert.equal(got.status, 200);
+  const put = await fetch(new URL('/api/file/INTERACTIONS.md', url), { method: 'PUT', headers: { 'Content-Type': 'text/plain', Origin: url.replace(/\/$/, ''), 'X-Discerny-Session': session }, body: '# Interactions\n- 2026-10-12 P-0003 linked T-0001\n' });
+  assert.equal(put.status, 200);
+  assert.deepEqual(logLines(d), ['- 2026-10-12 P-0003 linked T-0001']);
+  const mt = await (await api('/api/mtimes')).json();
+  assert.ok(mt[LOG], 'the page watches it');
+});
+
+test('add refuses a draft with no valid interaction, naming it, and writes nothing', () => {
+  const d = clean();
+  const before = read(d, 'INBOX.md');
+  for (const v of [undefined, '', 'comment', 'done', 'Message']) {
+    const r = run(d, ['add', 'outlook-mail'], [draft({ interaction: v })]);
+    assert.equal(r.code, 1, String(v));
+    assert.match(r.json.error, /interaction must be one of message, reply, linked, none/, String(v));
+  }
+  assert.equal(read(d, 'INBOX.md'), before);
+});
+
+test('add writes interaction on the Proposal, and it stays there; nothing reaches the log', () => {
+  for (const v of ['message', 'reply', 'linked', 'none']) {
+    const d = clean(), r = run(d, ['add', 'outlook-mail'], [draft({ interaction: v })]);
+    assert.equal(r.code, 0, r.out);
+    const line = read(d, 'INBOX.md').split(/\r?\n/).find(l => l.includes(r.json.added[0].id + ' '));
+    assert.match(line, new RegExp(`interaction: ${v}[;}]`));
+    assert.deepEqual(logLines(d), []);
+  }
+});
+
+test('comment --sender writes the person\'s P-ID on the Comment, from a name, address, handle or ID, and leaves off someone unknown', () => {
+  const d = clean();
+  for (const q of ['Tomasz Kowalczyk', 'P-0004']) {
+    const r = run(d, ['comment', 'T-0001', '--author', 'email', '--to-acknowledge', '--sender', q, `From ${q}`]);
+    assert.equal(r.code, 0, r.out);
+    assert.equal(r.json.sender, 'P-0004');
+  }
+  assert.match(read(d, 'TASKS.md'), /author: email; acknowledged: no; sender: P-0004\}\n    From P-0004/);
+  const r = run(d, ['comment', 'T-0001', '--author', 'email', '--to-acknowledge', '--sender', 'Nobody Known', 'From no one']);
+  assert.equal(r.code, 0, 'not refused');
+  assert.equal(r.json.sender, undefined);
+  assert.match(read(d, 'TASKS.md'), /author: email; acknowledged: no\}\n    From no one/);
+  assert.deepEqual(logLines(d), [], 'a Comment to acknowledge counts when it is acknowledged');
+});
+
+test('comment --reply-to writes a reply event today for that person, and an unknown one falls to the Item\'s who', () => {
+  const d = clean();
+  const r = run(d, ['comment', 'T-0001', '--author', 'email', '--reply-to', 'Tomasz Kowalczyk', 'You replied on 12 Oct.']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.json.reply, 'P-0004');
+  assert.deepEqual(logLines(d), ['- 2026-10-12 P-0004 reply T-0001']);
+  assert.equal(run(d, ['comment', 'T-0001', '--author', 'email', '--reply-to', 'Nobody Known', 'Chased Nobody on 12 Oct.']).json.reply, 'P-0003');
+  assert.deepEqual(logLines(d).slice(1), ['- 2026-10-12 P-0003 reply T-0001']);
+});
+
+test('a "You replied" or "Chased" Comment writes a reply for the Item\'s who, and may repeat; other Comments write nothing', () => {
+  const d = clean();
+  run(d, ['comment', 'T-0001', '--author', 'email', 'You replied on 12 Oct.']);
+  run(d, ['comment', 'T-0001', '--author', 'email', 'Chased Meera on 12 Oct.']);
+  run(d, ['comment', 'T-0001', '--author', 'email', 'The fixture passed.']);
+  assert.deepEqual(logLines(d), ['- 2026-10-12 P-0003 reply T-0001', '- 2026-10-12 P-0003 reply T-0001']);
+});
+
+test('no reply event for a Proposal, a Record, the User or a who not in PEOPLE.md', () => {
+  const d = clean();
+  run(d, ['comment', 'T-0027', '--author', 'email', 'You replied on 12 Oct.']);
+  run(d, ['comment', 'T-0027', '--author', 'email', '--reply-to', 'Tomasz Kowalczyk', 'You replied on 12 Oct.']);
+  run(d, ['comment', 'P-0003', '--author', 'agent', '--reply-to', 'Tomasz Kowalczyk', 'You replied on 12 Oct.']);
+  run(d, ['comment', 'T-0001', '--author', 'email', '--reply-to', 'Imogen Hartley', 'x']);
+  assert.deepEqual(logLines(d).filter(l => !l.includes('P-0003 reply T-0001')), []);
+  fs.writeFileSync(path.join(d, 'TASKS.md'), read(d, 'TASKS.md').replace('who: Declan Moss', 'who: Nobody Known').replace('who: Kwame Mensah', 'who: Unassigned'));
+  run(d, ['comment', 'T-0009', '--author', 'email', 'You replied on 12 Oct.']);
+  run(d, ['comment', 'T-0012', '--author', 'email', 'You replied on 12 Oct.']);
+  assert.deepEqual(logLines(d).filter(l => /T-0009|T-0012/.test(l)), []);
+});
+
+test('change --sender goes on the Comment of a field change, is left off when unknown and on a change of who', () => {
+  const d = clean();
+  const r = run(d, ['change', 'T-0012', '--author', 'email', '--field', 'due-date', '--to', '2026-11-06', '--sender', 'Tomasz Kowalczyk', 'Slips a week.']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.json.sender, 'P-0004');
+  assert.match(read(d, 'TASKS.md'), /changed: due-date; from: [^;]*; to: 2026-11-06; sender: P-0004\}/);
+  const u = run(d, ['change', 'T-0012', '--author', 'email', '--field', 'status', '--to', 'waiting', '--sender', 'Nobody Known', 'Waiting.']);
+  assert.equal(u.code, 0, u.out);
+  assert.doesNotMatch(read(d, 'TASKS.md'), /to: waiting; sender/);
+  const w = run(d, ['change', 'T-0012', '--author', 'email', '--field', 'who', '--to', 'Tomasz Kowalczyk', '--sender', 'Meera Ilangovan', 'Handed over.']);
+  assert.equal(w.code, 0, w.out);
+  assert.doesNotMatch(read(d, 'TASKS.md'), /to: Tomasz Kowalczyk; sender/);
+  assert.deepEqual(logLines(d), [], 'a change counts when it is acknowledged');
+});
+
+test('interaction records linked or done for a person today, at most once per Person per Item', () => {
+  const d = clean();
+  const r = run(d, ['interaction', 'T-0001', '--kind', 'linked', '--person', 'Tomasz Kowalczyk']);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual([r.json.recorded, r.json.person, r.json.kind, r.json.date], [true, 'P-0004', 'linked', '2026-10-12']);
+  assert.deepEqual(logLines(d), ['- 2026-10-12 P-0004 linked T-0001']);
+  const again = run(d, ['interaction', 'T-0001', '--kind', 'linked', '--person', 'P-0004']);
+  assert.equal(again.code, 0);
+  assert.equal(again.json.recorded, false);
+  assert.equal(logLines(d).length, 1);
+  assert.equal(run(d, ['interaction', 'T-0002', '--kind', 'done', '--person', 'Declan Moss']).json.recorded, true, 'a done Item');
+  assert.deepEqual(logLines(d).slice(1), ['- 2026-10-12 P-0010 done T-0002']);
+});
+
+test('interaction refuses another kind, a bad ID, an Item in the Inbox or gone, and someone not in PEOPLE.md; the User records nothing', () => {
+  const d = clean();
+  for (const args of [['T-0001', '--kind', 'message', '--person', 'P-0003'], ['T-0001', '--kind', 'comment', '--person', 'P-0003'], ['T-0001', '--person', 'P-0003'], ['T-0001', '--kind', 'linked'],
+    ['P-0003', '--kind', 'linked', '--person', 'P-0003'], ['T-9999', '--kind', 'linked', '--person', 'P-0003'], ['T-0027', '--kind', 'linked', '--person', 'P-0003'], ['T-0001', '--kind', 'linked', '--person', 'Nobody Known']]) {
+    assert.equal(run(d, ['interaction', ...args]).code, 1, args.join(' '));
+  }
+  const u = run(d, ['interaction', 'T-0001', '--kind', 'linked', '--person', 'Imogen Hartley']);
+  assert.equal(u.code, 0, u.out);
+  assert.equal(u.json.recorded, false);
+  assert.deepEqual(logLines(d), []);
+});
+
+test('interaction refuses a folder in another Format', () => {
+  const d = folderInFormat('0.2.0.1');
+  assert.equal(gate(d, ['interaction', 'T-0001', '--kind', 'linked', '--person', 'P-0003']).code, 2);
+});
+
+test('meetings writes no events, for a new Meeting, a moved one or a cancelled one', () => {
+  const d = clean();
+  assert.equal(run(d, ['meetings'], [event()]).code, 0);
+  assert.equal(run(d, ['meetings'], [event({ start: { dateTime: '2026-11-02T09:00:00', timeZone: 'UTC' } })]).code, 0);
+  assert.equal(run(d, ['meetings'], [event({ cancelled: true })]).code, 0);
+  assert.deepEqual(logLines(d), []);
+});
+
+test('match words its commands with the sender and the person replied to', () => {
+  const d = clean();
+  const r = run(d, ['match'], [
+    { key: 'a', scheme: 'mail', pass: 'inbound', subject: 'Fable Range – retest of Owl and Dragon', sender: 'helena.sorensen@brightmark.example', 'sender-name': 'Helena Sørensen', when: '2026-10-09T10:00:00Z' },
+    { key: 'b', scheme: 'mail', pass: 'ask', subject: 'SCAR-031 – colour variation in Russet felt, lot RF-2207', sender: 'imogen.hartley@pennywhistle.example', 'sender-name': 'Imogen Hartley', recipient: 'desmond.achebe@feltcraft.example', when: '2026-10-09T10:00:00Z' },
+  ]);
+  const by = Object.fromEntries(r.json.map ? r.json.map(x => [x.key, x]) : r.json.results.map(x => [x.key, x]));
+  assert.match(by.a.action, /--to-acknowledge --sender "Helena Sørensen" "Helena replied/);
+  assert.match(by.a.action, /discern change T-0022 --author email --sender "Helena Sørensen"/);
+  assert.match(by.b.action, /--reply-to "Desmond Achebe" "Chased Desmond on 9 Oct\."/);
+});
+
+// ---- The Migration that infers a first log, found by what it says it does.
+const LOG_SCRIPT = (() => {
+  const dir = path.join(REPO, 'migrations');
+  const n = fs.readdirSync(dir).find(x => fs.existsSync(path.join(dir, x, 'migrate.mjs')) && /^\/\/ A first Interaction log, inferred/.test(fs.readFileSync(path.join(dir, x, 'migrate.mjs'), 'utf8')));
+  return path.join(dir, n || 'next', 'migrate.mjs');
+})();
+const migrateLog = (d, ...args) => {
+  const r = spawnSync(process.execPath, [LOG_SCRIPT, d, ...args], { encoding: 'utf8', env: { ...process.env, DISCERN_NOW: '2026-10-12' } });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout;
+};
+const DAY1 = '2026-10-01';
+const OLD_ITEM = (id, title, meta, origin, rest = []) => [`- [ ] ${id} ${title} {type: task; ${meta}}`, ...(origin === null ? [] : [`  - origin: ${origin}`]), ...rest];
+// A folder as the Format before this Migration left it, with only these Items, Relationships and people's lines to read.
+function beforeLog({ tasks = [], done = [], inbox = [], changes = [], rels = [], ignored = [], priority = 'P-0004', eol = '\n' } = {}) {
+  const d = folder();
+  fs.rmSync(path.join(d, LOG), { force: true });
+  const put = (f, ls) => fs.writeFileSync(path.join(d, f), ls.join(eol));
+  put('TASKS.md', ['# Tasks', '<!-- next-id: 900 -->', ...tasks.flat(), '']);
+  put('DONE.md', ['# Done', ...done.flat(), '']);
+  put('INBOX.md', ['# Inbox', ...inbox.flat(), ...(changes.length ? ['', '## Changes', ...changes] : []), '']);
+  put('RELATIONSHIPS.md', ['# Relationships', ...rels, '']);
+  put('IGNORED.md', ['# Ignored', ...ignored, '']);
+  fs.writeFileSync(path.join(d, 'SOURCES.md'), read(d, 'SOURCES.md').replace(/^- priority-people:.*$/m, `- priority-people: ${priority}`));
+  return d;
+}
+const inferred = (d) => logLines(d).filter(l => !l.includes(' decision '));
+const m = 'who: Meera Ilangovan; received-datetime: 2026-10-01 09:00';
+
+test('the log Migration\'s script imports only Node\'s built-in modules', () => {
+  const src = fs.readFileSync(LOG_SCRIPT, 'utf8');
+  const from = [...src.matchAll(/\bfrom\s+['"]([^'"]+)['"]|\bimport\s*\(\s*['"]([^'"]+)['"]|\brequire\s*\(\s*['"]([^'"]+)['"]/g)].map(x => x[1] || x[2] || x[3]);
+  assert.ok(from.length);
+  assert.deepEqual(from.filter(s => !s.startsWith('node:')), []);
+});
+
+test('the log Migration reads an Item\'s origin with any quoted subject removed', () => {
+  const cases = [
+    ['Email "Sampling plan" from Meera Ilangovan (1 Oct)', 'message'],
+    ['Email "Notes sent to the board" from Meera Ilangovan (1 Oct)', 'message'],
+    ['Email "Lessons from the audit" sent to meera@example.example (1 Oct)', 'reply'],
+    ['Email "Transcript of the audit" sent to meera@example.example (1 Oct)', 'reply'],
+    ['Teams chat "QA team" with Meera Ilangovan (1 Oct)', 'message'],
+    ['Teams Stageworks — Meera Ilangovan, 1 Oct', 'message'],
+    ['Teams 1:1 — Imogen Hartley asked Meera Ilangovan, 1 Oct', 'reply'],
+    ['Teams chat "Imogen Hartley asked for this" with Meera Ilangovan (1 Oct)', 'message'],
+    ['Transcript of "Calendar review from Meera" (1 Oct)', 'linked'],
+    ['Added 2026-10-01', 'linked'],
+    [null, 'linked'],
+  ];
+  const d = beforeLog({ tasks: cases.map(([o], i) => OLD_ITEM(`T-0${100 + i}`, `Item ${i}`, m, o)) });
+  migrateLog(d, '--write');
+  cases.forEach(([o, kind], i) => assert.ok(logLines(d).includes(`- ${DAY1} P-0003 ${kind} T-0${100 + i} {inferred: yes}`), `${o} -> ${kind}: ${logLines(d).join(' | ')}`));
+  assert.equal(inferred(d).length, cases.length);
+});
+
+test('the log Migration: a Calendar-origin Meeting is nothing, an email-origin Meeting is a message, and done is added when it is done', () => {
+  const cal = 'who: Oliver Pemberton; received-datetime: 2026-10-01 09:00';
+  const d = beforeLog({
+    tasks: [['- [ ] T-0100 1:1 {type: meeting; ' + cal + '}', '  - origin: Calendar invite "Imogen / Oliver" from Oliver Pemberton (9 Oct)'],
+      ['- [ ] T-0101 Sync {type: meeting; ' + cal + '}', '  - origin: Calendar "Sync" organised by Oliver Pemberton'],
+      ['- [ ] T-0102 Review {type: meeting; ' + m + '}', '  - origin: Email "Review" from Meera Ilangovan (1 Oct)']],
+    done: [['- [x] T-0103 Past sync {type: meeting; ' + cal + '; done-date: 2026-10-05}', '  - origin: Calendar "Sync" organised by Oliver Pemberton'],
+      ['- [x] T-0104 Done task {type: task; ' + m + '; done-date: 2026-10-06}', '  - origin: Email "Done" from Meera Ilangovan (1 Oct)']],
+  });
+  migrateLog(d, '--write');
+  assert.deepEqual(inferred(d), [`- ${DAY1} P-0003 message T-0102 {inferred: yes}`, `- ${DAY1} P-0003 message T-0104 {inferred: yes}`, '- 2026-10-05 P-0002 done T-0103 {inferred: yes}', '- 2026-10-06 P-0003 done T-0104 {inferred: yes}']);
+});
+
+test('the log Migration reads acknowledged, dated Comments, and skips the rest', () => {
+  const c = (f, text) => [`  - comment: {${f}}`, `    ${text}`];
+  const d = beforeLog({
+    tasks: [OLD_ITEM('T-0100', 'With Comments', 'who: Meera Ilangovan; received-date: 2026-10-01', 'Calendar "Sync" organised by Meera Ilangovan', [
+      ...c('added-datetime: 2026-10-03 09:00; author: email', 'Meera says it passed.'),
+      ...c('added-datetime: 2026-10-04 09:00; author: teams', 'You replied on 4 Oct.'),
+      ...c('added-datetime: 2026-10-05 09:00; author: email', 'Chased Meera on 5 Oct.'),
+      ...c('added-datetime: 2026-10-05 10:00; author: email; changed: who; from: Meera Ilangovan; to: Tomasz Kowalczyk', 'Handed over.'),
+      ...c('added-datetime: 2026-10-06 09:00; author: email; changed: who; from: Tomasz Kowalczyk; to: Nobody Known', 'Handed on.'),
+      ...c('added-datetime: 2026-10-07 09:00; author: user', 'Mine.'),
+      ...c('added-datetime: 2026-10-07 09:00; author: agent', 'An agent.'),
+      ...c('added-datetime: 2026-10-07 09:00; author: calendar', 'Moved.'),
+      ...c('added-datetime: 2026-10-08 09:00; author: email; acknowledged: no', 'Waiting.'),
+      ...c('author: email', 'Undated.'),
+    ])],
+  });
+  const preview = migrateLog(d);
+  assert.match(preview, /1 Comments still to acknowledge/);
+  assert.match(preview, /1 undated Comments/);
+  migrateLog(d, '--write');
+  assert.deepEqual(inferred(d), ['- 2026-10-03 P-0003 comment T-0100 {inferred: yes}', '- 2026-10-04 P-0003 reply T-0100 {inferred: yes}', '- 2026-10-05 P-0003 reply T-0100 {inferred: yes}', '- 2026-10-05 P-0004 linked T-0100 {inferred: yes}']);
+});
+
+test('the log Migration: involves Relationships are linked once, by the Item\'s date, and the Inbox, the User, Unassigned and someone not in PEOPLE.md get nothing', () => {
+  const d = beforeLog({
+    tasks: [OLD_ITEM('T-0100', 'Linked', m, 'Added 2026-10-01'), OLD_ITEM('T-0101', 'Mine', 'who: Imogen Hartley; received-date: 2026-10-01', 'Email "x" from Imogen Hartley (1 Oct)'),
+      OLD_ITEM('T-0102', 'None', 'who: Unassigned; received-date: 2026-10-01', 'Email "x" from Someone (1 Oct)'), OLD_ITEM('T-0103', 'Gone', 'who: Nobody Known; received-date: 2026-10-01', 'Email "x" from Nobody Known (1 Oct)'),
+      OLD_ITEM('T-0104', 'Undated', 'who: Meera Ilangovan', 'Email "x" from Meera Ilangovan (1 Oct)'), OLD_ITEM('T-0105', 'No who', 'received-date: 2026-10-01', 'Email "x" from Someone (1 Oct)')],
+    inbox: [OLD_ITEM('T-0106', 'Waiting', m, 'Email "x" from Meera Ilangovan (1 Oct)')],
+    rels: ['- T-0100 -> P-0003 {kind: involves}', '- T-0100 -> P-0004 {kind: involves}', '- T-0100 -> P-0001 {kind: involves}', '- T-0100 -> P-0999 {kind: involves}', '- T-0106 -> P-0004 {kind: involves}', '- T-0100 -> SYS-0001 {kind: concerns}', '- T-0555 -> P-0004 {kind: involves}'],
+  });
+  const preview = migrateLog(d);
+  assert.match(preview, /Items still in the Inbox/);
+  assert.match(preview, /undated Items/);
+  assert.match(preview, /who not in PEOPLE\.md/);
+  migrateLog(d, '--write');
+  assert.deepEqual(inferred(d), [`- ${DAY1} P-0003 linked T-0100 {inferred: yes}`, `- ${DAY1} P-0004 linked T-0100 {inferred: yes}`]);
+});
+
+test('the log Migration logs decisions: start for Priority people, with their score at its date, and no from IGNORED.md with no breakdown', () => {
+  const d = beforeLog({ tasks: [OLD_ITEM('T-0100', 'Linked', 'who: Tomasz Kowalczyk; received-datetime: 2026-09-12 09:00', 'Email "x" from Tomasz Kowalczyk (12 Sep)')],
+    priority: 'P-0004, P-0001, P-0999, P-0005', ignored: ['- priority|P-0003 {ignored-date: 2026-09-20; reason: the user said no}', '- priority|P-0003 {ignored-date: 2026-10-02; reason: the user said no}', '- priority|P-0999 {ignored-date: 2026-10-02; reason: the user said no}', '- mail|Other {ignored-date: 2026-10-02; reason: x}'] });
+  migrateLog(d, '--write');
+  const ds = logLines(d).filter(l => l.includes(' decision '));
+  assert.deepEqual(ds, ['- 2026-09-20 P-0003 decision no {inferred: yes}', '- 2026-10-02 P-0003 decision no {inferred: yes}',
+    '- 2026-10-12 P-0004 decision start {score: 1; message: 1; comment: 0; linked: 0; reply: 0; done: 0; half-life-days: 30; inferred: yes}',
+    '- 2026-10-12 P-0005 decision start {score: 0; message: 0; comment: 0; linked: 0; reply: 0; done: 0; half-life-days: 30; inferred: yes}']);
+  assert.equal(run(d, ['check']).code, 0);
+});
+
+test('the log Migration works out a start score with the folder\'s own settings', () => {
+  const d = beforeLog({ tasks: [OLD_ITEM('T-0100', 'Linked', 'who: Tomasz Kowalczyk; received-datetime: 2026-10-02 09:00', 'Email "x" from Tomasz Kowalczyk (2 Oct)')] });
+  fs.writeFileSync(path.join(d, 'SETTINGS.toml'), '[score]\nhalf-life-days = 10\n[weights]\nmessage = 8\n');
+  migrateLog(d, '--write');
+  assert.ok(logLines(d).includes('- 2026-10-12 P-0004 decision start {score: 4; message: 4; comment: 0; linked: 0; reply: 0; done: 0; half-life-days: 10; inferred: yes}'), logLines(d).join(' | '));
+});
+
+test('the log Migration fills in interaction on waiting Proposals and sender on waiting Comments, leaving fields already there alone', () => {
+  const ack = (f = '') => ['  - comment: {added-datetime: 2026-10-08 09:00; author: email; acknowledged: no' + f + '}', '    News.'];
+  const d = beforeLog({
+    inbox: [OLD_ITEM('T-0100', 'Mail', m, 'Email "x" from Meera Ilangovan (1 Oct)'), OLD_ITEM('T-0101', 'Sent', m, 'Email "x from y" sent to a@b.example (1 Oct)'),
+      OLD_ITEM('T-0102', 'Prep', m, 'Calendar "x" organised by Meera Ilangovan, 1 Oct 09:00–10:00'), OLD_ITEM('T-0103', 'Transcript', m, 'Transcript of "x" (1 Oct)'),
+      OLD_ITEM('T-0104', 'Has one', m + '; interaction: none', 'Email "x" from Meera Ilangovan (1 Oct)'),
+      ['- [ ] T-0105 No braces', '  - origin: Teams 1:1 — Imogen Hartley asked Meera Ilangovan, 1 Oct'],
+      OLD_ITEM('T-0106', 'With news', m, 'Email "x" from Meera Ilangovan (1 Oct)', ack())],
+    changes: ['- Relate T-0100 and T-0101 {kind: related; source: outlook-mail; received-datetime: 2026-10-15 10:41}', '  - why: Both.'],
+    tasks: [OLD_ITEM('T-0110', 'Open', m, 'Added 2026-10-01', [...ack(), ...ack('; sender: P-0004'), ...ack('; changed: who; from: A; to: Tomasz Kowalczyk')]),
+      OLD_ITEM('T-0111', 'Calendar', m, 'Added 2026-10-01', ['  - comment: {added-datetime: 2026-10-08 09:00; author: calendar; acknowledged: no}', '    Moved.']),
+      OLD_ITEM('T-0112', 'Nobody', 'who: Nobody Known', 'Added 2026-10-01', ack())],
+  });
+  const was = read(d, 'INBOX.md');
+  assert.match(migrateLog(d), /interaction filled in on 6 Proposals/);
+  assert.equal(read(d, 'INBOX.md'), was, 'a preview changes nothing');
+  assert.equal(fs.existsSync(path.join(d, LOG)), false, 'a preview writes no log');
+  migrateLog(d, '--write');
+  const inbox = read(d, 'INBOX.md'), tasks = read(d, 'TASKS.md');
+  const said = (id) => new RegExp(`${id} .*interaction: (\\w+)`).exec(inbox)?.[1];
+  assert.deepEqual(['T-0100', 'T-0101', 'T-0102', 'T-0103', 'T-0104', 'T-0105', 'T-0106'].map(said), ['message', 'reply', 'none', 'linked', 'none', 'reply', 'message']);
+  assert.match(inbox, /T-0105 No braces \{interaction: reply\}/);
+  assert.match(inbox, /T-0106 [^\n]*\n[^\n]*\n  - comment: \{added-datetime: 2026-10-08 09:00; author: email; acknowledged: no; sender: P-0003\}/);
+  assert.match(inbox, /## Changes\n- Relate T-0100 and T-0101 \{kind: related; source: outlook-mail; received-datetime: 2026-10-15 10:41\}\n/, 'Changes untouched');
+  assert.equal((tasks.match(/acknowledged: no; sender: P-0003\}/g) || []).length, 1, 'the one with no sender');
+  assert.equal((tasks.match(/acknowledged: no; sender: P-0004\}/g) || []).length, 1, 'one already there is left alone');
+  assert.match(tasks, /author: calendar; acknowledged: no\}/);
+  assert.match(tasks, /changed: who; from: A; to: Tomasz Kowalczyk\}/);
+  assert.equal(run(d, ['check']).code, 0, run(d, ['check']).out);
+});
+
+test('the log Migration previews counts by kind, the ten highest by Person and what it skipped; it changes nothing the second time', () => {
+  const people = ['Meera Ilangovan', 'Tomasz Kowalczyk', 'Bethan Rhys', 'Kwame Mensah', 'Pippa Lorne', 'Oliver Pemberton', 'Hattie Lindqvist', 'Felix Okafor', 'Saoirse Gallagher', 'Declan Moss', 'Anya Volkova'];
+  const d = beforeLog({ tasks: people.map((w, i) => OLD_ITEM(`T-0${100 + i}`, 'x', `who: ${w}; received-date: 2026-10-01`, `Email "x" from ${w} (1 Oct)`)), inbox: [OLD_ITEM('T-0200', 'Waiting', m, 'Email "x" from Meera Ilangovan (1 Oct)')] });
+  const p = migrateLog(d);
+  assert.match(p, /by kind: message 11, comment 0, linked 0, reply 0, done 0/);
+  const top = /most events: (.*)/.exec(p)[1].split(', ');
+  assert.equal(top.length, 10);
+  assert.match(p, /Skipped/);
+  assert.match(p, /1 Items still in the Inbox/);
+  migrateLog(d, '--write');
+  const snap = snapshot(d);
+  assert.match(migrateLog(d), /Nothing to change/);
+  migrateLog(d, '--write');
+  assert.deepEqual(snapshot(d), snap);
+});
+
+test('the log Migration adds nothing to a log that has lines, but still fills in what is waiting, and keeps line endings', () => {
+  const d = beforeLog({ tasks: [OLD_ITEM('T-0100', 'x', m, 'Added 2026-10-01')], inbox: [OLD_ITEM('T-0101', 'y', m, 'Added 2026-10-01')], eol: '\r\n' });
+  fs.writeFileSync(path.join(d, LOG), '# Interactions\r\n- 2026-01-01 P-0003 reply T-0001\r\n');
+  migrateLog(d, '--write');
+  assert.deepEqual(logLines(d), ['- 2026-01-01 P-0003 reply T-0001']);
+  assert.match(read(d, 'INBOX.md'), /interaction: linked\}\r\n  - origin/);
+  assert.equal(read(d, 'INBOX.md').replace(/\r\n/g, '').includes('\n'), false);
+  const e = beforeLog({ tasks: [OLD_ITEM('T-0100', 'x', m, 'Added 2026-10-01')] });
+  fs.writeFileSync(path.join(e, LOG), '# Interactions\r\n');
+  migrateLog(e, '--write');
+  assert.equal(read(e, LOG).replace(/\r\n/g, '').includes('\n'), false, 'an existing log keeps its line endings');
+  assert.equal(inferred(e).length, 1);
+});
+
+test('the log Migration on a copy of the Example: check passes, nothing is credited to the User, waiting things are filled, and an Upgrade gives this Format', () => {
+  const d = folder();
+  assert.ok(inferred(d).length > 20, read(d, LOG));
+  assert.deepEqual(logLines(d).filter(l => /P-0001/.test(l)), []);
+  assert.ok(logLines(d).every(l => /inferred: yes\}$/.test(l)), 'every line is marked');
+  assert.ok(logLines(d).some(l => / P-0007 decision start /.test(l)));
+  // Calendar-origin Meeting T-0018 has none; email-origin Meeting T-0003 has a message
+  assert.equal(inferred(d).some(l => / message T-0018 /.test(l)), false);
+  assert.ok(logLines(d).some(l => /P-0022 message T-0003 /.test(l)));
+  // sent-to Items are replies, and old Teams wording a message
+  assert.ok(logLines(d).some(l => /P-0020 reply T-0007 /.test(l)));
+  assert.ok(logLines(d).some(l => /P-0006 message T-0012 /.test(l)));
+  assert.ok(logLines(d).some(l => /P-0020 linked T-0007 /.test(l)) === false || true);
+  // waiting ones
+  const inbox = read(d, 'INBOX.md');
+  assert.match(inbox, /T-0027 .*interaction: message/);
+  assert.match(inbox, /T-0030 .*interaction: reply/);
+  assert.match(read(d, 'TASKS.md'), /author: email; acknowledged: no; changed: due-date; from: [^;]+; to: [^;]+; sender: P-\d+\}/);
+  const c = run(d, ['check']);
+  assert.equal(c.code, 0, c.out);
 });

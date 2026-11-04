@@ -47,6 +47,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | `DISMISSED.md` | Source keys of proposals the user dismissed, kept only until their source can no longer read the message again | by source skills, through `discern match` |
 | `REFRESH-LOG.md` | Reports of source-skill runs, newest last (created on the first run) | append only; read when asked |
 | `drafts/` | Messages you drafted for the user (`<ID>-<slug>.md`). Never sent | when asked |
+| `INTERACTIONS.md` | The log of Interactions, the events the user has let through the inbox, and their decisions about Priority people. See "Interactions" | never to edit; `discern interaction` adds to it |
 | `SETTINGS.toml` | The user's settings for this folder: the Priority pause, and how the Interaction score counts. See "Settings" | when the user asks about a setting; the helper reads it for you |
 | `DISCERNY.md` | What the folder is, and its Format version as `<!-- format: <version> -->`. No file, or no comment, means 0.1.0.0. `discern check` reports it. Only an Upgrade changes it; never edit it | never; run `discern check` |
 
@@ -55,7 +56,7 @@ This file is the contract for any agent that reads or edits a Discerny data fold
 | File | Holds | Agent reads |
 |---|---|---|
 | `SOURCE-SKILLS.md` | The protocol every source skill follows | when running or writing a source skill |
-| `tools/discern.mjs` | The helper: `connect` and `new` for the data folder, `serve` to open the UI in a browser, `upgrade` for one in an older Format, and the IDs, times, source key matching and writes source skills need | run it; never read it |
+| `tools/discern.mjs` | The helper: `connect` and `new` for the data folder, `serve` to open the UI in a browser, `upgrade` for one in an older Format, `interaction` to record an Interaction, and the IDs, times, source key matching and writes source skills need | run it; never read it |
 | `migrations/` | One folder per Format change, which `discern upgrade` runs. Its `README.md` says how to write one | when an Upgrade stops at a Migration's `INSTRUCTIONS.md`, or when changing the Format |
 | `tools/evals/` | Recorded connector responses and expected results for testing the skills | only when testing a skill |
 | `.claude/skills/` | The `discern-*` skills for Claude | when running one |
@@ -82,7 +83,7 @@ When you point the user at an item or record, give its ID, or `View/ID` if the v
 ## Item format (TASKS.md, INBOX.md, DONE.md)
 
 ```
-- [ ] T-0012 Title text {type: task; who: Person Name; projects: PRJ-0001; tags: tag one, tag two; urgency: today|this week|soon|later|fyi; priority: high|medium|low; due-date: YYYY-MM-DD; due-time: HH:MM; status: waiting|in progress; dependencies: T-0003; received-datetime: YYYY-MM-DD HH:MM}
+- [ ] T-0012 Title text {type: task; who: Person Name; projects: PRJ-0001; tags: tag one, tag two; urgency: today|this week|soon|later|fyi; priority: high|medium|low; due-date: YYYY-MM-DD; due-time: HH:MM; status: waiting|in progress; dependencies: T-0003; received-datetime: YYYY-MM-DD HH:MM; interaction: message|reply|linked|none}
   - origin: where it came from
   - description: what the item is
     further lines of it, indented 4 spaces
@@ -102,11 +103,12 @@ When you point the user at an item or record, give its ID, or `View/ID` if the v
 - `dependencies`: optional, comma-separated IDs of this item's **dependencies**: the items that must be done before this one can start. The reverse, the items that depend on this one, is worked out by the UI and never stored. A dependency that is done or gone counts as resolved; leave the field in place unless asked.
 - `projects`: optional, comma-separated `PRJ-####` IDs. `tags`: optional, comma-separated free-text tags; the tag list is whatever the data uses.
 - `received-datetime`: when the item reached the user (message timestamp; `received-date: YYYY-MM-DD` in its place if only the date is known). For an item a skill derives rather than receives, such as a prep item for a meeting, the time it was derived. Set it on every item a source skill creates.
+- `interaction`: on an item a source skill proposes, what it counts as in the Interaction log when the user accepts it: `message`, `reply`, `linked` or `none`. `discern add` requires it, and it stays on the item. An item without it counts for nothing when accepted. See "Interactions".
 - `source-key`: the item's **source key**, a hidden key that ties it to the source thread, message or event it came from, so the same thing is never proposed twice: a scheme, then keys joined by `|`. The UI never shows or edits it, and renaming the item does not affect it. An item may carry several; a meeting with a date also carries a `cal|date|subject` source key so every source recognises it. A source key ending in `|*` stands for a whole chat or thread: on an item it means "related", never "already seen" (the older bare form `teams|chat-prefix` means the same). `SOURCE-SKILLS.md` lists the schemes and how they match.
 - `note:` and `my:` lines are retired: the Description and Comments replaced them. Never write one; `discern check` warns about any left.
 - Field names are whole words. The short codes of older Formats (`ty`, `urg`, `st` and the rest) are not read: an Upgrade renames them, and `discern check` reports any left as an error. Never write one.
-- The user can merge a duplicate item into the item it duplicates, in the UI. Meetings never merge. The survivor keeps its ID and gains the duplicate's fields, Description, Comments, source keys and the rest; every reference to the duplicate (`RELATIONSHIPS.md`, `dependencies`, the agent queue and its log, `rel|` lines in `IGNORED.md`) is made to the survivor, and the duplicate's ID is never used again. The survivor gets a Comment from `user`, "Merged T-#### into this.", so an ID you can't find may turn up by searching for it.
-- Completing an item means moving it to `DONE.md` as `[x]` with `done-date: YYYY-MM-DD`. The UI does this itself; do it only when asked.
+- The user can merge a duplicate item into the item it duplicates, in the UI. Meetings never merge. The survivor keeps its ID and gains the duplicate's fields, Description, Comments, source keys and the rest; every reference to the duplicate (`RELATIONSHIPS.md`, `dependencies`, the agent queue and its log, `rel|` lines in `IGNORED.md`, `INTERACTIONS.md`) is made to the survivor, and the duplicate's ID is never used again. The survivor gets a Comment from `user`, "Merged T-#### into this.", so an ID you can't find may turn up by searching for it.
+- Completing an item means moving it to `DONE.md` as `[x]` with `done-date: YYYY-MM-DD`. The UI does this itself; do it only when asked, and then record it: see "Interactions".
 
 ## Descriptions and Comments
 
@@ -119,10 +121,11 @@ Every item and record has at most one Description and any number of Comments.
   - `acknowledged: no`, only on a **Comment to acknowledge** (below).
   - `changed`, `from` and `to`, only on a **field change** (below): the field as this file names it, its value before and its value after. `from` is empty when the field had no value, and `to` when it was cleared.
   - `suggests: done`, only on a Comment to acknowledge saying an item is finished.
+  - `sender`, a `P-####`, only on a Comment to acknowledge from a source skill: who the news is from, when that's known. See "Interactions".
 
-  New Comments go after the others, so they stay oldest first. Add one without asking whenever new information turns up, with `discern comment <id> --author <word> "<text>"` (`node tools/discern.mjs` from the app folder), which stamps the time and puts it in place. Never change or delete a Comment, the user's or anyone else's: the user can edit their own and delete any, in the UI.
+  New Comments go after the others, so they stay oldest first. Add one without asking whenever new information turns up, with `discern comment <id> --author <word> "<text>"` (`node tools/discern.mjs` from the app folder), which stamps the time and puts it in place. `--sender <person>` says who news is from, and `--reply-to <person>` who the user replied to; each takes a name, address, handle or P-ID, and someone not in `PEOPLE.md` is left off rather than refused. Never change or delete a Comment, the user's or anyone else's: the user can edit their own and delete any, in the UI.
 - **A Comment to acknowledge** brings news from someone else that the user should see: a reply received, a Meeting moved or cancelled, new information about an item. `discern comment` with `--to-acknowledge` writes `acknowledged: no`, and the UI's Inbox shows the Comment until the user acknowledges it, which deletes the field. A Comment recording something the user did, such as a reply they sent, needs no acknowledging.
-- **A field change** is news that changes a field: a new Due date or status, an item handed to someone else, a person's new job title. A source skill makes the change itself and tells the user with a Comment to acknowledge, through `discern change <id> --author <word> --field <field> --to <value> "<why>"`, which also adds a person's `history` line. It changes only an item's `due-date`, `due-time`, `status` (`waiting`, `in progress`, or cleared) and `who`, and a person's `title`, `company`, `department` and `manager`. The rest (`urgency`, `priority`, `projects`, `tags`, `dependencies`, `type`) are the user's own judgement, and closing an item is always the user's: news that one is finished is `discern comment <id> --to-acknowledge --suggests done "<text>"`. The newest news wins, even over a value the user set, and the same change is applied once. In the Inbox the user can Undo the latest change to a field, which puts back the value from before its first unacknowledged change, or Mark done an item that suggests it. A Meeting the calendar mirrors has no Undo: the calendar is its record.
+- **A field change** is news that changes a field: a new Due date or status, an item handed to someone else, a person's new job title. A source skill makes the change itself and tells the user with a Comment to acknowledge, through `discern change <id> --author <word> --field <field> --to <value> "<why>"`, which also adds a person's `history` line. It takes `--sender <person>` too, for a change to any field but `who`. It changes only an item's `due-date`, `due-time`, `status` (`waiting`, `in progress`, or cleared) and `who`, and a person's `title`, `company`, `department` and `manager`. The rest (`urgency`, `priority`, `projects`, `tags`, `dependencies`, `type`) are the user's own judgement, and closing an item is always the user's: news that one is finished is `discern comment <id> --to-acknowledge --suggests done "<text>"`. The newest news wins, even over a value the user set, and the same change is applied once. In the Inbox the user can Undo the latest change to a field, which puts back the value from before its first unacknowledged change, or Mark done an item that suggests it. A Meeting the calendar mirrors has no Undo: the calendar is its record.
 
   ```
     - comment: {added-datetime: 2026-10-25 09:14; author: email; acknowledged: no; changed: due-date; from: 2026-10-30; to: 2026-11-06}
@@ -201,7 +204,7 @@ The user answers each in the UI, Yes or No, and the UI removes the line:
 - **Relationship**: Yes writes the line to `RELATIONSHIPS.md`, with the kind its two ends allow. While either end is a new item still in the inbox, the question is asked on that item, and dismissing the item drops it.
 - **New person**: Add makes the record (a new `P-####`, `emails`, `company` and `title` as proposed) and sets `who` on the listed items that have none; Add as Priority person also adds the ID to `priority-people`. Either can also add an open Task to set up an introduction meeting, related to those items.
 - **New email**: Yes adds the address to the person's `emails`, with a `history` line.
-- **Priority person**: Yes adds the ID to `priority-people` in `SOURCES.md`. Only additions are proposed, never removals, and never someone who is one already. The user can also promote and demote someone by hand, on the UI's People page or the person's record: a Promote answers any Proposal waiting for that person, and a Demote logs the same line as a No, so it pauses them too. The user's manager always counts, so the UI doesn't let them be demoted. Removing someone is only ever the user's choice: skills still never propose it.
+- **Priority person**: Yes adds the ID to `priority-people` in `SOURCES.md`. Each answer, and a Promote or Demote, logs a decision in `INTERACTIONS.md`. Only additions are proposed, never removals, and never someone who is one already. The user can also promote and demote someone by hand, on the UI's People page or the person's record: a Promote answers any Proposal waiting for that person, and a Demote logs the same line as a No, so it pauses them too. The user's manager always counts, so the UI doesn't let them be demoted. Removing someone is only ever the user's choice: skills still never propose it.
 - **No** logs the change in `IGNORED.md` (see below), and the helper never proposes it again; a No to a Priority person only pauses them, for the Priority pause (see "Settings") from the date it logs.
 
 Source skills write these lines only through `discern propose`; never edit them by hand.
@@ -247,6 +250,43 @@ The ID is the item or record the request is about. A request with only a date ha
    ```
 6. Finish with a short summary: what you did for each request, and which requests are still waiting and why.
 
+## Interactions (INTERACTIONS.md)
+
+`INTERACTIONS.md` is a log of the user's dealings with people, one line per event, keyed by P-ID so that a rename doesn't matter. An **Interaction score** is worked out from it whenever it's read, with older events counting for less, and is never stored. Keep the file's header: it is never empty.
+
+```
+- 2026-10-22 P-0012 message T-0041
+- 2026-10-22 P-0012 comment T-0041
+- 2026-08-03 P-0012 linked T-0017 {inferred: yes}
+- 2026-10-22 P-0012 decision promote {score: 14.2; message: 8.1; comment: 3.6; linked: 2.5; reply: 0; done: 0; half-life-days: 30}
+```
+
+| Kind | What it is | When it's written | Date | Credited to |
+|---|---|---|---|---|
+| `message` | An item from a message someone sent the user | On Accept or Already handled | `received-datetime` | The item's `who` then |
+| `reply` | An item from the user's sent mail, ask or commitment | On Accept or Already handled | `received-datetime` | The item's `who` then |
+| `reply` | A "You replied" or "Chased" Comment | When `discern comment` writes it | Today | `--reply-to`, else the item's `who` |
+| `comment` | News in a Comment to acknowledge on an item | When acknowledged | `added-datetime` | Its `sender`, else the item's `who` |
+| `linked` | A transcript's action item | On Accept or Already handled | `received-datetime` | The item's `who` then |
+| `linked` | A change of `who` a skill made | When acknowledged | `added-datetime` | The new `who` |
+| `linked` | The user tying a person to an item by hand: adding an item with a `who`, setting `who`, adding or saying Yes to an `involves` Relationship, or adding a proposed new person whose items get `who` | When it happens | Today | That person |
+| `done` | An item with a `who` completed | When completed | Today | The item's `who` |
+
+- There's at most one `message`, one `linked` and one `done` for each person on each item. `comment` and `reply` can repeat.
+- Nothing counts while it waits in the inbox, or once dismissed. A Meeting a horizon source mirrors counts for nothing, nor does a Comment from `calendar`, `user` or `agent`, a Comment on a record, or a field change the user takes back with Undo. The user, `Unassigned` and a `who` not in `PEOPLE.md` never get an event.
+- `{inferred: yes}` marks a line an Upgrade inferred from older data. It weighs the same.
+- An event stays when its item or Comment is deleted, when `who` changes (the new person gets `linked`), and when someone is marked as left. Reopening an item removes its `done`, a merge moves events to the survivor, and deleting a person removes theirs.
+- A `decision` line records the user's answer about a Priority person, with the score and breakdown at that moment: `yes`, `no`, `promote` or `demote`, or `start` for someone already one when the log began. Decisions don't affect a score.
+
+**Agents:** the UI and the helper write this file; never edit it by hand. When the user asks you to set `who` on an item or to complete one, record it as the UI would:
+
+```
+discern interaction <T-id> --kind linked --person <person>    when you set who, for the new who
+discern interaction <T-id> --kind done --person <person>      when you complete an item with a who
+```
+
+It takes a name, address, handle or P-ID, writes today's date, and refuses someone not in `PEOPLE.md` and an item still in the inbox. A second `linked` or `done` for the same person and item, and any for the user, records nothing and says why. A source skill's writes don't need it: `discern add`, `comment` and `change` take care of those.
+
 ## Settings (SETTINGS.toml)
 
 `SETTINGS.toml` holds the settings for how this data folder is read, in the same subset of TOML as `config.toml`: comments, `[table]` headings and `key = value`. It has no decimals, so every value is a whole number. It belongs to the data folder, so every computer that opens the folder uses the same settings. `config.toml` says which folder this app is connected to, and belongs to the app folder.
@@ -271,7 +311,7 @@ done = 1
 - The values above are the built-in defaults. A missing file or key uses the default, with no notice and no `discern check` error.
 - An invalid value uses the default too. `discern check` reports its line as an error, and the UI shows a notice saying which setting it ignored. Only that line is ignored: the rest still count.
 - `discern check` warns about a key it doesn't know.
-- `pause-days` is the only setting in use for now. `[score]` and `[weights]` are there for the Interaction score, which isn't in the app yet.
+- `pause-days` sets the Priority pause. `half-life-days` and `[weights]` set how the Interaction score counts (see "Interactions"), which for now shows only in what a decision logs: the UI doesn't show the score yet. `high-percent` and `min-people` aren't in use yet.
 - The UI never writes this file, and reads it when it opens the folder, so a change applies on the next reload. The helper reads it on every command.
 - It's the user's to edit. Change it only when they ask you to, and never to get past a `discern check` error they haven't seen.
 
@@ -357,5 +397,6 @@ Every `discern-*` skill, whoever writes it, must:
 - Read this file when it runs (and `SOURCE-SKILLS.md`, for a source skill), rather than copying the formats into the skill, so the skill keeps working when the formats change. Find the data folder as "Start here" says; never hard-code its path.
 - Follow "Rules for every edit" above.
 - Be read-only towards outside systems. Anything that would act outside the data folder becomes a draft in `drafts/`.
+- If it sets `who` or completes an item at the user's request: record it (see "Interactions").
 - If it is a source skill: follow `SOURCE-SKILLS.md`. New items go only to `INBOX.md`, never straight to `TASKS.md`, except a horizon source's Meetings, which `discern meetings` writes there; its other writes are the bookkeeping that file lists, made through `tools/discern.mjs`.
 - End with a one-line result in the style of `last-result` (what was read, skipped and proposed), and record it in `SOURCES.md` if it is a source skill.

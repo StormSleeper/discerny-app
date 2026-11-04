@@ -430,8 +430,8 @@ input[type="checkbox"]{width:17px;height:17px;margin:0;accent-color:var(--btn);f
 <script>
 'use strict';
 //<core>
-var VERSION='0.4.0.1'; // the app's version; tools/discern.mjs reads it from here
-var FORMAT='0.4.0.1'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
+var VERSION='0.4.0.2'; // the app's version; tools/discern.mjs reads it from here
+var FORMAT='0.4.0.2'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};
 var URG_ORDER=['today','this week','soon','later','fyi'];
@@ -499,7 +499,7 @@ function textLines(each,curOf,blank){var tx=null,gap=0;
     var cur=curOf(),last=cur&&cur.subs[cur.subs.length-1];
     tx=last&&(last.k==='description'||fielded(last.k))&&last.n!==undefined?last:null;
     if(i===all.length-1)end();};}
-var COMMENT_ORDER=['added-datetime','author','acknowledged','changed','from','to','suggests'],HISTORY_ORDER=['changed-date','changed'];
+var COMMENT_ORDER=['added-datetime','author','acknowledged','changed','from','to','suggests','sender'],HISTORY_ORDER=['changed-date','changed'];
 // one sub-line of an Item or Record as written: several physical lines for a Description, Comment or history line
 function serSub(b){
   if(b.k==='raw')return b.v;
@@ -924,6 +924,100 @@ function stampIn(tz,ms){try{var o={};new Intl.DateTimeFormat('en-GB',{timeZone:t
 // Comments in time order, the undated ones (older than any stamp) first; those with the same time keep their order
 function byTime(list){return list.map(function(c,k){return {c:c,k:k,t:String((c.f||{})['added-datetime']||'')};})
   .sort(function(a,b){return a.t<b.t?-1:a.t>b.t?1:a.k-b.k;}).map(function(x){return x.c;});}
+// ---- The Interaction log, INTERACTIONS.md: one line per event, "- YYYY-MM-DD P-#### <kind> T-####", or per decision, "- YYYY-MM-DD P-#### decision <what> {score: …}".
+// The Interaction score is worked out from it whenever it's read, and is never stored.
+var INTERACTIONS_FILE='INTERACTIONS.md';
+var INTER_HEAD=['# Interactions',
+  '<!-- The log the Interaction score is worked out from, keyed by P-ID. One line per event, written as it gets past the Inbox:',
+  '     `- YYYY-MM-DD P-#### <kind> T-####`, the kind being message, comment, linked, reply or done.',
+  '     One line per decision about a Priority person, with the score and breakdown at that moment:',
+  '     `- YYYY-MM-DD P-#### decision <yes|no|promote|demote|start> {score: …; message: …; half-life-days: …}`.',
+  '     `{inferred: yes}` marks a line an Upgrade inferred from older data. discerny.html and tools/discern.mjs write this file. -->',''];
+var INTER_KINDS=['message','comment','linked','reply','done'],INTER_DECISIONS=['yes','no','promote','demote','start'];
+// There's at most one of these for each Person on each Item; comment and reply can repeat.
+var INTER_ONCE=['message','linked','done'];
+// What a Proposal's interaction field may be: what it counts as when it's accepted, none being nothing
+var PROPOSAL_INTERACTIONS=['message','reply','linked','none'];
+var INTER_LINE=/^- (\S+) (\S+) (\S+) (\S+)(?: \{([^{}]*)\})?$/;
+function realDay(d){var m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d||''));if(!m)return false;var t=new Date(Date.UTC(+m[1],+m[2]-1,+m[3]));return t.getUTCFullYear()===+m[1]&&t.getUTCMonth()===+m[2]-1&&t.getUTCDate()===+m[3];}
+// one line -> {date, person, kind, item | decision, fields, line}, or null for a line that isn't one
+function interactionOf(ln){var m=INTER_LINE.exec(ln);
+  if(!m)return null;
+  var o={date:m[1],person:m[2],kind:m[3],fields:m[5]?fieldsOf(m[5]):{},line:ln};
+  if(m[3]==='decision')o.decision=m[4];else o.item=m[4];
+  return o;}
+// the events and decisions in the log's text, with at, each one's index among its lines
+function interactionsOf(text){var out=[];String(text||'').replace(/\r/g,'').split('\n').forEach(function(ln,at){if(ln.slice(0,2)!=='- ')return;var o=interactionOf(ln);if(o){o.at=at;out.push(o);}});return out;}
+// what's wrong with the log's lines -> [{line, message}], line being 1-based. An ID needn't still exist: a deleted Item's events stay.
+function checkInteractions(text){var out=[],open=false;
+  String(text||'').replace(/\r/g,'').split('\n').forEach(function(ln,i){
+    var inC=open;if(ln.indexOf('<!--')>=0)inC=open=true;if(ln.indexOf('-->')>=0)open=false;
+    if(inC||!ln.trim()||/^#/.test(ln))return;
+    function no(m){out.push({line:i+1,message:INTERACTIONS_FILE+' line '+(i+1)+': '+m});}
+    var o=/^- /.test(ln)?interactionOf(ln):null;
+    if(!o){no('"'+ln.trim().slice(0,60)+'" is not in the shape of an event or a decision');return;}
+    if(!realDay(o.date))no('the date "'+o.date+'" must be a real date, YYYY-MM-DD');
+    if(!/^P-\d+$/.test(o.person))no('"'+o.person+'" must be a Person\'s ID, P-####');
+    if(o.kind==='decision'){if(INTER_DECISIONS.indexOf(o.decision)<0)no('the decision "'+o.decision+'" must be one of '+INTER_DECISIONS.join(', '));}
+    else{if(INTER_KINDS.indexOf(o.kind)<0)no('the kind "'+o.kind+'" must be one of '+INTER_KINDS.join(', ')+', or decision');
+      if(!/^T-\d+$/.test(o.item))no('"'+o.item+'" must be an Item\'s ID, T-####');}});
+  return out;}
+function interactionLine(e){var f=e.fields||{},parts=Object.keys(f).map(function(k){return k+': '+f[k];});
+  return '- '+e.date+' '+e.person+' '+e.kind+' '+(e.kind==='decision'?e.decision:e.item)+(parts.length?' {'+parts.join('; ')+'}':'');}
+function interactionText(text){var t=String(text||'');return t.trim()?t:INTER_HEAD.join('\n')+'\n';}
+function interactionAdd(t,line){if(t.slice(-1)!=='\n')t+='\n';return t+line+'\n';}
+// The log with these events written, unless that would repeat a one-per-Item kind -> {text, added: [the lines written]}
+function addInteractions(text,events){var t=interactionText(text),have={},added=[];
+  function key(e){return e.person+'|'+e.kind+'|'+e.item;}
+  interactionsOf(t).forEach(function(e){if(INTER_ONCE.indexOf(e.kind)>=0)have[key(e)]=1;});
+  events.forEach(function(e){
+    if(INTER_ONCE.indexOf(e.kind)>=0){if(have[key(e)])return;have[key(e)]=1;}
+    var l=interactionLine(e);t=interactionAdd(t,l);added.push(l);});
+  return {text:added.length?t:String(text||''),added:added};}
+// One line out for each line named, so what an action wrote goes even when an identical line remains from another.
+function dropInteractions(text,lines){var ls=String(text||'').split('\n');
+  for(var i=lines.length-1;i>=0;i--){var k=ls.lastIndexOf(lines[i]);if(k>=0)ls.splice(k,1);}
+  return ls.join('\n');}
+// The lines test picks taken out -> {text, removed: [[line, where it was]]}, which restoreInteractions puts back
+function removeInteractions(text,test){var removed=[],ls=String(text||'').split('\n');
+  var keep=ls.filter(function(ln,at){var o=ln.slice(0,2)==='- '?interactionOf(ln):null;if(o&&test(o)){removed.push([ln,at]);return false;}return true;});
+  return {text:removed.length?keep.join('\n'):String(text||''),removed:removed};}
+function restoreInteractions(text,removed){if(!removed||!removed.length)return String(text||'');var ls=interactionText(text).split('\n');
+  removed.forEach(function(r){ls.splice(Math.min(r[1],ls.length&&ls[ls.length-1]===''?ls.length-1:ls.length),0,r[0]);});
+  return ls.join('\n');}
+// values as readSettings gives them; a table or key that's missing is the default
+function settingOf(values,table,key){var t=values&&values[table];return t&&typeof t[key]==='number'?t[key]:SETTING_RULES[table][key][0];}
+function noScore(){var s={};INTER_KINDS.forEach(function(k){s[k]=0;});return {total:0,shares:s};}
+// score = the sum of weight(kind) x 0.5 ^ (age in days / half-life-days), an event dated in the future being age 0. Inferred events weigh the same; decisions don't count.
+// log is the file's text or interactionsOf's result -> {P-id: {total, shares: {kind: its part of the total}}}
+function interactionScores(log,values,today){var out={},half=settingOf(values,'score','half-life-days');
+  (typeof log==='string'?interactionsOf(log):log||[]).forEach(function(e){
+    if(INTER_KINDS.indexOf(e.kind)<0||!realDay(e.date))return;
+    var s=out[e.person]||(out[e.person]=noScore()),n=settingOf(values,'weights',e.kind)*Math.pow(0.5,Math.max(daysBetween(e.date,today),0)/half);
+    s.shares[e.kind]+=n;s.total+=n;});
+  return out;}
+function interactionScore(log,id,values,today){return interactionScores(log,values,today)[id]||noScore();}
+function tenths(n){return Math.round(n*10)/10;}
+// A decision's line: with a score, the score and each kind's share at that moment
+function decisionLine(date,person,decision,score,half){var f;
+  if(score){f={score:tenths(score.total)};INTER_KINDS.forEach(function(k){f[k]=tenths(score.shares[k]);});f['half-life-days']=half;}
+  return interactionLine({date:date,person:person,kind:'decision',decision:decision,fields:f});}
+// Who can get credit: someone in PEOPLE.md other than the User -> their P-ID, or ''. Unassigned, and a name not there, are no one.
+function creditById(people,id){return id&&id!==USER_ID&&people.some(function(p){return p.meta.id===id;})?id:'';}
+function creditByName(people,name){var p=name?people.filter(function(x){return x.name===name;})[0]:null;return p&&/^P-\d+$/.test(p.meta.id||'')&&p.meta.id!==USER_ID?p.meta.id:'';}
+function dayOf(s){var m=/^\d{4}-\d{2}-\d{2}/.exec(String(s||''));return m?m[0]:'';}
+// Accept or Already handled: the Proposal's interaction, credited to who as it is now, dated when the Item reached the User
+function acceptEvents(it,people,today){var k=it.meta.interaction,pid=creditByName(people,it.meta.who);
+  return pid&&k&&k!=='none'&&PROPOSAL_INTERACTIONS.indexOf(k)>=0?[{date:dayOf(receivedOf(it.meta))||today,person:pid,kind:k,item:it.id}]:[];}
+// Acknowledging a Comment on an Item: news is a comment, credited to its sender, else who; a change of who is linked, credited to the new one.
+// A Comment from the calendar, the User or an Agent is nothing.
+function ackEvents(it,c,people,today){var f=c.f||{},g=fieldChange(c),date=dayOf(f['added-datetime'])||today,pid;
+  if(['calendar','user','agent'].indexOf(f.author)>=0)return [];
+  if(g&&g.field==='who'){pid=creditByName(people,g.to);return pid?[{date:date,person:pid,kind:'linked',item:it.id}]:[];}
+  pid=f.sender?creditById(people,f.sender):creditByName(people,it.meta.who);
+  return pid?[{date:date,person:pid,kind:'comment',item:it.id}]:[];}
+function doneEvents(it,people,date){var pid=creditByName(people,it.meta.who);return pid?[{date:date,person:pid,kind:'done',item:it.id}]:[];}
+function linkedEvents(pid,id,date){return pid?[{date:date,person:pid,kind:'linked',item:id}]:[];}
 // ---- Merge: a duplicate Item d folded into the Item s it duplicates, which keeps its ID. Meetings never merge.
 function canMerge(s,d){return !!s&&!!d&&s.id!==d.id&&s.meta.type!=='meeting'&&d.meta.type!=='meeting';}
 // due a before due b: the earlier day, and on the same day a time before none or a later one
@@ -958,9 +1052,10 @@ function mergeItem(s,d,at){
   cs.forEach(function(c){placeSub(s,{k:'comment',f:Object.assign({},c.f),v:c.v},ITEM_RANK);});
   addComment(s,{at:at,author:'user',text:'Merged '+d.id+' into this.'},ITEM_RANK);
   return s;}
-// the lines of RELATIONSHIPS.md ('rels'), ASK-AGENT.md ('asks', the entries as aParse keeps them), ASK-AGENT-LOG.md ('log') or
-// IGNORED.md ('ignored') that name d, made to name s. A Relationship or a No to one that would then repeat another, or join s to
-// itself, goes. -> {lines, swaps: [[the old line, the new one or null, where the old one was]]}
+// the lines of RELATIONSHIPS.md ('rels'), ASK-AGENT.md ('asks', the entries as aParse keeps them), ASK-AGENT-LOG.md ('log'),
+// IGNORED.md ('ignored') or INTERACTIONS.md ('interactions') that name d, made to name s. A Relationship or a No to one that would then
+// repeat another, or join s to itself, goes, as does an event of a kind there's one of per Item.
+// -> {lines, swaps: [[the old line, the new one or null, where the old one was]]}
 var IGN_REL_RE=/^(- rel\|)((?:T|P|PRJ|SYS)-\d+)\|((?:T|P|PRJ|SYS)-\d+)( \{[^{}]*\})$/;
 function mergeRefs(kind,lines,d,s){
   function to(x){return x===d?s:x;}
@@ -970,10 +1065,12 @@ function mergeRefs(kind,lines,d,s){
     if(kind==='asks'&&(m=NOTE_RE.exec(ln))&&m[1]===d)return '- '+s+ln.slice(2+d.length);
     if(kind==='log'&&(m=LOG_RE.exec(ln))&&m[1]===d)return '- '+s+ln.slice(2+d.length);
     if(kind==='ignored'&&(m=IGN_REL_RE.exec(ln))&&(m[2]===d||m[3]===d)){if(to(m[2])===to(m[3]))return null;return m[1]+to(m[2])+'|'+to(m[3])+m[4];}
+    if(kind==='interactions'&&ln.slice(0,2)==='- '&&(m=interactionOf(ln))&&m.item===d)return ln.replace(' '+m.kind+' '+d,' '+m.kind+' '+s);
     return undefined;}
   function key(ln){var m;
     if(kind==='rels'&&(m=REL_RE.exec(ln)))return m[2]==='~'?[m[1],m[3]].sort().join('~'):m[1]+'->'+m[3];
     if(kind==='ignored'&&(m=IGN_REL_RE.exec(ln)))return [m[2],m[3]].sort().join('|');
+    if(kind==='interactions'&&ln.slice(0,2)==='- '&&(m=interactionOf(ln))&&INTER_ONCE.indexOf(m.kind)>=0)return m.person+'|'+m.kind+'|'+m.item;
     return null;}
   var seen={},swaps=[],out=[];
   lines.forEach(function(ln){if(moved(ln)===undefined){var k=key(ln);if(k)seen[k]=1;}});
@@ -984,8 +1081,8 @@ function mergeRefs(kind,lines,d,s){
     if(k)seen[k]=1;out.push(n);swaps.push([ln,n,at]);});
   return {lines:out,swaps:swaps};}
 // The data folder files the page reads and writes; `discern serve` serves these, and SETTINGS_FILE for reading, and no others.
-var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', asklog: 'ASK-AGENT-LOG.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md', settings: 'SOURCES.md' };
-var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md'];
+var FILES = { tasks: 'TASKS.md', inbox: 'INBOX.md', done: 'DONE.md', people: 'PEOPLE.md', projects: 'PROJECTS.md', systems: 'SYSTEMS.md', rels: 'RELATIONSHIPS.md', asks: 'ASK-AGENT.md', asklog: 'ASK-AGENT-LOG.md', ignored: 'IGNORED.md', dismissed: 'DISMISSED.md', settings: 'SOURCES.md', interactions: 'INTERACTIONS.md' };
+var WATCH = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'RELATIONSHIPS.md', 'ASK-AGENT.md', 'ASK-AGENT-LOG.md', 'SOURCES.md', 'DISCERNY.md', 'INTERACTIONS.md'];
 // The header the page writes when it creates a missing RELATIONSHIPS.md, DISMISSED.md or ASK-AGENT.md: the starter file's, word for word.
 var REL_HEAD = ['# Relationships',
   '<!-- One line per Relationship, stored once (shown on both):',
@@ -1012,7 +1109,7 @@ var EDEF = {
 };
 // a Record's type or status as the page shows it: the file's lowercase value with a capital first letter
 function cap(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
-var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, asklog: function (t) { return { text: String(t || '') }; }, ignored: function (t) { return { text: String(t || '') }; }, dismissed: function (t) { return { text: String(t || '') }; }, settings: function (t) { return { text: String(t || '') }; } };
+var PARSE = { tasks: parse, inbox: parse, done: parse, people: pParse, projects: eParse, systems: eParse, rels: rParse, asks: aParse, asklog: function (t) { return { text: String(t || '') }; }, ignored: function (t) { return { text: String(t || '') }; }, dismissed: function (t) { return { text: String(t || '') }; }, settings: function (t) { return { text: String(t || '') }; }, interactions: function (t) { return { text: String(t || '').replace(/\r\n/g, '\n') }; } };
 function serKey(k, m) {
   if (k === 'tasks' || k === 'inbox' || k === 'done') return serialize(m);
   if (k === 'people') { ensurePIds(m); return pSerialize(m); }
@@ -1161,7 +1258,8 @@ function countOf(k, m) {
   if (k === 'people') return m.people.length;
   if (k === 'projects' || k === 'systems') return m.ents.length;
   if (k === 'rels' || k === 'asks') return m.lines.length;
-  return String(m.text || '').split('\n').length;
+  var t = String(m.text || '');
+  return t.trim() ? t.split('\n').length : 0;
 }
 function looksWrong(k, text, m) {
   var b = BASE[k];
@@ -1194,7 +1292,7 @@ async function loadAll() {
     people: pParse(t['PEOPLE.md']), projects: eParse(t['PROJECTS.md']), systems: eParse(t['SYSTEMS.md']),
     rels: rParse(t['RELATIONSHIPS.md']), asks: aParse(t['ASK-AGENT.md']),
     log: logParse(t['ASK-AGENT-LOG.md']), sources: parseSources(t['SOURCES.md']),
-    drafts: await readDrafts(), asklog: { text: t['ASK-AGENT-LOG.md'] }, ignored: { text: '' }, dismissed: { text: '' }, settings: { text: t['SOURCES.md'] }
+    drafts: await readDrafts(), asklog: { text: t['ASK-AGENT-LOG.md'] }, ignored: { text: '' }, dismissed: { text: '' }, settings: { text: t['SOURCES.md'] }, interactions: PARSE.interactions(t['INTERACTIONS.md'])
   };
   keys.forEach(function (k) { BASE[k] = countOf(k, out[k]); });
   return out;
@@ -1206,7 +1304,9 @@ async function loadAll() {
    written only when the operation changed them. */
 function op(label, keys, fn) { return { label: label, keys: keys, fn: fn }; }
 var ANY = ['tasks', 'inbox', 'done'];
-var MERGE_KEYS = ['tasks', 'inbox', 'done', 'rels', 'asks', 'asklog', 'ignored'];
+var MERGE_KEYS = ['tasks', 'inbox', 'done', 'rels', 'asks', 'asklog', 'ignored', 'interactions'];
+// What an operation that writes to the Interaction log also needs: who can get credit, and the log.
+var LOG_KEYS = ['people', 'interactions'];
 function fItem(M, id) {
   id = rid(id);
   for (var a = 0; a < ANY.length; a++) {
@@ -1319,12 +1419,40 @@ function ensureProject(m, name, wants) {
 }
 function entIn(M, kind, id) { var x = rid(id); return M[EDEF[kind].key].ents.filter(function (e) { return e.meta.id === x; })[0]; }
 
+/* The Interaction log. An operation writes its events here and keeps the lines it wrote in st.logged, so its undo takes back exactly
+   those. Each run overwrites st.logged, so what stays is what the last run, the save, wrote to the files. */
+function logEvents(M, st, events) {
+  if (!M.interactions || !events.length) return;
+  var r = addInteractions(M.interactions.text, events);
+  M.interactions.text = r.text;
+  if (st) st.logged = (st.logged || []).concat(r.added);
+}
+function logBack(M, st) { if (st && st.logged && st.logged.length) M.interactions.text = dropInteractions(M.interactions.text, st.logged); }
+// A decision about a Priority person, with the score and breakdown at this moment, before anything else this action writes.
+function logDecision(M, st, pid, decision, today) {
+  var line = decisionLine(today, pid, decision, interactionScore(M.interactions.text, pid, SET.values, today), SET.values.score['half-life-days']);
+  M.interactions.text = interactionAdd(interactionText(M.interactions.text), line);
+  st.logged = (st.logged || []).concat([line]);
+}
+// A new involves Relationship is the User tying a Person to an Item, once the Item is past the Inbox.
+function involvesLine(line) { var m = REL_RE.exec(line); return !!m && m[4].trim() === 'involves'; }
+function logInvolves(M, st, line, today) {
+  var m = REL_RE.exec(remapLine(line));
+  if (!m || m[4].trim() !== 'involves') return;
+  var f = fItem(M, m[1]);
+  if (f && f.k !== 'inbox') logEvents(M, st, linkedEvents(creditById(M.people.people, m[3]), f.it.id, today));
+}
+
 var OPS = {
   meta: function (id, patch) {
-    return op('Edit ' + id, ANY, function (M) {
+    var who = patch.who !== undefined, day = who ? todayStr() : '';
+    return op('Edit ' + id, who ? ANY.concat(LOG_KEYS) : ANY, function (M) {
       var f = fItem(M, id);
       if (!f) return;
+      var was = f.it.meta.who || '';
       Object.keys(patch).forEach(function (k) { var v = patch[k] == null ? '' : String(patch[k]).replace(/[{}]/g, '').trim(); if (v === '') delete f.it.meta[k]; else f.it.meta[k] = v; });
+      // The User setting or changing who is linked for the new one, and the old one keeps their events. A Proposal counts when it's accepted.
+      if (who && f.k !== 'inbox' && (f.it.meta.who || '') !== was) logEvents(M, null, linkedEvents(creditByName(M.people.people, f.it.meta.who), f.it.id, day));
     });
   },
   title: function (id, t) { return op('Rename ' + id, ANY, function (M) { var f = fItem(M, id); if (f && t) f.it.title = t; }); },
@@ -1361,11 +1489,24 @@ var OPS = {
       if (list[idx]) r.x.subs.splice(r.x.subs.indexOf(list[idx]), 0, b); else placeSub(r.x, b, r.rank);
     });
   },
-  // Acknowledged clears the Comments to acknowledge it names ([idx, text] each); on, the undo, marks them again
-  ack: function (id, which, on) {
-    return op((on ? 'Undo acknowledge on ' : 'Acknowledge comments on ') + id, recKeys(id), function (M) {
+  // Acknowledged clears the Comments to acknowledge it names ([idx, text] each), and an Item's are logged once it's past the Inbox;
+  // on, the undo, marks them again and takes back what that wrote, with the same st
+  ack: function (id, which, on, st) {
+    var isItem = kindOf(id) === 'T', day = todayStr();
+    st = st || {};
+    return op((on ? 'Undo acknowledge on ' : 'Acknowledge comments on ') + id, isItem ? recKeys(id).concat(LOG_KEYS) : recKeys(id), function (M) {
       var r = recIn(M, id);
-      if (r) which.forEach(function (w) { var c = findComment(r.x, w[0], w[1]); if (!c) return; if (on) c.f.acknowledged = 'no'; else delete c.f.acknowledged; });
+      if (!on) st.logged = [];
+      if (!r) return;
+      var past = isItem && fItem(M, id).k !== 'inbox';
+      which.forEach(function (w) {
+        var c = findComment(r.x, w[0], w[1]);
+        if (!c) return;
+        if (on) { c.f.acknowledged = 'no'; return; }
+        if (past && toAck(c)) logEvents(M, st, ackEvents(r.x, c, M.people.people, day));
+        delete c.f.acknowledged;
+      });
+      if (on) logBack(M, st);
     });
   },
   // Undo of a Skill's field change: the field back to value, and the change Comments it names ([idx, text] each) acknowledged.
@@ -1397,50 +1538,62 @@ var OPS = {
   },
   // Yes to a Priority person: their ID added to priority-people; st.had says it was there already, for the undo
   prioYes: function (c, st) {
-    return op('Make ' + c.name + ' a Priority person', ['inbox', 'settings'], function (M) {
+    var day = todayStr();
+    return op('Make ' + c.name + ' a Priority person', ['inbox', 'settings', 'interactions'], function (M) {
+      st.logged = [];
       if (!dropChange(M.inbox, c.line)) return;
       var t = setPriority(M.settings.text, rid(c.id), true);
       if (st.had === undefined) st.had = t === M.settings.text;
       M.settings.text = t;
+      logDecision(M, st, rid(c.id), 'yes', day);
     });
   },
   prioUnyes: function (c, st) {
-    return op('Undo Priority person', ['inbox', 'settings'], function (M) {
+    return op('Undo Priority person', ['inbox', 'settings', 'interactions'], function (M) {
       putChange(M.inbox, c.lines);
       if (st.had === false) M.settings.text = setPriority(M.settings.text, rid(c.id), false);
+      logBack(M, st);
     });
   },
   // Promote by hand, which also answers a Priority person Proposal waiting for them. st keeps what the undo must put back;
   // each run overwrites it, so what stays is what the last run, the save, found in the files.
   promote: function (id, st) {
-    return op('Promote ' + id, ['inbox', 'settings'], function (M) {
+    var day = todayStr();
+    return op('Promote ' + id, ['inbox', 'settings', 'interactions'], function (M) {
       var t = setPriority(M.settings.text, rid(id), true), cs = changesOf(M.inbox.post).filter(function (c) { return c.type === 'priority' && rid(c.id) === rid(id); });
       st.had = t === M.settings.text;
       M.settings.text = t;
       st.lines = cs.map(function (c) { return c.lines; });
       cs.forEach(function (c) { dropChange(M.inbox, c.line); });
+      st.logged = [];
+      logDecision(M, st, rid(id), 'promote', day);
     });
   },
   unpromote: function (id, st) {
-    return op('Undo promote ' + id, ['inbox', 'settings'], function (M) {
+    return op('Undo promote ' + id, ['inbox', 'settings', 'interactions'], function (M) {
       (st.lines || []).forEach(function (l) { putChange(M.inbox, l); });
       if (st.had === false) M.settings.text = setPriority(M.settings.text, rid(id), false);
+      logBack(M, st);
     });
   },
   // Demote by hand starts a Priority pause, with the line a No writes. addLines won't repeat a line, so st.added says whether this one is ours to undo.
   demote: function (id, line, st) {
-    return op('Demote ' + id, ['settings', 'ignored'], function (M) {
+    var day = todayStr();
+    return op('Demote ' + id, ['settings', 'ignored', 'interactions'], function (M) {
       var t = setPriority(M.settings.text, rid(id), false), g = addLines(M.ignored.text, [line]);
       st.had = t !== M.settings.text;
       st.added = g !== M.ignored.text;
       M.settings.text = t;
       M.ignored.text = g;
+      st.logged = [];
+      logDecision(M, st, rid(id), 'demote', day);
     });
   },
   undemote: function (id, line, st) {
-    return op('Undo demote ' + id, ['settings', 'ignored'], function (M) {
+    return op('Undo demote ' + id, ['settings', 'ignored', 'interactions'], function (M) {
       if (st.had) M.settings.text = setPriority(M.settings.text, rid(id), true);
       if (st.added) M.ignored.text = dropLines(M.ignored.text, [line]);
+      logBack(M, st);
     });
   },
   addSub: function (id, text) {
@@ -1503,8 +1656,9 @@ var OPS = {
       if (ds.length) f.it.meta.dependencies = ds.join(', '); else delete f.it.meta.dependencies;
     });
   },
-  complete: function (id, date) {
-    return op('Complete ' + id, ['done', 'tasks'], function (M) {
+  // back, the undo of a reopen, puts back the done events that reopen took out, in place of writing one
+  complete: function (id, date, back) {
+    return op('Complete ' + id, ['done', 'tasks'].concat(LOG_KEYS), function (M) {
       var x = rid(id), k = M.tasks.items.findIndex(function (i) { return i.id === x; });
       if (k < 0) return;
       var it = M.tasks.items[k], dup = M.done.items.filter(function (i) { return i.id === x; })[0];
@@ -1513,12 +1667,18 @@ var OPS = {
       it.done = true; it.meta['done-date'] = date; delete it.meta.status;
       M.done.items = M.done.items.filter(function (i) { return i.id !== x; });
       M.done.items.push(it);
+      if (back) M.interactions.text = restoreInteractions(M.interactions.text, back.removed);
+      else logEvents(M, null, doneEvents(it, M.people.people, date));
     });
   },
-  reopen: function (id, st) {
-    return op('Reopen ' + id, ['tasks', 'done'], function (M) {
+  // Reopening an Item takes out its done events, which back keeps for the undo
+  reopen: function (id, st, back) {
+    return op('Reopen ' + id, ['tasks', 'done', 'interactions'], function (M) {
       var x = rid(id), k = M.done.items.findIndex(function (i) { return i.id === x; });
       if (k < 0) return;
+      var gone = removeInteractions(M.interactions.text, function (e) { return e.kind === 'done' && e.item === x; });
+      M.interactions.text = gone.text;
+      if (back) back.removed = gone.removed;
       var it = M.done.items[k], dup = M.tasks.items.filter(function (i) { return i.id === x; })[0];
       if (dup && dup.title !== it.title) throw clash(x, dup.title, it.title);
       M.done.items.splice(k, 1);
@@ -1528,9 +1688,13 @@ var OPS = {
       insertById(M.tasks.items, it);
     });
   },
-  accept: function (id, relLines) {
-    return op('Accept ' + id, ['tasks', 'inbox', 'rels'], function (M) {
-      var k = M.inbox.items.findIndex(function (i) { return i.id === id; });
+  // st keeps the lines it logged, for unaccept. Getting past the Inbox is when the Proposal's interaction, and any involves Relationship it has, count.
+  accept: function (id, relLines, st) {
+    var day = todayStr();
+    st = st || {};
+    return op('Accept ' + id, ['tasks', 'inbox', 'rels'].concat(LOG_KEYS), function (M) {
+      var k = M.inbox.items.findIndex(function (i) { return i.id === id; }), came = null;
+      st.logged = [];
       if (k >= 0) {
         var it = M.inbox.items[k], dup = M.tasks.items.filter(function (i) { return i.id === id; })[0];
         if (dup && dup.title !== it.title) throw clash(id, dup.title, it.title);
@@ -1539,14 +1703,19 @@ var OPS = {
         insertById(M.tasks.items, it);
         var n = idNum(id) + 1;
         if (n > nextId(M.tasks)) setNextId(M.tasks, n);
+        came = it;
       } else if (!M.tasks.items.some(function (i) { return i.id === id; })) return;
       var R = M.rels, added = false;
       relLines.map(remapLine).forEach(function (l) { if (R.lines.indexOf(l) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); added = true; } });
       if (added) relRefresh(R);
+      if (!came) return;
+      logEvents(M, st, acceptEvents(came, M.people.people, day));
+      R.rels.filter(function (r) { return r.a === id; }).forEach(function (r) { logInvolves(M, st, r.raw, day); });
     });
   },
-  unaccept: function (id, relLines) {
-    return op('Undo accept ' + id, ['inbox', 'tasks', 'rels'], function (M) {
+  unaccept: function (id, relLines, st) {
+    return op('Undo accept ' + id, ['inbox', 'tasks', 'rels', 'interactions'], function (M) {
+      logBack(M, st);
       var k = M.tasks.items.findIndex(function (i) { return i.id === id; });
       if (k >= 0) {
         var it = M.tasks.items[k], dup = M.inbox.items.filter(function (i) { return i.id === id; })[0];
@@ -1580,25 +1749,35 @@ var OPS = {
     });
   },
   /* change Proposals: each answer drops the Proposal from the Inbox and makes the change, or logs a No in IGNORED.md */
-  relYes: function (c, line) {
-    return op('Relate ' + c.a + ' and ' + c.b, ['inbox', 'rels'], function (M) {
+  relYes: function (c, line, st) {
+    var day = todayStr(), logs = involvesLine(line);
+    return op('Relate ' + c.a + ' and ' + c.b, logs ? ['inbox', 'rels', 'tasks', 'done'].concat(LOG_KEYS) : ['inbox', 'rels'], function (M) {
+      st.logged = [];
       if (!dropChange(M.inbox, c.line)) return;
       var R = M.rels, l = remapLine(line);
-      if (R.lines.indexOf(l) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); }
+      if (R.lines.indexOf(l) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); if (logs) logInvolves(M, st, l, day); }
     });
   },
-  relUnyes: function (c, line) {
-    return op('Undo relate', ['inbox', 'rels'], function (M) {
+  relUnyes: function (c, line, st) {
+    return op('Undo relate', involvesLine(line) ? ['inbox', 'rels', 'interactions'] : ['inbox', 'rels'], function (M) {
       putChange(M.inbox, c.lines);
       var R = M.rels, k = R.lines.indexOf(remapLine(line));
       if (k >= 0) { R.lines.splice(k, 1); relRefresh(R); }
+      logBack(M, st);
     });
   },
-  changeNo: function (c) {
-    return op('No to a change', ['inbox', 'ignored'], function (M) { if (dropChange(M.inbox, c.line)) M.ignored.text = addLines(M.ignored.text, [noLine(c)]); });
+  // A No to a Priority person is a decision, logged with the score at this moment
+  changeNo: function (c, st) {
+    var prio = c.type === 'priority', day = todayStr();
+    return op('No to a change', prio ? ['inbox', 'ignored', 'interactions'] : ['inbox', 'ignored'], function (M) {
+      st.logged = [];
+      if (!dropChange(M.inbox, c.line)) return;
+      M.ignored.text = addLines(M.ignored.text, [noLine(c)]);
+      if (prio) logDecision(M, st, rid(c.id), 'no', day);
+    });
   },
-  changeUnno: function (c, line) {
-    return op('Undo no', ['inbox', 'ignored'], function (M) { putChange(M.inbox, c.lines); M.ignored.text = dropLines(M.ignored.text, [line]); });
+  changeUnno: function (c, line, st) {
+    return op('Undo no', c.type === 'priority' ? ['inbox', 'ignored', 'interactions'] : ['inbox', 'ignored'], function (M) { putChange(M.inbox, c.lines); M.ignored.text = dropLines(M.ignored.text, [line]); logBack(M, st); });
   },
   // st keeps what the Person had before, for the undo
   emailYes: function (c, date, st) {
@@ -1628,8 +1807,9 @@ var OPS = {
     if (o.intro) spec = { title: 'Set up an introduction meeting with ' + c.name, meta: { type: 'task', who: c.name, urgency: 'this week', priority: 'medium', 'received-datetime': o.now }, description: '', newProjects: [], date: o.date };
     var at = spec ? OPS.addTask(spec, task) : null, items = csv(c.fields.items);
     st.whos = []; st.rels = [];
-    var keys = ['inbox', 'people', 'tasks', 'done', 'rels'].concat(o.priority ? ['settings'] : []);
+    var keys = ['inbox', 'people', 'tasks', 'done', 'rels', 'interactions'].concat(o.priority ? ['settings'] : []);
     return op('Add ' + c.name, keys, function (M) {
+      st.logged = [];
       if (!dropChange(M.inbox, c.line)) return;
       var had = M.people.people.some(function (x) { return x.name.toLowerCase() === c.name.toLowerCase(); });
       ap.fn(M);
@@ -1641,20 +1821,30 @@ var OPS = {
       if (c.fields.company && !p.meta.company) p.meta.company = cleanName(c.fields.company);
       if (c.fields.title && !p.meta.title) p.meta.title = cleanName(c.fields.title);
       p.meta['checked-date'] = o.date;
-      items.forEach(function (x) { var f = fItem(M, x); if (f && f.k !== 'done' && !realWho(f.it)) { f.it.meta.who = p.name; if (st.whos.indexOf(f.it.id) < 0) st.whos.push(f.it.id); } });
+      if (o.priority) logDecision(M, st, p.meta.id, 'yes', o.date);
+      items.forEach(function (x) {
+        var f = fItem(M, x);
+        if (!f || f.k === 'done' || realWho(f.it)) return;
+        f.it.meta.who = p.name;
+        if (st.whos.indexOf(f.it.id) < 0) st.whos.push(f.it.id);
+        // One still in the Inbox counts when it's accepted
+        if (f.k !== 'inbox') logEvents(M, st, linkedEvents(creditById(M.people.people, p.meta.id), f.it.id, o.date));
+      });
       if (o.priority) M.settings.text = setPriority(M.settings.text, p.meta.id, true);
       if (!at) return;
       at.fn(M);
       st.task = task.id;
+      st.logged = st.logged.concat(task.logged || []);
       var R = M.rels, n = R.lines.length;
       items.forEach(function (x) { var f = fItem(M, x), r = f ? relLine(task.id, f.it.id) : {}; if (r.line && R.lines.indexOf(r.line) < 0) { if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(r.line); if (st.rels.indexOf(r.line) < 0) st.rels.push(r.line); } });
       if (R.lines.length !== n) relRefresh(R);
     });
   },
   personUnadd: function (c, o, st) {
-    var keys = ['inbox', 'people', 'tasks', 'done', 'rels'].concat(o.priority ? ['settings'] : []);
+    var keys = ['inbox', 'people', 'tasks', 'done', 'rels', 'interactions'].concat(o.priority ? ['settings'] : []);
     return op('Undo add ' + c.name, keys, function (M) {
       putChange(M.inbox, c.lines);
+      logBack(M, st);
       var pid = rid(st.pid), p = M.people.people.filter(function (x) { return x.meta.id === pid; })[0];
       if (p && st.created) {
         var hw = pNextId(M.people);
@@ -1700,6 +1890,16 @@ var OPS = {
       if (nextId(M.tasks) < hw) setNextId(M.tasks, hw);
       mergeItem(s.it, d.it, at);
       if (s.k === 'done' && !s.it.done) { M.done.items.splice(M.done.items.indexOf(s.it), 1); insertById(M.tasks.items, s.it); }
+      // The events move with the rest. A survivor left open has no done event, as if it had been reopened.
+      var L = M.interactions, lr = mergeRefs('interactions', String(L.text || '').split('\n'), dx, sx);
+      if (!s.it.done) lr.lines = lr.lines.filter(function (ln, at) {
+        var e = ln.slice(0, 2) === '- ' ? interactionOf(ln) : null;
+        if (!e || e.kind !== 'done' || e.item !== sx) return true;
+        var w = lr.swaps.filter(function (y) { return y[1] === ln; })[0];
+        if (w) w[1] = null; else lr.swaps.push([ln, null, at]);
+        return false;
+      });
+      if (lr.swaps.length) { L.text = lr.lines.join('\n'); st.swaps.interactions = lr.swaps; }
       ANY.forEach(function (k) {
         M[k].items.forEach(function (i) {
           var ds = depList(i);
@@ -1750,15 +1950,17 @@ var OPS = {
       }
       if (st.swaps.rels) { M.rels.lines = back(M.rels.lines, st.swaps.rels); relRefresh(M.rels); }
       if (st.swaps.asks) { M.asks.lines = back(M.asks.lines, st.swaps.asks); askRefresh(M.asks); }
-      ['asklog', 'ignored'].forEach(function (k) { if (st.swaps[k] && M[k]) M[k].text = back(String(M[k].text || '').split('\n'), st.swaps[k]).join('\n'); });
+      ['asklog', 'ignored', 'interactions'].forEach(function (k) { if (st.swaps[k] && M[k]) M[k].text = back(String(M[k].text || '').split('\n'), st.swaps[k]).join('\n'); });
       if (st.swaps.asklog && M.log) M.log = logParse(M.asklog.text);
       st.post.forEach(function (w) { var p = M.inbox.post || [], k = w[1] === null ? -1 : p.indexOf(w[1]); if (k >= 0) p[k] = w[0][0]; else putChange(M.inbox, w[0]); });
     });
   },
+  // An Item added by hand with a who ties that Person to it; out keeps the Item's ID, and the lines logged for removeAdded.
   addTask: function (spec, out) {
-    var keys = spec.newProjects.length ? ['projects', 'tasks', 'inbox', 'done'] : ['tasks', 'inbox', 'done'];
+    var keys = (spec.newProjects.length ? ['projects', 'tasks', 'inbox', 'done'] : ['tasks', 'inbox', 'done']).concat(spec.meta.who ? LOG_KEYS : []);
     spec.prjWant = spec.prjWant || {};
     return op('Add task', keys, function (M) {
+      if (out) out.logged = [];
       var prj = csv(spec.meta.projects).map(rid);
       spec.newProjects.forEach(function (name) { var pid = ensureProject(M.projects, name, spec.prjWant); if (prj.indexOf(pid) < 0) prj.push(pid); });
       var want = spec.want ? rid(spec.want) : null, f = want ? fItem(M, want) : null;
@@ -1773,19 +1975,31 @@ var OPS = {
       M.tasks.items.push(it);
       setNextId(M.tasks, Math.max(n, idNum(id) + 1));
       if (out) out.id = id;
+      if (meta.who) logEvents(M, out, linkedEvents(creditByName(M.people.people, meta.who), id, spec.date));
     });
   },
-  removeAdded: function (id) {
-    return op('Undo add', ['tasks'], function (M) {
+  removeAdded: function (id, out) {
+    return op('Undo add', ['tasks', 'interactions'], function (M) {
       var x = rid(id);
       M.tasks.items = M.tasks.items.filter(function (i) { return !(i.id === x && getSub(i, 'origin').some(function (b) { return /^Added /.test(b.v); })); });
+      logBack(M, out);
     });
   },
-  addRel: function (line) {
-    return op('Relate', ['rels'], function (M) { var R = M.rels, l = remapLine(line); if (R.lines.indexOf(l) >= 0) return; if (!R.lines.length) R.lines = REL_HEAD.slice(); R.lines.push(l); relRefresh(R); });
+  // Given st, this is the User adding a Relationship, which an involves one logs; without it, the undo of taking one out, which logs nothing.
+  addRel: function (line, st) {
+    var logs = !!st && involvesLine(line), day = logs ? todayStr() : '';
+    return op('Relate', logs ? ['rels'].concat(ANY, LOG_KEYS) : ['rels'], function (M) {
+      if (st) st.logged = [];
+      var R = M.rels, l = remapLine(line);
+      if (R.lines.indexOf(l) >= 0) return;
+      if (!R.lines.length) R.lines = REL_HEAD.slice();
+      R.lines.push(l);
+      relRefresh(R);
+      if (logs) logInvolves(M, st, l, day);
+    });
   },
-  removeRel: function (line) {
-    return op('Unlink', ['rels'], function (M) { var R = M.rels, k = R.lines.indexOf(remapLine(line)); if (k >= 0) { R.lines.splice(k, 1); relRefresh(R); } });
+  removeRel: function (line, st) {
+    return op('Unlink', st ? ['rels', 'interactions'] : ['rels'], function (M) { var R = M.rels, k = R.lines.indexOf(remapLine(line)); if (k >= 0) { R.lines.splice(k, 1); relRefresh(R); } if (st) logBack(M, st); });
   },
   addAsk: function (line) {
     return op('Queue for the agent', ['asks'], function (M) { var A = M.asks, l = remapLine(line); if (A.lines.indexOf(l) >= 0) return; if (!A.lines.length) A.lines = ASK_HEAD.slice(); A.lines.push(l); askRefresh(A); });
@@ -1826,18 +2040,23 @@ var OPS = {
       pSetNextId(M.people, Math.max(pNextId(M.people), idNum(p.meta.id) + 1));
     });
   },
-  removePerson: function (name) {
-    return op('Remove ' + name, ['people'], function (M) {
-      var hw = pNextId(M.people);
+  // Deleting a Person takes their lines out of the log, which st keeps for restorePerson
+  removePerson: function (name, st) {
+    return op('Remove ' + name, LOG_KEYS, function (M) {
+      var hw = pNextId(M.people), who = M.people.people.filter(function (x) { return x.name === name; })[0], pid = who && who.meta.id;
       M.people.people = M.people.people.filter(function (x) { return x.name !== name; });
       if (pNextId(M.people) < hw || !M.people.pre.some(function (l) { return /next-id:/.test(l); })) pSetNextId(M.people, hw);
+      var gone = removeInteractions(M.interactions.text, function (e) { return !!pid && e.person === pid; });
+      M.interactions.text = gone.text;
+      if (st) st.removed = gone.removed;
     });
   },
-  restorePerson: function (text, grp, idx) {
-    return op('Restore person', ['people'], function (M) {
+  restorePerson: function (text, grp, idx, st) {
+    return op('Restore person', LOG_KEYS, function (M) {
       var p = pParse('## ' + grp + '\n' + text).people[0];
       if (!p || M.people.people.some(function (x) { return x.name === p.name; })) return;
       M.people.people.splice(Math.min(idx, M.people.people.length), 0, p);
+      if (st) M.interactions.text = restoreInteractions(M.interactions.text, st.removed);
     });
   },
   /* projects and systems */
@@ -4070,9 +4289,9 @@ function toggleDone(id, viaKey) {
     var prevSt = i.meta.status || '';
     commit(OPS.complete(id, todayStr()), { toast: 'Done: ' + clip(i.title, 60), undo: OPS.reopen(id, prevSt) });
   } else if (w === 'done') {
-    var prevDone = i.meta['done-date'] || todayStr();
-    commit(OPS.reopen(id));
-    toastShow('Reopened ' + id + '. It is back in ' + listName(item(id)) + '.', OPS.complete(id, prevDone));
+    var prevDone = i.meta['done-date'] || todayStr(), gone = {};
+    commit(OPS.reopen(id, '', gone));
+    toastShow('Reopened ' + id + '. It is back in ' + listName(item(id)) + '.', OPS.complete(id, prevDone, gone));
   } else return;
   if (viaKey) {
     S.cur = nb;
@@ -4094,21 +4313,21 @@ function accept(id) {
   if (!i || whereOf(id) !== 'inbox') return;
   var rl = [];
   suggestions(i).forEach(function (g) { if (S.suggestOn[id + '|' + g.id]) { var r = relLine(id, g.id); if (r.line) rl.push(r.line); } });
-  var nx = nextInbox(id);
+  var nx = nextInbox(id), st = {};
   S.dismissFor = null;
-  commit(OPS.accept(id, rl));
-  toastShow('Accepted ' + id + ' into ' + listName(item(id)) + (rl.length ? ', related to ' + rl.length + ' item' + (rl.length > 1 ? 's' : '') : '') + '.', OPS.unaccept(id, rl));
+  commit(OPS.accept(id, rl, st));
+  toastShow('Accepted ' + id + ' into ' + listName(item(id)) + (rl.length ? ', related to ' + rl.length + ' item' + (rl.length > 1 ? 's' : '') : '') + '.', OPS.unaccept(id, rl, st));
   afterTriage(id, nx);
 }
 // a Proposal done in two minutes: accepted and marked done in one step, keeping its ID
 function acceptDone(id) {
   var i = item(id);
   if (!i || whereOf(id) !== 'inbox') return;
-  var a = OPS.accept(id, []), c = OPS.complete(id, todayStr()), nx = nextInbox(id);
-  var un = OPS.unaccept(id, []), ro = OPS.reopen(id);
+  var st = {}, a = OPS.accept(id, [], st), c = OPS.complete(id, todayStr()), nx = nextInbox(id);
+  var un = OPS.unaccept(id, [], st), ro = OPS.reopen(id);
   S.dismissFor = null;
-  commit(op('Accept and complete ' + id, ['tasks', 'inbox', 'rels', 'done'], function (M) { a.fn(M); c.fn(M); }));
-  toastShow('Done: ' + clip(i.title, 60), op('Undo done ' + id, ['tasks', 'done', 'inbox', 'rels'], function (M) { ro.fn(M); un.fn(M); }));
+  commit(op('Accept and complete ' + id, ['tasks', 'inbox', 'rels', 'done'].concat(LOG_KEYS), function (M) { a.fn(M); c.fn(M); }));
+  toastShow('Done: ' + clip(i.title, 60), op('Undo done ' + id, ['tasks', 'done', 'inbox', 'rels'].concat(LOG_KEYS), function (M) { ro.fn(M); un.fn(M); }));
   afterTriage(id, nx);
 }
 function doneNow(id) {
@@ -4153,13 +4372,15 @@ function mergeItems(sid, did) {
 function relYes(line) {
   var c = changeByLine(line), r = c && relOf(c);
   if (!r || !exists(c.a) || !exists(c.b)) return;
-  commit(OPS.relYes(c, r.line), { toast: 'Related ' + c.a + ' and ' + c.b + '.', undo: OPS.relUnyes(c, r.line) });
+  var st = {};
+  commit(OPS.relYes(c, r.line, st), { toast: 'Related ' + c.a + ' and ' + c.b + '.', undo: OPS.relUnyes(c, r.line, st) });
 }
 function changeNo(line) {
   var c = changeByLine(line);
   if (!c) return;
   var what = c.type === 'relationship' ? c.a + ' and ' + c.b + ' won’t be proposed as related again.' : c.type === 'priority' ? c.name + ' won’t be proposed as a Priority person for ' + plural(pauseDays(), 'day') + '.' : c.email + ' won’t be proposed again.';
-  commit(OPS.changeNo(c), { toast: 'No: ' + what, undo: OPS.changeUnno(c, noLine(c)) });
+  var st = {};
+  commit(OPS.changeNo(c, st), { toast: 'No: ' + what, undo: OPS.changeUnno(c, noLine(c), st) });
 }
 function emailYes(line) {
   var c = changeByLine(line), st = {};
@@ -4193,9 +4414,9 @@ function undoChange(id, field) {
 function markDoneAck(id) {
   var i = item(id), w = whereOf(id);
   if (!i || (w !== 'open' && w !== 'inbox')) return;
-  var list = commentsOf(i), which = list.filter(toAck).map(function (c) { return [list.indexOf(c), c.v]; }), keys = ['tasks', 'inbox', 'done', 'rels'];
-  var steps = (w === 'inbox' ? [OPS.accept(id, [])] : []).concat([OPS.complete(id, todayStr()), OPS.ack(id, which, false)]);
-  var back = [OPS.ack(id, which, true), OPS.reopen(id, i.meta.status || '')].concat(w === 'inbox' ? [OPS.unaccept(id, [])] : []);
+  var list = commentsOf(i), which = list.filter(toAck).map(function (c) { return [list.indexOf(c), c.v]; }), keys = ['tasks', 'inbox', 'done', 'rels'].concat(LOG_KEYS), st = {}, sa = {};
+  var steps = (w === 'inbox' ? [OPS.accept(id, [], st)] : []).concat([OPS.complete(id, todayStr()), OPS.ack(id, which, false, sa)]);
+  var back = [OPS.ack(id, which, true, sa), OPS.reopen(id, i.meta.status || '')].concat(w === 'inbox' ? [OPS.unaccept(id, [], st)] : []);
   commit(op('Mark done ' + id, keys, function (M) { steps.forEach(function (s) { s.fn(M); }); }),
     { toast: 'Done: ' + clip(i.title, 60), undo: op('Undo done ' + id, keys, function (M) { back.forEach(function (s) { s.fn(M); }); }) });
 }
@@ -4240,7 +4461,7 @@ function addQuick() {
   commit(OPS.addTask({ title: it0.title, meta: it0.meta, date: todayStr(), description: it0.description, newProjects: q.prjNew }, out));
   S.qa = ''; S.qaType = null; S.qaUrg = ''; S.qaDesc = ''; S.qaMore = false; forceClear('qa-in'); forceClear('qa-desc');
   var it = out.id ? item(out.id) : null;
-  if (it) toastShow('Added ' + out.id + ' to ' + listName(it) + ' · ' + when(it).label + (q.prjNew.length ? ' · new project ' + q.prjNew.join(', ') : ''), OPS.removeAdded(out.id));
+  if (it) toastShow('Added ' + out.id + ' to ' + listName(it) + ' · ' + when(it).label + (q.prjNew.length ? ' · new project ' + q.prjNew.join(', ') : ''), OPS.removeAdded(out.id, out));
   render();
 }
 function setItemDue(id, date, time) {
@@ -4292,9 +4513,9 @@ function addLink(id, other) {
     if (dependsOn(other, id)) { toastShow(other + ' already depends on ' + id + '. That would make a loop.'); return; }
     commit(OPS.addDep(id, other), { toast: id + ' now depends on ' + other + '.', undo: OPS.removeDep(id, other) });
   } else {
-    var r = relLine(id, other);
+    var r = relLine(id, other), st = {};
     if (r.err) { toastShow(r.err); return; }
-    commit(OPS.addRel(r.line), { toast: 'Relationship added.', undo: OPS.removeRel(r.line) });
+    commit(OPS.addRel(r.line, st), { toast: 'Relationship added.', undo: OPS.removeRel(r.line, st) });
   }
   S.linkQ = ''; forceClear('f-linkq');
   focusLater('#f-linkq');
@@ -4435,7 +4656,8 @@ var ACT = {
     var id = did(el), x = recOf(id);
     if (!x) return;
     var list = commentsOf(x), which = list.filter(toAck).map(function (c) { return [list.indexOf(c), c.v]; });
-    if (which.length) commit(OPS.ack(id, which, false), { toast: 'Acknowledged ' + plural(which.length, 'comment') + ' on ' + id + '.', undo: OPS.ack(id, which, true) });
+    var st = {};
+    if (which.length) commit(OPS.ack(id, which, false, st), { toast: 'Acknowledged ' + plural(which.length, 'comment') + ' on ' + id + '.', undo: OPS.ack(id, which, true, st) });
   },
   'sub-del': function (el) {
     var id = did(el), k = +el.getAttribute('data-i'), i = item(id), s = i ? subsOf(i)[k] : null;
@@ -4521,10 +4743,10 @@ var ACT = {
   'p-remove': function (el) {
     var p = personOf(did(el));
     if (!p) return;
-    var text = pSerItem(p), grp = p.grp, idx = S.m.people.people.indexOf(p), name = p.name;
+    var text = pSerItem(p), grp = p.grp, idx = S.m.people.people.indexOf(p), name = p.name, st = {};
     S.panel = false; S.sel = null;
     if (S.view === 'person' && S.entity === did(el)) go('people');
-    commit(OPS.removePerson(name), { toast: 'Removed ' + name + ' from People.', undo: OPS.restorePerson(text, grp, idx) });
+    commit(OPS.removePerson(name, st), { toast: 'Removed ' + name + ' from People.', undo: OPS.restorePerson(text, grp, idx, st) });
   },
   'e-del': function (el) { S.confirm = 'del:' + did(el); render(); },
   'e-del-no': function () { S.confirm = null; render(); },

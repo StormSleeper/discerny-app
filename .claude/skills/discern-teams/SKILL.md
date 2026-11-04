@@ -61,8 +61,9 @@ Channels listed in `candidate-channels` aren't scanned. When posts in one of the
 - `origin`: `Teams <label> — <sender>, <d Mon>`. The label comes from `chat-labels` when the chat matches, else the channel's name or subject, else "1:1". For asks: `Teams <label> — <user> asked <person>, <d Mon>`.
 - `links`: `[Teams message](<webUrl>)`, plus any document link in the text.
 - `received-datetime`: `createdDateTime`.
+- `interaction`: `message` for a message or mention; `reply` for the user's ask or commitment.
 - `who` on an ask: the person asked, from the text, else from someone else's message in the same chat this run. Still unclear: leave `who` out and say "Addressee unclear." in the description.
-- **Comments** are by `teams`: `discern comment <id> --author teams`, as `match`'s actions give them.
+- **Comments** are by `teams`: `discern comment <id> --author teams`, with `--sender` on news and `--reply-to` on a record of the user's reply or chaser, as `match`'s actions give them. `discern change` takes `--sender` the same way.
 
 ## Known limits
 

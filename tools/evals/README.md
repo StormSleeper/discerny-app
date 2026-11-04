@@ -43,6 +43,7 @@ Every eval runs over the Example: the data folder of a fictional company, Pennyw
 | E23 | outlook-calendar with `transcripts: organizer-only` | Action items owned by others become waiting-for items |
 | E24 | the outlook-calendar scenario run twice; helper tests "meetings…" | Every Meeting goes straight into `TASKS.md` once; moved and cancelled ones are kept in step; the second run changes no item |
 | E25 | outlook-mail and teams-chat, the report; helper tests "commit after a Run…" | A stream source's report ends saying it is caught up, or how many days are still to read; `discern-refresh` runs it again while it isn't, up to 5 Runs |
+| E27 | every source skill, each draft; helper tests "add refuses a draft with no valid interaction…" and "match words its commands…" | Each proposal has the `interaction` its kind calls for; news on a tracked item names its `--sender`, and a record of the user's reply its `--reply-to`, when they're in `PEOPLE.md`; a Meeting writes no event |
 | E26 | `fixtures/outlook-calendar/free`; helper tests "…a free event…" and "meetings drops a free event…" | A free event is a Meeting only when it's tracked and the user declined it: that one is retitled "Cancelled: …"; a tracked one the user accepted and an untracked one are dropped |
 
 Each `<source>.<scenario>.expected.json` also lists the expected results that aren't tied to a numbered eval.

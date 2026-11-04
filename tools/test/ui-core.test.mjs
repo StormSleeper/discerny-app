@@ -14,7 +14,8 @@ function loadCore() {
   const names = ['parse', 'serialize', 'pParse', 'pSerialize', 'eParse', 'eSerialize', 'changesOf', 'changeKey', 'setPriority', 'priorityIds', 'priorityStatus', 'workbench', 'itemMatch', 'quickItem', 'snooze', 'isOverdue',
     'REL_HEAD', 'ASK_HEAD', 'DIS_HEAD', 'descOf', 'setDesc', 'commentsOf', 'toAck', 'addComment', 'byTime', 'tzOf', 'stampIn', 'ITEM_RANK', 'PERSON_RANK',
     'serItem', 'canMerge', 'mergeItem', 'mergeRefs', 'fieldChange', 'changeUndo', 'priorityPaused', 'dueOf', 'setDue', 'receivedOf',
-    'aParse', 'aLine', 'logParse', 'rParse', 'relLine', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings'];
+    'aParse', 'aLine', 'logParse', 'rParse', 'relLine', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings',
+    'INTER_HEAD', 'interactionsOf', 'checkInteractions', 'addInteractions', 'dropInteractions', 'removeInteractions', 'restoreInteractions', 'interactionScore', 'interactionScores', 'decisionLine', 'creditByName', 'creditById', 'acceptEvents', 'ackEvents', 'doneEvents', 'linkedEvents'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)();
 }
@@ -777,4 +778,170 @@ test('priorityPaused uses the days it is given, and 28 when given none', () => {
 test('the Priority pause has no constant of its own: its default is the setting\'s', () => {
   const html = fs.readFileSync(path.join(REPO, 'discerny.html'), 'utf8');
   assert.doesNotMatch(html, /PRIORITY_PAUSE/);
+});
+
+// ---------------------------------------------------------------- The Interaction log
+const logOf = (...lines) => C.INTER_HEAD.join('\n') + '\n' + lines.map(l => l + '\n').join('');
+const PEOPLE_MD = C.pParse(['## Team', '- Imogen Hartley {id: P-0001; manager: Oliver Pemberton}', '- Oliver Pemberton {id: P-0002}', '- Meera Ilangovan {id: P-0003}', '- Tomasz Kowalczyk {id: P-0004}'].join('\n')).people;
+const oneItem = (meta, subs = '') => C.parse(`# Tasks\n- [ ] T-0041 A thing {${meta}}\n${subs}`).items[0];
+
+test('interactionsOf reads events and decisions, keeping their lines, and skips the header', () => {
+  const log = logOf('- 2026-10-22 P-0012 message T-0041', '- 2026-08-03 P-0012 linked T-0017 {inferred: yes}',
+    '- 2026-10-22 P-0012 decision promote {score: 14.2; message: 8.1; comment: 3.6; linked: 2.5; reply: 0; done: 0; half-life-days: 30}');
+  const ev = C.interactionsOf(log);
+  assert.equal(ev.length, 3);
+  assert.deepEqual([ev[0].date, ev[0].person, ev[0].kind, ev[0].item], ['2026-10-22', 'P-0012', 'message', 'T-0041']);
+  assert.equal(ev[1].fields.inferred, 'yes');
+  assert.equal(ev[2].kind, 'decision');
+  assert.equal(ev[2].decision, 'promote');
+  assert.equal(ev[2].fields.score, '14.2');
+  assert.equal(ev[0].line, '- 2026-10-22 P-0012 message T-0041');
+});
+
+test('checkInteractions passes a good log and names the line of a bad date, kind, decision or ID, not a deleted Item', () => {
+  assert.deepEqual(C.checkInteractions(logOf('- 2026-10-22 P-0012 message T-9999', '- 2026-10-22 P-0999 decision no')), []);
+  const head = C.INTER_HEAD.length + 1;
+  const bad = [['- 2026-13-40 P-0012 message T-0041', /date/], ['- 22/10/2026 P-0012 message T-0041', /date/], ['- 2026-10-22 P-0012 waved T-0041', /kind/],
+    ['- 2026-10-22 P-0012 decision maybe', /decision/], ['- 2026-10-22 Meera message T-0041', /P-/], ['- 2026-10-22 P-0012 message PRJ-0041', /T-/], ['- 2026-10-22 P-0012 message', /line|shape/], ['nonsense', /line|shape/]];
+  bad.forEach(([line, re]) => {
+    const e = C.checkInteractions(logOf(line));
+    assert.equal(e.length, 1, line);
+    assert.match(e[0].message, re, line);
+    assert.equal(e[0].line, head, line);
+    assert.match(e[0].message, new RegExp(`INTERACTIONS.md line ${head}`), line);
+  });
+});
+
+test('addInteractions keeps one message, linked and done per Person per Item, repeats comment and reply, and starts a blank file with the header', () => {
+  const ev = (kind, person = 'P-0003', item = 'T-0041', date = '2026-10-22') => ({ date, person, kind, item });
+  let r = C.addInteractions('', [ev('message')]);
+  assert.ok(r.text.startsWith(C.INTER_HEAD[0]));
+  assert.deepEqual(r.added, ['- 2026-10-22 P-0003 message T-0041']);
+  ['message', 'linked', 'done'].forEach(k => {
+    const a = C.addInteractions(logOf(`- 2026-01-01 P-0003 ${k} T-0041 {inferred: yes}`), [ev(k)]);
+    assert.deepEqual(a.added, [], k);
+    assert.equal(C.addInteractions(logOf(`- 2026-01-01 P-0003 ${k} T-0041`), [ev(k, 'P-0004')]).added.length, 1, 'another Person');
+    assert.equal(C.addInteractions(logOf(`- 2026-01-01 P-0003 ${k} T-0041`), [ev(k, 'P-0003', 'T-0042')]).added.length, 1, 'another Item');
+    assert.equal(C.addInteractions('', [ev(k), ev(k)]).added.length, 1, 'twice in one go');
+  });
+  ['comment', 'reply'].forEach(k => {
+    const a = C.addInteractions(logOf(`- 2026-10-22 P-0003 ${k} T-0041`), [ev(k), ev(k)]);
+    assert.equal(a.added.length, 2, k);
+    assert.equal(a.text.split('\n').filter(l => l === `- 2026-10-22 P-0003 ${k} T-0041`).length, 3, k);
+  });
+});
+
+test('dropInteractions takes out one line for each named, even when two are identical', () => {
+  const line = '- 2026-10-22 P-0003 comment T-0041';
+  const log = logOf(line, '- 2026-10-23 P-0003 reply T-0041', line);
+  const now = C.dropInteractions(log, [line]);
+  assert.equal(now.split('\n').filter(l => l === line).length, 1);
+  assert.equal(C.dropInteractions(now, [line]).split('\n').filter(l => l === line).length, 0);
+  assert.ok(C.dropInteractions(logOf(line), [line]).startsWith(C.INTER_HEAD[0]), 'the header stays');
+});
+
+test('removeInteractions and restoreInteractions take a Person out and put every line back where it was', () => {
+  const log = logOf('- 2026-10-20 P-0003 message T-0041', '- 2026-10-21 P-0004 message T-0041', '- 2026-10-22 P-0003 decision no', '- 2026-10-23 P-0004 done T-0041');
+  const r = C.removeInteractions(log, e => e.person === 'P-0003');
+  assert.equal(r.removed.length, 2);
+  assert.equal(C.interactionsOf(r.text).length, 2);
+  assert.equal(C.restoreInteractions(r.text, r.removed), log);
+});
+
+test('the score decays by half-life, uses each kind\'s weight, and adds up to its shares', () => {
+  const v = C.readSettings('').values, log = logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-09-22 P-0003 comment T-0002', '- 2026-10-22 P-0003 reply T-0003', '- 2026-10-22 P-0004 linked T-0004');
+  const s = C.interactionScore(log, 'P-0003', v, '2026-10-22');
+  assert.equal(s.shares.message, 2);
+  assert.equal(s.shares.comment, 1, 'a half-life old');
+  assert.equal(s.shares.reply, 1);
+  assert.equal(s.shares.linked, 0);
+  assert.equal(s.shares.done, 0);
+  assert.equal(s.total, 4);
+  assert.equal(C.interactionScore(log, 'P-0099', v, '2026-10-22').total, 0);
+});
+
+test('the score counts a future date as age 0, counts inferred events the same, and ignores decisions and bad dates', () => {
+  const v = C.readSettings('').values;
+  assert.equal(C.interactionScore(logOf('- 2027-01-01 P-0003 message T-0001'), 'P-0003', v, '2026-10-22').total, 2);
+  assert.equal(C.interactionScore(logOf('- 2026-10-22 P-0003 message T-0001 {inferred: yes}'), 'P-0003', v, '2026-10-22').total, 2);
+  assert.equal(C.interactionScore(logOf('- 2026-10-22 P-0003 decision yes {score: 99}', 'junk', '- nope P-0003 message T-0001'), 'P-0003', v, '2026-10-22').total, 0);
+});
+
+test('the score uses the settings it is given, and the defaults for any it is missing', () => {
+  const log = logOf('- 2026-10-12 P-0003 message T-0001', '- 2026-10-22 P-0003 done T-0001');
+  const set = C.readSettings('[score]\nhalf-life-days = 10\n[weights]\nmessage = 8\ndone = 0\n').values;
+  const s = C.interactionScore(log, 'P-0003', set, '2026-10-22');
+  assert.equal(s.shares.message, 4);
+  assert.equal(s.shares.done, 0);
+  assert.equal(C.interactionScore(log, 'P-0003', undefined, '2026-10-22').shares.done, 1, 'no settings at all');
+  assert.equal(C.interactionScore(log, 'P-0003', { weights: { done: 3 } }, '2026-10-22').shares.done, 3, 'a partial one');
+  assert.equal(C.interactionScore(log, 'P-0003', { weights: { done: 3 } }, '2026-10-22').shares.message, 2 * Math.pow(0.5, 10 / 30));
+});
+
+test('interactionScores gives every Person in the log their score', () => {
+  const all = C.interactionScores(logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-10-22 P-0004 reply T-0001'), C.readSettings('').values, '2026-10-22');
+  assert.equal(all['P-0003'].total, 2);
+  assert.equal(all['P-0004'].total, 1);
+});
+
+test('decisionLine writes the score and each share to one decimal, with the half-life; no score is no braces', () => {
+  const v = C.readSettings('').values, score = C.interactionScore(logOf('- 2026-10-22 P-0003 message T-0001', '- 2026-09-30 P-0003 comment T-0002'), 'P-0003', v, '2026-10-22');
+  assert.equal(C.decisionLine('2026-10-22', 'P-0003', 'promote', score, 30), '- 2026-10-22 P-0003 decision promote {score: 3.2; message: 2; comment: 1.2; linked: 0; reply: 0; done: 0; half-life-days: 30}');
+  assert.equal(C.decisionLine('2026-10-22', 'P-0003', 'no'), '- 2026-10-22 P-0003 decision no');
+});
+
+test('only someone in PEOPLE.md other than the User gets credit, by name or ID', () => {
+  assert.equal(C.creditByName(PEOPLE_MD, 'Meera Ilangovan'), 'P-0003');
+  ['Imogen Hartley', 'Unassigned', 'Nobody Known', '', undefined].forEach(w => assert.equal(C.creditByName(PEOPLE_MD, w), '', String(w)));
+  assert.equal(C.creditById(PEOPLE_MD, 'P-0003'), 'P-0003');
+  ['P-0001', 'P-0999', '', undefined].forEach(w => assert.equal(C.creditById(PEOPLE_MD, w), '', String(w)));
+});
+
+test('acceptEvents follows the Proposal\'s interaction, credits who as it is now, and dates it when received', () => {
+  ['message', 'reply', 'linked'].forEach(k => {
+    const ev = C.acceptEvents(oneItem(`who: Meera Ilangovan; received-datetime: 2026-10-01 09:00; interaction: ${k}`), PEOPLE_MD, '2026-10-22');
+    assert.deepEqual(ev, [{ date: '2026-10-01', person: 'P-0003', kind: k, item: 'T-0041' }], k);
+  });
+  assert.equal(C.acceptEvents(oneItem('who: Meera Ilangovan; received-date: 2026-10-02; interaction: message'), PEOPLE_MD, '2026-10-22')[0].date, '2026-10-02');
+  assert.equal(C.acceptEvents(oneItem('who: Meera Ilangovan; interaction: message'), PEOPLE_MD, '2026-10-22')[0].date, '2026-10-22', 'undated: today');
+  ['interaction: none', '', 'interaction: sideways'].forEach(m => assert.deepEqual(C.acceptEvents(oneItem(`who: Meera Ilangovan; received-date: 2026-10-02; ${m}`), PEOPLE_MD, '2026-10-22'), [], m));
+  ['Imogen Hartley', 'Unassigned', 'Nobody Known'].forEach(w => assert.deepEqual(C.acceptEvents(oneItem(`who: ${w}; interaction: message`), PEOPLE_MD, '2026-10-22'), [], w));
+});
+
+test('ackEvents: news is a comment for its sender, else who; a who change is linked for the new who; calendar, user and agent are nothing', () => {
+  const cm = (fields) => `  - comment: {added-datetime: 2026-10-05 10:00; ${fields}}\n    News.`;
+  const ack = (fields, who = 'Meera Ilangovan') => { const it = oneItem(`who: ${who}`, cm(fields)); return C.ackEvents(it, C.commentsOf(it)[0], PEOPLE_MD, '2026-10-22'); };
+  assert.deepEqual(ack('author: email; acknowledged: no'), [{ date: '2026-10-05', person: 'P-0003', kind: 'comment', item: 'T-0041' }]);
+  assert.equal(ack('author: email; acknowledged: no; sender: P-0004')[0].person, 'P-0004');
+  assert.deepEqual(ack('author: email; acknowledged: no; sender: P-0001'), [], 'the User as sender');
+  assert.deepEqual(ack('author: email; acknowledged: no; sender: P-0999'), [], 'a sender no longer in People');
+  assert.equal(ack('author: email; acknowledged: no; changed: due-date; from: 2026-10-30; to: 2026-11-06; sender: P-0004')[0].kind, 'comment');
+  assert.deepEqual(ack('author: email; acknowledged: no; changed: who; from: Meera Ilangovan; to: Tomasz Kowalczyk', 'Tomasz Kowalczyk'), [{ date: '2026-10-05', person: 'P-0004', kind: 'linked', item: 'T-0041' }]);
+  assert.deepEqual(ack('author: email; acknowledged: no; changed: who; from: Meera Ilangovan; to: Nobody Known'), [], 'to someone not in People');
+  assert.deepEqual(ack('author: email; acknowledged: no; changed: who; from: Meera Ilangovan; to: Imogen Hartley'), [], 'to the User');
+  ['calendar', 'user', 'agent'].forEach(a => assert.deepEqual(ack(`author: ${a}; acknowledged: no`), [], a));
+  assert.deepEqual(ack('author: email; acknowledged: no', 'Nobody Known'), [], 'no sender, and a who not in People');
+  const undated = oneItem('who: Meera Ilangovan', '  - comment: {author: email; acknowledged: no}\n    News.');
+  assert.equal(C.ackEvents(undated, C.commentsOf(undated)[0], PEOPLE_MD, '2026-10-22')[0].date, '2026-10-22');
+});
+
+test('a Comment keeps its sender through being parsed and written', () => {
+  const it = oneItem('who: Meera Ilangovan', '  - comment: {added-datetime: 2026-10-05 10:00; author: email; acknowledged: no; sender: P-0004}\n    News.');
+  assert.match(C.serItem(it), /author: email; acknowledged: no; sender: P-0004\}/);
+});
+
+test('doneEvents and linkedEvents credit only someone who can get credit', () => {
+  assert.deepEqual(C.doneEvents(oneItem('who: Meera Ilangovan'), PEOPLE_MD, '2026-10-22'), [{ date: '2026-10-22', person: 'P-0003', kind: 'done', item: 'T-0041' }]);
+  assert.deepEqual(C.doneEvents(oneItem('who: Unassigned'), PEOPLE_MD, '2026-10-22'), []);
+  assert.deepEqual(C.doneEvents(oneItem('type: task'), PEOPLE_MD, '2026-10-22'), []);
+  assert.deepEqual(C.linkedEvents('P-0003', 'T-0041', '2026-10-22'), [{ date: '2026-10-22', person: 'P-0003', kind: 'linked', item: 'T-0041' }]);
+  assert.deepEqual(C.linkedEvents('', 'T-0041', '2026-10-22'), []);
+});
+
+test('mergeRefs moves a duplicate\'s events to the survivor, collapses one-per-Item kinds, keeps repeats, and leaves others alone', () => {
+  const lines = ['# Interactions', '- 2026-10-01 P-0003 message T-0001', '- 2026-10-02 P-0003 message T-0002', '- 2026-10-02 P-0004 linked T-0002', '- 2026-10-03 P-0003 comment T-0001', '- 2026-10-03 P-0003 comment T-0002', '- 2026-10-03 P-0003 decision no', '- 2026-10-04 P-0003 done T-0003'];
+  const r = C.mergeRefs('interactions', lines, 'T-0002', 'T-0001');
+  assert.deepEqual(r.lines, ['# Interactions', '- 2026-10-01 P-0003 message T-0001', '- 2026-10-02 P-0004 linked T-0001', '- 2026-10-03 P-0003 comment T-0001', '- 2026-10-03 P-0003 comment T-0001', '- 2026-10-03 P-0003 decision no', '- 2026-10-04 P-0003 done T-0003']);
+  assert.equal(r.swaps.filter(s => s[1] === null).length, 1);
+  assert.deepEqual(r.swaps.find(s => s[1] === null).slice(0, 2), ['- 2026-10-02 P-0003 message T-0002', null]);
 });

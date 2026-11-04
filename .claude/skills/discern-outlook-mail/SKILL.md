@@ -57,10 +57,11 @@ An `exclude-subject` rule that drops Accepted or Tentative replies, such as `^(A
 
 - `origin`: `Email "<subject>" from <sender name> (<d Mon>)`; for sent mail, `Email "<subject>" sent to <recipient addresses> (<d Mon>)`.
 - `received-datetime`: `receivedDateTime`, or `sentDateTime` for sent mail.
+- `interaction`: `message` for inbound mail, including a reply to an invite; `reply` for a sent-mail ask or the user's own commitment.
 - `who` on sent-mail items: the main recipient, which `match` returns from `recipient`.
 - `links`: only a URL in the mail the user needs, such as a document or form.
 - **Reply to an invite:** `type: task`, `priority: medium`, urgency by the shared policy from its `due-date`; the description says what the reply asks or proposes.
-- **Comments** are by `email`: `discern comment <id> --author email`, as `match`'s actions give them.
+- **Comments** are by `email`: `discern comment <id> --author email`, with `--sender` on news and `--reply-to` on a record of the user's reply or chaser, as `match`'s actions give them. `discern change` takes `--sender` the same way.
 
 ## Known limits
 

@@ -35,6 +35,11 @@
       "eval": "-",
       "event": "state",
       "result": "last-run 2026-10-12T16:00:00Z and a last-result line; the next-id counter is unchanged at 32; no watermark; discern check passes."
+    },
+    {
+      "eval": "E27",
+      "message": "every Meeting",
+      "result": "INTERACTIONS.md is unchanged by the run: a Meeting existing, moving or being cancelled counts for nothing."
     }
   ]
 }

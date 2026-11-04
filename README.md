@@ -118,7 +118,8 @@ A Link's view and item keep working in later versions of the app. If the item ha
 | `REFERENCE.md` | Web addresses, people's details and other things you look up often |
 | `ASK-AGENT.md`, `ASK-AGENT-LOG.md` | The agent queue: requests waiting for your agent, and a record of what it did with them |
 | `SOURCES.md`, `IGNORED.md`, `DISMISSED.md` | Bookkeeping for source skills: shared settings such as your time zone, how far each source has been read, what was ignored, so it's never proposed again, and what you dismissed, so the same message isn't proposed twice |
-| `SETTINGS.toml` | Settings you edit by hand: how long someone isn't proposed as a Priority person after you demote them or say No (`pause-days`), and how the Interaction score will count once it's in the app. A setting that's missing or invalid uses its default, `discern check` reports an invalid one, and the UI tells you which it ignored. Discerny never writes this file, and a change applies when you reload the page |
+| `INTERACTIONS.md` | A log of your dealings with people: what you let through the inbox, who you tied to what, and your decisions about Priority people. Discerny keeps it up to date, and it stays on your machine |
+| `SETTINGS.toml` | Settings you edit by hand: how long someone isn't proposed as a Priority person after you demote them or say No (`pause-days`), and how the Interaction score counts. A setting that's missing or invalid uses its default, `discern check` reports an invalid one, and the UI tells you which it ignored. Discerny never writes this file, and a change applies when you reload the page |
 | `REFRESH-LOG.md` | A record of each source-skill run, created on the first run |
 | `drafts/` | Messages your agent drafted for you. They are never sent |
 
@@ -138,6 +139,8 @@ A Link's view and item keep working in later versions of the app. If the item ha
 `discerny.html` is the UI: Today, Inbox, Next actions, Waiting for, Upcoming, FYI, All items, Projects, People, Systems, Weekly review, Done and an Agent page, with search (Ctrl K), undo and dark mode.
 
 You choose your Priority people, whose messages source skills always capture. Promote or Demote anyone on the People page or their record, and filter People to see who's on the list. Your manager always counts. Skills can propose adding someone, but never removing them, and they won't propose someone again for a while after you demote them or say No: 28 days, unless you change `pause-days` in `SETTINGS.toml`.
+
+Discerny also keeps a log of your dealings with people in `INTERACTIONS.md`. An entry is written once something is past the inbox: when you accept a proposal or acknowledge news, when you tie someone to an item yourself by setting its person or adding an `involves` relationship, and when you complete an item with a person. Undo takes an entry back. Dismissed messages leave no trace, and a meeting on your calendar counts for nothing unless you tie someone to it yourself. The log also records your Promote, Demote, Yes and No decisions, with what the score was at the time. The score isn't shown in the UI yet. An Upgrade builds a first log from your existing items, marking each line `inferred: yes`, and shows you what it will write first.
 
 ### Version
 

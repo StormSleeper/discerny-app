@@ -6,7 +6,7 @@
 //   node tools/discern.mjs <command> [args] [--dir <folder>] [--now <ISO time>]
 //   node tools/discern.mjs --version   prints the app's version (VERSION in discerny.html)
 //
-// Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, comment, change, ref, commit, log, check, upgrade, serve.
+// Commands: connect, new, state, match, who, local, add, propose, meetings, ignore, comment, change, interaction, ref, commit, log, check, upgrade, serve.
 // Input for match, add, propose, meetings, ignore and log comes on stdin (JSON, or text for log); output is JSON on stdout.
 // Exit codes: 0 done, 1 invalid input (the message says what to fix), 2 the user must decide.
 // Every command but connect, new, check, upgrade and --version refuses a data folder in another Format, with exit 2.
@@ -32,7 +32,7 @@ const DAY = 864e5, HOUR = 36e5;
 
 // ---------------------------------------------------------------- arguments and output
 const argv = process.argv.slice(2);
-const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '', port: '4790', author: '', ack: false, field: null, to: null, suggests: '' };
+const OPT = { dir: '', now: process.env.DISCERN_NOW || '', write: false, dry: false, zone: '', one: false, done: '', port: '4790', author: '', ack: false, field: null, to: null, suggests: '', sender: null, replyTo: null, kind: '', person: null };
 const ARGS = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -49,6 +49,10 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--field') OPT.field = argv[++i] || '';
   else if (a === '--to') OPT.to = argv[++i] ?? '';
   else if (a === '--suggests') OPT.suggests = argv[++i] || '';
+  else if (a === '--sender') OPT.sender = argv[++i] ?? '';
+  else if (a === '--reply-to') OPT.replyTo = argv[++i] ?? '';
+  else if (a === '--kind') OPT.kind = argv[++i] || '';
+  else if (a === '--person') OPT.person = argv[++i] ?? '';
   else ARGS.push(a);
 }
 // ---------------------------------------------------------------- the shared parser from the UI
@@ -59,7 +63,8 @@ function loadCore() {
   if (a < 0 || b < a) fail('no //<core> ... //</core> block found in discerny.html next to tools/');
   const names = ['VERSION', 'FORMAT', 'versionCmp', 'formatOf', 'formatIs', 'parse','serItem', 'nextId', 'getSub', 'pParse', 'eParse', 'TYPES', 'URG_ORDER', 'STATUS', 'PRIORITIES', 'FILES', 'WATCH',
     'CHANGES_HEAD', 'changesOf', 'changeKey', 'relLine', 'REL_RE', 'NOTE_RE', 'LOG_RE', 'serSub', 'placeSub', 'ITEM_RANK', 'PERSON_RANK', 'ENT_RANK', 'setDesc', 'addComment', 'USER_ID',
-    'pSerItem', 'commentsOf', 'CHANGE_FIELDS', 'fieldChange', 'priorityPaused', 'dueOf', 'setDue', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings', 'SETTINGS_FILE'];
+    'pSerItem', 'commentsOf', 'CHANGE_FIELDS', 'fieldChange', 'priorityPaused', 'dueOf', 'setDue', 'ignoredOf', 'ignoredLine', 'addHistory', 'parseToml', 'readSettings', 'SETTINGS_FILE',
+    'INTERACTIONS_FILE', 'INTER_HEAD', 'PROPOSAL_INTERACTIONS', 'addInteractions', 'checkInteractions', 'creditById', 'creditByName', 'linkedEvents'];
   const ret = '{' + names.map(n => `${n}: typeof ${n} === 'undefined' ? undefined : ${n}`).join(', ') + '}';
   try { return new Function(`'use strict';\n${html.slice(a + 8, b)}\n;return ${ret};`)(); }
   catch (e) { fail(`the //<core> block in discerny.html did not load: ${e.message}`); }
@@ -414,12 +419,15 @@ function dMon(date) { const m = /^\d{4}-(\d{2})-(\d{2})/.exec(date || ''); retur
 const firstName = (name, or) => name ? name.split(/\s+/)[0] : or;
 // The command that adds a Comment to the Item a candidate matched: one to acknowledge carries news from someone else.
 const oneOf = ids => ids.length === 1 ? ids[0] : `<whichever of ${ids.join(', ')} it is about>`;
+// News names who it came from, and a record of the user's own reply names who it went to, when they're in PEOPLE.md. A calendar's Comments count for no one.
 function commentCmd(ids, c, text, ack, done) {
-  return `discern comment ${oneOf(ids)} --author ${c.author}${ack ? ' --to-acknowledge' : ''}${done ? ' --suggests done' : ''} "${text}"`;
+  const whom = !c.who || c.author === AUTHOR.cal ? '' : ack ? ` --sender "${c.who}"` : ` --reply-to "${c.who}"`;
+  return `discern comment ${oneOf(ids)} --author ${c.author}${ack ? ' --to-acknowledge' : ''}${done ? ' --suggests done' : ''}${whom} "${text}"`;
 }
 // The command that applies news changing one of an Item's fields, with a Comment for the user to acknowledge.
 function changeCmd(ids, c, field, to) {
-  return `discern change ${oneOf(ids)} --author ${c.author} --field ${field || '<due-date, due-time, status or who>'} --to "${to || '<the new value>'}" "<why, in a sentence>"`;
+  const whom = !c.who || c.author === AUTHOR.cal ? '' : ` --sender "${c.who}"`;
+  return `discern change ${oneOf(ids)} --author ${c.author}${whom} --field ${field || '<due-date, due-time, status or who>'} --to "${to || '<the new value>'}" "<why, in a sentence>"`;
 }
 const NEWS = '<the news, in a sentence>';
 
@@ -731,13 +739,50 @@ function checkAuthor(author) {
   if (!/^[a-z]+$/.test(author)) fail(`--author must be one lowercase word: the Skill's (email, calendar, teams), or agent for a request from the agent queue`);
   if (author === 'user') fail('only the user writes Comments as user, in the UI: give your Skill\'s word, or agent');
 }
+// --sender says who the news is from, and --reply-to who a reply went to: each a name, address, handle or P-ID, and someone not in
+// PEOPLE.md is left off rather than refused. A record of the user replying or chasing writes a reply event at once, for --reply-to, else the Item's who.
+const USERS_REPLY = /^(You replied|Chased)\b/;
 CMD.comment = function () {
   const [, id, ...rest] = ARGS, text = rest.join(' ').replace(/\r\n?/g, '\n').trim(), author = OPT.author.trim();
-  if (!id || !/^(T|P|PRJ|SYS)-\d+$/.test(id) || !text || !author) fail('usage: discern comment <id> --author <word> [--to-acknowledge [--suggests done]] <text>');
+  if (!id || !/^(T|P|PRJ|SYS)-\d+$/.test(id) || !text || !author) fail('usage: discern comment <id> --author <word> [--to-acknowledge [--suggests done]] [--sender <person>] [--reply-to <person>] <text>');
   checkAuthor(author);
   if (OPT.suggests && (OPT.suggests !== 'done' || !OPT.ack || !/^T-/.test(id))) fail('--suggests takes only done, with --to-acknowledge, on an Item: news that it is finished, which the user marks done');
-  const at = local(nowDate(), timezone()), fields = OPT.suggests ? { suggests: 'done' } : null;
-  out({ id, author, 'added-datetime': at, acknowledge: OPT.ack, ...(fields || {}), ...editSubs(id, (x, rank) => { C.addComment(x, { at, author, ack: OPT.ack, text, fields }, rank); }) });
+  const at = local(nowDate(), timezone()), P = people(), sender = senderId(OPT.sender, P), fields = { ...(OPT.suggests ? { suggests: 'done' } : {}), ...(sender ? { sender } : {}) };
+  let who = '';
+  const res = editSubs(id, (x, rank) => { who = x.meta.who || ''; C.addComment(x, { at, author, ack: OPT.ack, text, fields }, rank); });
+  // Still in the Inbox, it counts for nothing yet, and a Record's Comment never does.
+  const reply = /^T-/.test(id) && res.file === 'TASKS.md' && (OPT.replyTo !== null || USERS_REPLY.test(text)) ? (OPT.replyTo !== null && senderId(OPT.replyTo, P)) || C.creditByName(P, who) : '';
+  if (reply) writeEvents([{ date: at.slice(0, 10), person: reply, kind: 'reply', item: id }]);
+  out({ id, author, 'added-datetime': at, acknowledge: OPT.ack, ...fields, ...(reply ? { reply } : {}), ...res });
+};
+
+// someone a command names: a name, address, handle or P-ID -> their P-ID, or '' for no one, or for the user, who never gets an event
+function senderId(q, P) {
+  const s = String(q || '').trim();
+  if (!s) return '';
+  const p = P.find(x => x.meta.id === s) || findPerson(s, P);
+  return p ? C.creditById(P, p.meta.id) : '';
+}
+// Writes events to INTERACTIONS.md, keeping its line endings -> the lines written, one-per-Item kinds not repeating
+function writeEvents(events) {
+  const f = C.INTERACTIONS_FILE, was = read(f), eol = eolOf(was || '\n'), r = C.addInteractions(was.replace(/\r\n/g, '\n'), events);
+  if (r.added.length) write(f, r.text.replace(/\n/g, eol));
+  return r.added;
+}
+
+// An Agent working at the user's request records what the UI would have: linked when it sets who, done when it completes an Item.
+CMD.interaction = function () {
+  const id = ARGS[1], kind = OPT.kind, usage = 'usage: discern interaction <T-id> --kind linked|done --person <person>';
+  if (!id || !/^T-\d+$/.test(id) || !OPT.person) fail(usage);
+  if (kind !== 'linked' && kind !== 'done') fail(`--kind must be linked or done, not "${kind}": the others are written when the user accepts or acknowledges. ${usage}`);
+  if (itemAt(id, ['INBOX.md'])) fail(`${id} is still waiting in the Inbox, where nothing counts yet`);
+  if (!itemAt(id, ['TASKS.md', 'DONE.md'])) fail(`${id} is not in TASKS.md or DONE.md`);
+  const P = people(), q = String(OPT.person).trim(), p = P.find(x => x.meta.id === q) || findPerson(q, P);
+  if (!p) fail(`--person "${q}" is not in PEOPLE.md: a name, address, handle or P-ID of someone there`);
+  const person = C.creditById(P, p.meta.id);
+  if (!person) { out({ id, kind, recorded: false, why: `${p.name} is the user, who never gets an event` }); return; }
+  const date = local(nowDate(), timezone()).slice(0, 10), added = writeEvents([{ date, person, kind, item: id }]);
+  out(added.length ? { id, kind, person, date, recorded: true } : { id, kind, person, recorded: false, why: `${person} already has ${kind} on ${id}: there's one per Person per Item` });
 };
 
 // A Skill applies news that changes one of an Item's or a Person's fields itself, with a Comment to acknowledge naming the field,
@@ -751,7 +796,7 @@ const OLD_FIELDS = { due: 'due-date or due-time', st: 'status', co: 'company', d
   prj: 'projects', tg: 'tags', dep: 'dependencies', ty: 'type', done: 'done-date' };
 CMD.change = function () {
   const [, id, ...rest] = ARGS, why = rest.join(' ').replace(/\r\n?/g, '\n').trim(), author = OPT.author.trim();
-  if (!id || !why || !author || !OPT.field || OPT.to === null) fail('usage: discern change <id> --author <word> --field <field> --to <value> <why>');
+  if (!id || !why || !author || !OPT.field || OPT.to === null) fail('usage: discern change <id> --author <word> --field <field> --to <value> [--sender <person>] <why>');
   checkAuthor(author);
   const kind = id.split('-')[0], allowed = C.CHANGE_FIELDS[kind], field = OPT.field;
   if (!/^(T|P)-\d+$/.test(id)) fail(`${id} is not an Item or a Person: a Skill changes fields only on those. Give other news as a Comment: discern comment ${id} --author ${author} --to-acknowledge "<the news>"`);
@@ -761,7 +806,9 @@ CMD.change = function () {
   if (kind === 'T' && USERS_OWN.includes(field)) fail(`${field} is the user's own judgement: a Skill never changes it on an existing Item. On an Item it changes ${allowed.join(', ')}`);
   if (!allowed.includes(field)) fail(`on ${kind === 'T' ? 'an Item' : 'a Person'} discern change takes --field ${allowed.join(', ')}, not ${field}`);
   let to = cleanMeta(OPT.to);
-  const names = new Set(people().map(p => p.name));
+  const P = people(), names = new Set(P.map(p => p.name));
+  // A change of who counts for the new who, whoever brought the news.
+  const sender = field === 'who' ? '' : senderId(OPT.sender, P);
   if (field === 'due-date' && !/^\d{4}-\d{2}-\d{2}$/.test(to)) fail('--to for due-date must be YYYY-MM-DD; a time goes in due-time');
   if (field === 'due-time' && to && !/^\d{2}:\d{2}$/.test(to)) fail('--to for due-time must be HH:MM, or "" to clear it');
   if (field === 'status') {
@@ -780,10 +827,10 @@ CMD.change = function () {
     if (C.commentsOf(x).some(c => { const g = C.fieldChange(c); return g && g.field === field && g.to === to; })) { skip = `${id} already has a Comment changing ${field} to ${to ? `"${to}"` : 'empty'}: a change applies once`; return false; }
     if (to) x.meta[field] = to; else delete x.meta[field];
     if (kind === 'P') { C.addHistory(x, today, field, from, to); x.meta['checked-date'] = today; }
-    C.addComment(x, { at, author, ack: true, text: why, fields: { changed: field, from, to } }, rank);
+    C.addComment(x, { at, author, ack: true, text: why, fields: { changed: field, from, to, ...(sender ? { sender } : {}) } }, rank);
   }, true);
   if (noDay) fail(`${id} has no due-date, so it can't take a due-time: change its due-date first`);
-  out(skip ? { id, field, unchanged: true, why: skip, file: res.file } : { id, field, from, to, author, 'added-datetime': at, file: res.file });
+  out(skip ? { id, field, unchanged: true, why: skip, file: res.file } : { id, field, from, to, author, 'added-datetime': at, ...(sender ? { sender } : {}), file: res.file });
 };
 function itemAt(id, files) { return files.some(f => itemLine(read(f).split(/\r?\n/), id) >= 0); }
 
@@ -813,6 +860,7 @@ CMD.add = function () {
     if (!C.TYPES.includes(d.type)) e(`type must be one of ${C.TYPES.join(', ')}`);
     if (!C.URG_ORDER.includes(d.urgency)) e(`urgency must be one of ${C.URG_ORDER.join(', ')}`);
     if (!C.PRIORITIES.includes(d.priority)) e(`priority must be one of ${C.PRIORITIES.join(', ')}`);
+    if (!C.PROPOSAL_INTERACTIONS.includes(d.interaction)) e(`interaction must be one of ${C.PROPOSAL_INTERACTIONS.join(', ')}: what it counts as for the who it has when the user accepts it`);
     if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) e('due-date must be YYYY-MM-DD; a time goes in due-time');
     if (dueTime && !/^\d{2}:\d{2}$/.test(dueTime)) e('due-time must be HH:MM');
     if (dueTime && !dueDate) e('due-time goes only beside a due-date');
@@ -847,7 +895,7 @@ CMD.add = function () {
     const meta = { type: d.type, who: d.who ? cleanMeta(d.who) : undefined, projects: prj.length ? prj.join(', ') : undefined,
       tags: listOf(d.tags).map(t => cleanMeta(t)).filter(Boolean).join(', ') || undefined,
       urgency: d.urgency, priority: d.priority, 'due-date': dueDate || undefined, 'due-time': dueTime || undefined, status: d.status || undefined,
-      dependencies: listOf(d.dependencies).join(', ') || undefined, 'received-datetime': received, source };
+      dependencies: listOf(d.dependencies).join(', ') || undefined, 'received-datetime': received, interaction: d.interaction, source };
     Object.keys(meta).forEach(k => { if (meta[k] === undefined || meta[k] === '') delete meta[k]; else meta[k] = cleanMeta(meta[k]); });
     const x = { subs: [{ k: 'origin', v: String(d.origin || '').replace(/[\r\n]+/g, ' ') }] };
     if (typeof d.description === 'string') C.setDesc(x, d.description, C.ITEM_RANK);
@@ -1150,7 +1198,7 @@ const OLD_SHAPES = {
 };
 CMD.check = function () {
   const errors = [], warnings = [];
-  const files = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'SOURCES.md'];
+  const files = ['TASKS.md', 'INBOX.md', 'DONE.md', 'PEOPLE.md', 'PROJECTS.md', 'SYSTEMS.md', 'SOURCES.md', C.INTERACTIONS_FILE];
   files.forEach(f => { if (fs.existsSync(fp(f)) && !read(f).trim()) errors.push(`${f} is empty`); });
   const sets = { 'TASKS.md': C.parse(read('TASKS.md')), 'INBOX.md': C.parse(read('INBOX.md')), 'DONE.md': C.parse(read('DONE.md')) };
   const seen = {}, all = new Set();
@@ -1165,6 +1213,7 @@ CMD.check = function () {
     oldKeys(where, it.meta, OLD_ITEM_KEYS);
     oneOf(where, it.meta, 'type', C.TYPES); oneOf(where, it.meta, 'urgency', C.URG_ORDER); oneOf(where, it.meta, 'priority', C.PRIORITIES);
     oneOf(where, it.meta, 'status', ['waiting', 'in progress']);
+    oneOf(where, it.meta, 'interaction', C.PROPOSAL_INTERACTIONS);
     if (it.meta['due-time'] && !it.meta['due-date']) warnings.push(`${where}: due-time goes only beside a due-date`);
     subLines(f, it.id, it);
     C.getSub(it, 'source-key').forEach(s => { if (!/^[a-z][a-z0-9-]*\|./i.test(s.v.trim())) errors.push(`${where}: source key "${s.v}" has no scheme`); });
@@ -1185,6 +1234,7 @@ CMD.check = function () {
       if (g && Object.hasOwn(old, g.field)) errors.push(`${said} has changed: ${g.field}, the name an older Format gave ${old[g.field]}, which is not read: run discern upgrade`);
       else if (g && !(C.CHANGE_FIELDS[kind] || []).includes(g.field)) warnings.push(`${said} has changed: ${g.field}, a field no Skill changes${C.CHANGE_FIELDS[kind] ? ` there: only ${C.CHANGE_FIELDS[kind].join(', ')}` : ''}`);
       if (c.f.suggests !== undefined && (c.f.suggests !== 'done' || kind !== 'T')) warnings.push(`${said} has suggests: ${c.f.suggests}: only an Item's Comment suggests, and only done`);
+      if (c.f.sender !== undefined && !/^P-\d+$/.test(c.f.sender)) warnings.push(`${said} has sender: ${c.f.sender}: it is a Person's ID, P-####`);
       if (!c.v.trim()) warnings.push(`${said} has no text`);
     });
   }
@@ -1224,6 +1274,7 @@ CMD.check = function () {
   if (!S.blocks.defaults) warnings.push('SOURCES.md has no "## defaults" block');
   else if (!val(S.blocks.defaults, 'timezone')) warnings.push('SOURCES.md defaults has no timezone');
   Object.values(S.blocks).forEach(b => Object.keys(b.keys).filter(k => k.includes('_')).forEach(k => errors.push(`SOURCES.md ## ${b.name}: ${k} is the name an older Format gave it, and is not read: run discern upgrade, or write it with hyphens`)));
+  C.checkInteractions(read(C.INTERACTIONS_FILE)).forEach(e => errors.push(e.message));
   const set = settings();
   set.errors.forEach(e => errors.push(e.message));
   set.warnings.forEach(w => warnings.push(w.message));
@@ -1404,7 +1455,7 @@ if (cmd === '--version' || cmd === 'version') {
   process.exit(0);
 }
 if (!cmd || !CMD[cmd]) {
-  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|comment|change|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
+  process.stdout.write('usage: node tools/discern.mjs <connect|new|state|match|who|local|add|propose|meetings|ignore|comment|change|interaction|ref|commit|log|check|upgrade|serve> [args] [--dir <folder>] [--now <ISO>]\nSee SOURCE-SKILLS.md for what each command does.\n');
   process.exit(cmd ? 1 : 0);
 }
 // serve starts with no usable folder when it can switch to one, so the page can offer Change folder.

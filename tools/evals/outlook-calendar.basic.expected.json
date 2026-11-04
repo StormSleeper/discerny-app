@@ -75,6 +75,16 @@
       "eval": "-",
       "event": "state",
       "result": "last-run 2026-10-12T16:00:00Z and a last-result line with meetings +5; no watermark; discern check passes."
+    },
+    {
+      "eval": "E27",
+      "message": "every proposal",
+      "result": "Each prep and \"Respond to invite\" proposal has interaction: none, and a transcript's action item has interaction: linked."
+    },
+    {
+      "eval": "E27",
+      "message": "every Meeting",
+      "result": "discern meetings writes no line in INTERACTIONS.md, and its Comments are by calendar with no sender. INTERACTIONS.md is unchanged by the run."
     }
   ]
 }

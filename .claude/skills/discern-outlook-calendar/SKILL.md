@@ -50,10 +50,10 @@ Each `discern match` candidate: `{"key": <id>, "scheme": "cal", "subject": ..., 
 ## Item specifics
 
 - **Meeting:** written by `discern meetings`: the event's subject as title, `type: meeting`, `who` the organiser (left out when the user organises or isn't in `PEOPLE.md`), `priority: medium`, `due-date` and `due-time` its local start, `origin: Calendar "<subject>" organised by <organiser>` and `[Outlook event](<webLink>)`.
-- **Prep:** title "Prepare for <meeting> (<d Mon HH:MM>)", `type: task`, `who` the organiser (left out when the user organises), `priority: medium` (`high` when a priority person asks for something specific). `origin`: `Calendar "<subject>" organised by <organiser>, <d Mon HH:MM>–<HH:MM>`. The description says why prep is needed; `links` are `[Outlook event](<webLink>)` and any agenda or pre-read link.
-- **Invite:** title "Respond to invite: <meeting> (<d Mon HH:MM>)", `type: task`, `priority: low`, `origin: Calendar invite from <organiser>`, and the description "No response recorded; starts <d Mon HH:MM>.".
-- **Comments** are by `calendar`: `discern comment <id> --author calendar`.
-- **Transcript:** title is the action item, or the waiting-for title for someone else's. `origin: Transcript of "<subject>" (<d Mon>)`.
+- **Prep:** title "Prepare for <meeting> (<d Mon HH:MM>)", `type: task`, `who` the organiser (left out when the user organises), `priority: medium` (`high` when a priority person asks for something specific). `origin`: `Calendar "<subject>" organised by <organiser>, <d Mon HH:MM>–<HH:MM>`. The description says why prep is needed; `links` are `[Outlook event](<webLink>)` and any agenda or pre-read link. `interaction: none`.
+- **Invite:** title "Respond to invite: <meeting> (<d Mon HH:MM>)", `type: task`, `priority: low`, `origin: Calendar invite from <organiser>`, `interaction: none`, and the description "No response recorded; starts <d Mon HH:MM>.".
+- **Comments** are by `calendar`: `discern comment <id> --author calendar`. They name no `--sender`, as they count for no one.
+- **Transcript:** title is the action item, or the waiting-for title for someone else's. `origin: Transcript of "<subject>" (<d Mon>)`, `interaction: linked`.
 
 ## Known limits
 

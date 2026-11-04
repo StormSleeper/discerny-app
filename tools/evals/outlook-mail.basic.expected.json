@@ -110,6 +110,21 @@
       "eval": "-",
       "message": "state",
       "result": "watermark 2026-10-12T16:00:00Z, waiting-checked-through 2026-10-11T16:00:00Z, last-run 2026-10-12T16:00:00Z; discern check passes."
+    },
+    {
+      "eval": "E27",
+      "message": "every proposal",
+      "result": "Each proposal in INBOX.md has an interaction: message for inbound mail and a reply to an invite, reply for a sent-mail ask or commitment. The inbound proposals from E1 and E2 are message; a sent-mail ask is reply."
+    },
+    {
+      "eval": "E27",
+      "message": "m-104",
+      "result": "Helena's reply carries --sender, so the Comment has sender: P-0021. INTERACTIONS.md gains nothing until the user acknowledges it."
+    },
+    {
+      "eval": "E27",
+      "message": "s-201, s-202",
+      "result": "The chaser and the reply carry --reply-to, or none where the recipient is not in PEOPLE.md. INTERACTIONS.md gains a reply dated the run date for each, credited to the person replied to, else the item's who: P-0020 on T-0007 and P-0010 on T-0009."
     }
   ]
 }
