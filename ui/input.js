@@ -1,0 +1,907 @@
+// The input concern: turns clicks, keys and typing into ops and links calls, with navigation, selection, focus, dialogs and opening a folder.
+// It never builds markup. Everything it shares is on D.input, and the rest stays private to this file. The one thing it calls from the
+// page itself is setThemeColor, which the page's head defines so that it runs before first paint.
+(function () {
+'use strict';
+var S = D.model.S;
+
+/* ===================== retrying a save, and noticing edits from outside ===================== */
+async function regainAccess() {
+  if (D.files.srv) {
+    // A server started again on another folder: reload rather than save this folder's changes into it.
+    var was = D.files.srv.folder;
+    if (!(await D.files.serverInfo())) return false;
+    if (D.files.srv.folder !== was) { location.reload(); return false; }
+    S.lost = false;
+    return true;
+  }
+  try { var p = await D.files.dir.requestPermission({ mode: 'readwrite' }); if (p === 'granted') { S.lost = false; return true; } } catch (e) { /* not allowed without a click */ }
+  return false;
+}
+async function retrySave() {
+  if (S.lost && !(await regainAccess())) { D.render.render(); return; }
+  D.files.Q.blocked = null;
+  D.files.kick();
+}
+async function poll() {
+  if (!S.ready || S.moved || D.files.Q.running || D.files.Q.jobs.length || D.files.Q.blocked || document.hidden) return;
+  try {
+    var changed = false;
+    var mt = D.files.srv ? await D.files.serverMtimes() : null;
+    for (var i = 0; i < WATCH.length; i++) { var t = mt ? mt[WATCH[i]] || 0 : await D.files.modOf(WATCH[i]); if (t !== (D.files.lastMod[WATCH[i]] || 0)) { changed = true; break; } }
+    if (changed) D.files.requestSync(true);
+    else if (Date.now() - (S.lastSync || 0) > 30000) D.files.requestSync(false);
+  } catch (e) { if (D.files.isMoved(e)) { S.moved = true; D.render.render(); } else if (D.files.isPermErr(e)) { S.lost = true; D.render.render(); } }
+}
+
+/* ===================== the All items filters ===================== */
+function setWb(p) { for (var k in p) S.wb[k] = p[k]; D.model.lsSet('discerny-wb', JSON.stringify(S.wb)); D.render.render(); }
+
+/* ===================== acting on a Link ===================== */
+// sets the View's state from the Link, a key it leaves out to its default, and names what this version doesn't know.
+// -> the Side panel's tab for the Item the Link names
+function openState(pairs, withItem) {
+  var keys = D.links.LINK_STATE[S.view] || {}, own = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); }, tab = 'details', bad = [];
+  Object.keys(keys).forEach(function (k) { keys[k].set(keys[k].def); });
+  pairs.forEach(function (p) {
+    var k = p[0], v = p[1], d = own(keys, k) ? keys[k] : null;
+    if (k === 'tab' && withItem && own(D.links.TAB_LINK, v)) tab = D.links.TAB_LINK[v];
+    else if (d && (!d.vals || own(d.vals, v))) d.set(d.vals ? d.vals[v] : v);
+    else bad.push(k + (v ? '=' + v : ''));
+  });
+  if (bad.length) D.ops.toastShow('This version doesn’t know ' + bad.join(', ') + ' in this Link, so it opened without ' + (bad.length > 1 ? 'them.' : 'it.'));
+  return tab;
+}
+// the Item an ID in a Link names now: itself, or the Item it was merged into, and says so
+function linkTarget(id) {
+  if (D.model.whereOf(id)) return id;
+  var to = D.links.mergedInto(id);
+  if (to) D.ops.toastShow(id + ' was merged into ' + to + ', so here’s ' + to + '.');
+  return to;
+}
+// a View's own rows hold what is on it. The Item's home View counts whatever it shows: Done loads only some of its Items.
+function onThisView(id) {
+  var b = D.views.viewFor().body;
+  return S.view === D.model.homeView(D.model.item(id)) || b.indexOf('data-row="' + id + '"') >= 0 || b.indexOf('data-k="ack-' + id + '"') >= 0;
+}
+function openLink(link, state) {
+  var parts = link.split('/'), it = (parts[1] || '').toUpperCase(), bare = parts[0].toUpperCase(), tab, to;
+  if (!it && kindOf(bare) === 'T' && /^T-\d+$/.test(bare)) {
+    to = linkTarget(bare);
+    if (to) { go(D.model.homeView(D.model.item(to))); tab = openState(state, true); select(to, { tab: tab }); }
+    else { go('today'); D.ops.toastShow(bare + ' isn’t in this Data folder, so here’s Today.'); openState(state, true); }
+    return;
+  }
+  var named = openView(parts[0]);
+  tab = openState(state, !!it);
+  if (!it) return;
+  to = linkTarget(it);
+  if (!to) { D.ops.toastShow(it + ' isn’t in this Data folder.'); return; }
+  select(to, { tab: tab });
+  if (named && !onThisView(to)) D.links.nav.offView = to;
+}
+// -> whether the View the Link names is the one that opened
+function openView(link) {
+  if (!link) { go('today'); return false; }
+  var v = D.links.LINK_VIEW[link.toLowerCase()];
+  if (v) { go(v); return true; }
+  var id = link.toUpperCase(), rv = D.links.RECORD_VIEW[kindOf(id)];
+  if (rv && /^[A-Z]+-\d+$/.test(id)) {
+    if (D.model.exists(id)) { go(rv, id); return true; }
+    go('today'); D.ops.toastShow(id + ' isn’t in this Data folder, so here’s Today.');
+    return false;
+  }
+  go('today'); D.ops.toastShow('There’s no View called “' + link + '”, so here’s Today.');
+  return false;
+}
+// goes to the Link in the hash; the browser has already made its history entry, so this replaces rather than adds one
+function land() {
+  D.links.nav.hashOwn = location.hash; D.links.nav.linkPush = false;
+  D.links.nav.landing = true;
+  try { openLink(D.links.linkOfHash(location.hash), D.links.stateOfHash(location.hash)); } finally { D.links.nav.landing = false; }
+}
+
+/* ===================== navigation and selection ===================== */
+function go(view, entity) {
+  var changed = S.view !== view || S.entity !== (entity || null);
+  if (changed && !D.links.nav.landing) D.links.nav.linkPush = true;
+  S.view = view; S.entity = entity || null;
+  S.panel = false; S.sel = null; S.cur = null; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.confirm = null; S.adding = null; S.linkQ = ''; S.tab = 'details'; S.editAsk = null; S.dialog = null;
+  if (changed) { S.eq = ''; S.pq = ''; S.pf = 'all'; S.psort = 'name'; S.doneLimit = 60; }
+  D.links.nav.autoOpen = null; D.links.nav.offView = null;
+  if (view === 'inbox' && !D.model.isDrawer()) { var l = D.model.inboxList(); if (l.length) { S.sel = D.links.nav.autoOpen = l[0].id; S.panel = true; S.cur = l[0].id; } }
+  if (changed) { var m = document.getElementById('main'); if (m) m.scrollTop = 0; S.scrolled = false; }
+  D.render.focusLater('#page-title');
+}
+function goAny(id) {
+  var k = kindOf(id);
+  if (k === 'T') select(id);
+  else if (k === 'P') go('person', id);
+  else if (k === 'PRJ') go('project', id);
+  else if (k === 'SYS') go('system', id);
+}
+function select(id, o) {
+  o = o || {};
+  if (S.sel !== id) {
+    if (!D.links.nav.landing && !o.move && kindOf(id) === 'T') D.links.nav.linkPush = true;
+    D.links.nav.offView = null;
+    S.tab = o.tab || 'details';
+    S.subDraft = ''; S.cmtDraft = ''; S.cmtEdit = null; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.mergeQ = ''; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
+  } else if (o.tab) S.tab = o.tab;
+  S.sel = id; S.panel = true; D.links.nav.autoOpen = null;
+  if (kindOf(id) === 'T') S.cur = id;
+  S.fresh.delete(id);
+  if (o.focus === false) D.render.render();
+  else D.render.focusLater(o.focus || '#panel-top');
+}
+function closePanel() {
+  var id = S.sel;
+  S.panel = false; S.sel = null; S.dismissFor = null; S.confirm = null; S.editAsk = null;
+  if (id && kindOf(id) === 'T' && document.querySelector('.main [data-row="' + id + '"] .t')) D.render.focusLater('.main [data-row="' + id + '"] .t');
+  else D.render.render();
+}
+function rowIds() {
+  var out = [];
+  document.querySelectorAll('.main [data-row]').forEach(function (el) { var id = el.getAttribute('data-row'); if (out.indexOf(id) < 0) out.push(id); });
+  return out;
+}
+function neighbour(id) { var r = rowIds(), k = r.indexOf(id); if (k < 0) return null; return r[k + 1] || r[k - 1] || null; }
+function moveCursor(step) {
+  var rows = rowIds();
+  if (!rows.length) return;
+  var cur = S.cur && rows.indexOf(S.cur) >= 0 ? S.cur : (S.sel && rows.indexOf(S.sel) >= 0 ? S.sel : null);
+  var k = cur ? rows.indexOf(cur) + step : (step > 0 ? 0 : rows.length - 1);
+  k = Math.max(0, Math.min(rows.length - 1, k));
+  S.cur = rows[k];
+  S.scrollRow = rows[k];
+  var rowEl = document.querySelector('.main [data-row="' + rows[k] + '"]');
+  if (rowEl && rowEl.scrollIntoView) rowEl.scrollIntoView({ block: 'nearest' });
+  if (S.panel && S.sel && kindOf(S.sel) === 'T') { select(rows[k], { move: true, focus: '.main [data-row="' + rows[k] + '"] .t' }); return; }
+  D.render.focusLater('.main [data-row="' + rows[k] + '"] .t');
+}
+function targetId() {
+  var a = document.activeElement, row = a && a.closest ? a.closest('[data-row]') : null;
+  if (row) return row.getAttribute('data-row');
+  if (S.panel && S.sel && kindOf(S.sel) === 'T') return S.sel;
+  return S.cur;
+}
+
+/* ===================== task actions ===================== */
+function toggleDone(id, viaKey) {
+  var i = D.model.item(id), w = D.model.whereOf(id);
+  if (!i) return;
+  var nb = viaKey ? neighbour(id) : null;
+  if (w === 'open') {
+    var prevSt = i.meta.status || '';
+    D.ops.commit(D.ops.OPS.complete(id, D.model.todayStr()), { toast: 'Done: ' + D.model.clip(i.title, 60), undo: D.ops.OPS.reopen(id, prevSt) });
+  } else if (w === 'done') {
+    var prevDone = i.meta['done-date'] || D.model.todayStr(), gone = {};
+    D.ops.commit(D.ops.OPS.reopen(id, '', gone));
+    D.ops.toastShow('Reopened ' + id + '. It is back in ' + D.model.listName(D.model.item(id)) + '.', D.ops.OPS.complete(id, prevDone, gone));
+  } else return;
+  if (viaKey) {
+    S.cur = nb;
+    if (S.panel && S.sel === id) { if (nb) { select(nb, { move: true, focus: '.main [data-row="' + nb + '"] .t' }); return; } S.panel = false; S.sel = null; }
+    if (nb) D.render.focusLater('.main [data-row="' + nb + '"] .t');
+  }
+}
+function nextInbox(id) { var l = D.model.inboxList(), k = l.map(function (x) { return x.id; }).indexOf(id), rest = l.filter(function (x) { return x.id !== id; }); return rest.length ? rest[Math.min(Math.max(k, 0), rest.length - 1)].id : null; }
+function afterTriage(id, nextSel) {
+  if (S.view === 'inbox') {
+    if (nextSel) { select(nextSel, { move: true, focus: S.panel ? '#panel-top' : '.main [data-row="' + nextSel + '"] .t' }); return; }
+    S.panel = false; S.sel = null; S.cur = null; D.render.focusLater('#page-title');
+    return;
+  }
+  D.render.render();
+}
+function accept(id) {
+  var i = D.model.item(id);
+  if (!i || D.model.whereOf(id) !== 'inbox') return;
+  var rl = [];
+  D.model.suggestions(i).forEach(function (g) { if (S.suggestOn[id + '|' + g.id]) { var r = relLine(id, g.id); if (r.line) rl.push(r.line); } });
+  var nx = nextInbox(id), st = {};
+  S.dismissFor = null;
+  D.ops.commit(D.ops.OPS.accept(id, rl, st));
+  D.ops.toastShow('Accepted ' + id + ' into ' + D.model.listName(D.model.item(id)) + (rl.length ? ', related to ' + rl.length + ' item' + (rl.length > 1 ? 's' : '') : '') + '.', D.ops.OPS.unaccept(id, rl, st));
+  afterTriage(id, nx);
+}
+// a Proposal done in two minutes: accepted and marked done in one step, keeping its ID
+function acceptDone(id) {
+  var i = D.model.item(id);
+  if (!i || D.model.whereOf(id) !== 'inbox') return;
+  var st = {}, a = D.ops.OPS.accept(id, [], st), c = D.ops.OPS.complete(id, D.model.todayStr()), nx = nextInbox(id);
+  var un = D.ops.OPS.unaccept(id, [], st), ro = D.ops.OPS.reopen(id);
+  S.dismissFor = null;
+  D.ops.commit(D.ops.op('Accept and complete ' + id, ['tasks', 'inbox', 'rels', 'done'].concat(D.ops.LOG_KEYS), function (M) { a.fn(M); c.fn(M); }));
+  D.ops.toastShow('Done: ' + D.model.clip(i.title, 60), D.ops.op('Undo done ' + id, ['tasks', 'done', 'inbox', 'rels'].concat(D.ops.LOG_KEYS), function (M) { ro.fn(M); un.fn(M); }));
+  afterTriage(id, nx);
+}
+function doneNow(id) {
+  var i = D.model.item(id), w = D.model.whereOf(id);
+  if (!i) return;
+  if (w === 'inbox') acceptDone(id);
+  else if (w === 'open') { if (i.meta.type === 'fyi') D.ops.acknowledge(id); else toggleDone(id); }
+}
+// A Dismiss remembers only the message, in DISMISSED.md, until its source has moved past it; Already handled is not a Dismiss.
+function dismiss(id, reason) {
+  var i = D.model.item(id);
+  if (!i || D.model.whereOf(id) !== 'inbox') return;
+  if (reason === 'Already handled') { acceptDone(id); return; }
+  if (reason === 'Duplicate') { S.dupFor = id; S.dupQ = ''; D.model.forceClear('f-dupq'); D.render.focusLater('#f-dupq'); return; }
+  var why = String(reason || 'not actionable').toLowerCase();
+  var lines = D.ops.ignorable(getSub(i, 'source-key').map(function (b) { return b.v.trim(); })).map(function (r) { return D.ops.dismissLine(i, r, why); });
+  var text = serItem(i), nx = nextInbox(id), cs = D.model.changesOn(S.m.inbox, id);
+  S.dismissFor = null;
+  D.ops.commit(D.ops.OPS.dismiss(id, lines));
+  D.ops.toastShow('Dismissed ' + id + ' (' + why + '). This message won’t be proposed again; later news on the thread may be.', D.ops.OPS.undismiss(text, lines, cs));
+  afterTriage(id, nx);
+}
+// Merge: did folded into sid, which keeps its ID. Dismissing a Proposal as Duplicate is a Merge with the Proposal as did.
+function mergeItems(sid, did) {
+  var s = D.model.item(sid), d = D.model.item(did);
+  if (!canMerge(s, d)) return;
+  var st = {}, triage = D.model.whereOf(did) === 'inbox' && S.dupFor === did, nx = triage ? nextInbox(did) : null;
+  S.mergeFor = null; S.mergeQ = ''; S.dismissFor = null; S.dupFor = null; S.dupQ = '';
+  D.model.forceClear('f-mergeq');
+  D.ops.commit(D.ops.OPS.merge(sid, did, D.model.nowStamp(), st), { toast: 'Merged ' + did + ' into ' + sid + '. ' + did + ' now finds ' + sid + '.', undo: D.ops.OPS.unmerge(sid, did, st) });
+  if (triage) { afterTriage(did, nx); return; }
+  if (S.sel === did) select(sid, { move: true });
+}
+function deleteTask(id) {
+  var i = D.model.item(id);
+  if (!i || D.model.whereOf(id) !== 'open') return;
+  var refs = D.ops.ignorable(getSub(i, 'source-key').map(function (b) { return b.v; }));
+  var lines = refs.map(function (r) { return ignoredLine(r, D.model.todayStr(), 'deleted by user (' + id + ')'); });
+  var text = serItem(i);
+  if (S.sel === id) { S.panel = false; S.sel = null; }
+  D.ops.commit(D.ops.OPS.del(id, lines), { toast: 'Deleted ' + id + '.' + (lines.length ? ' Its source won’t be proposed again.' : ''), undo: D.ops.OPS.undel(text, lines) });
+}
+function addQuick() {
+  var q = D.model.parseQuick(S.qa || '', S.qaType);
+  if (!q.title) { D.render.focusLater('#qa-in'); return; }
+  var it0 = quickItem(q, { urg: S.qaUrg, description: S.qaDesc, today: D.model.todayStr(), now: D.model.nowStamp() });
+  var out = {};
+  D.ops.commit(D.ops.OPS.addTask({ title: it0.title, meta: it0.meta, date: D.model.todayStr(), description: it0.description, newProjects: q.prjNew }, out));
+  S.qa = ''; S.qaType = null; S.qaUrg = ''; S.qaDesc = ''; S.qaMore = false; D.model.forceClear('qa-in'); D.model.forceClear('qa-desc');
+  var it = out.id ? D.model.item(out.id) : null;
+  if (it) D.ops.toastShow('Added ' + out.id + ' to ' + D.model.listName(it) + ' · ' + D.model.when(it).label + (q.prjNew.length ? ' · new project ' + q.prjNew.join(', ') : ''), D.ops.OPS.removeAdded(out.id, out));
+  D.render.render();
+}
+function addCommentFrom(id) {
+  var text = cleanText(S.cmtDraft);
+  if (!text) { D.render.focusLater('#f-cmt'); return; }
+  var c = { at: D.model.nowStamp(), author: 'user', text: text };
+  S.cmtDraft = '';
+  D.model.forceClear('f-cmt');
+  // the new Comment's place once added: after every other Comment
+  var x = D.model.recOf(id), k = x ? commentsOf(x).length : 0;
+  D.ops.commit(D.ops.OPS.comment(id, c), { toast: 'Added a comment to ' + id + '.', undo: D.ops.OPS.delComment(id, k, text) });
+  D.render.focusLater('#f-cmt');
+}
+function queueAsk(id) {
+  var text = String(S.composer[id] || '').trim();
+  if (!text) { D.render.focusLater('#f-composer'); return; }
+  var line = aLine(id, D.model.nowStamp(), text);
+  S.composer[id] = '';
+  D.model.forceClear('f-composer');
+  D.ops.commit(D.ops.OPS.addAsk(line), { toast: 'Queued for the agent on ' + id + '.', undo: D.ops.OPS.removeAsk(line) });
+}
+function addSystem(id, sys) {
+  var r = id ? relLine(id, sys) : null;
+  if (!r || r.err) { if (r) D.ops.toastShow(r.err); return; }
+  D.ops.commit(D.ops.OPS.addRel(r.line), { toast: 'Relationship added.', undo: D.ops.OPS.removeRel(r.line) });
+  S.sysQ = ''; D.model.forceClear('f-sys');
+  D.render.focusLater('#f-sys');
+}
+function addLink(id, other) {
+  if (S.linkMode === 'blocked' && kindOf(id) === 'T') {
+    if (D.model.dependsOn(other, id)) { D.ops.toastShow(other + ' already depends on ' + id + '. That would make a loop.'); return; }
+    D.ops.commit(D.ops.OPS.addDep(id, other), { toast: id + ' now depends on ' + other + '.', undo: D.ops.OPS.removeDep(id, other) });
+  } else {
+    var r = relLine(id, other), st = {};
+    if (r.err) { D.ops.toastShow(r.err); return; }
+    D.ops.commit(D.ops.OPS.addRel(r.line, st), { toast: 'Relationship added.', undo: D.ops.OPS.removeRel(r.line, st) });
+  }
+  S.linkQ = ''; D.model.forceClear('f-linkq');
+  D.render.focusLater('#f-linkq');
+}
+function rowAfter(el, filters) {
+  var tr = filters.indexOf(S.pf) >= 0 ? el.closest('.tr') : null, rows = tr ? Array.prototype.slice.call(document.querySelectorAll('.main .tr[data-k^="p-"]')) : [], k = rows.indexOf(tr);
+  return rows[k + 1] || rows[k - 1] || null;
+}
+function focusRow(tr) { D.render.focusLater('.main .tr[data-k="' + tr.getAttribute('data-k') + '"] .nm'); }
+function addEntityLink(id) {
+  var label = String(S.linkLabel || '').replace(/[\[\]\n]/g, ' ').trim(), url = String(S.linkUrl || '').trim().replace(/\s/g, '%20').replace(/\(/g, '%28').replace(/\)/g, '%29');
+  if (!url) { D.ops.toastShow('Type the URL first.'); D.render.focusLater('#ef-lu'); return; }
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = 'https://' + url;
+  var v = '[' + (label || url) + '](' + url + ')';
+  D.ops.commit(D.ops.OPS.addEntLink(kindOf(id), id, v), { toast: 'URL added.', undo: D.ops.OPS.removeEntLink(kindOf(id), id, v) });
+  S.linkLabel = ''; S.linkUrl = ''; D.model.forceClear('ef-ll'); D.model.forceClear('ef-lu');
+}
+function setTheme(t) {
+  S.theme = t;
+  if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme');
+  setThemeColor(t);
+  D.model.lsSet('discerny-theme', t);
+  D.render.render();
+}
+function toggleSide() { S.side = D.model.isRail() ? 'full' : (window.innerWidth >= 1440 ? 'rail' : 'auto'); D.model.lsSet('discerny-side', S.side); D.render.render(); }
+function openPalette() { if (!S.ready) return; if (S.dialog !== 'palette') S.dlgReturn = document.activeElement; S.dialog = 'palette'; S.palQ = ''; S.palI = 0; D.render.focusLater('#pal-q'); }
+function openKeys() { if (S.dialog !== 'keys') S.dlgReturn = document.activeElement; S.dialog = 'keys'; D.render.focusLater('.dlg .xbtn'); }
+function closeDialog() {
+  var back = S.dlgReturn;
+  S.dialog = null; S.dlgReturn = null;
+  D.render.render();
+  if (back && back !== document.body) requestAnimationFrame(function () { if (document.contains(back)) back.focus({ preventScroll: true }); });
+}
+function quickAddFocus() { if (S.view !== 'today' && S.view !== 'next') go('today'); D.render.focusLater('#qa-in'); }
+function runResult(it) {
+  if (!it) return;
+  S.dialog = null; S.dlgReturn = null;
+  if (it.act === 'go') { if (it.arg === 'people-gaps') { go('people'); S.pf = 'gaps'; } else go(it.arg); return; }
+  if (it.act === 'open') { openLink(it.arg, []); return; }
+  if (it.act === 'link') { openLink(D.links.linkOfHash(it.arg), D.links.stateOfHash(it.arg)); return; }
+  if (it.act === 'all') { S.wq = it.arg; D.model.forceClear('wb-q'); go('all'); return; }
+  if (it.act === 'person' && it.arg) { go('person', it.arg); return; }
+  if (it.act === 'ent') { goAny(it.arg); return; }
+  if (it.act === 'cmd') {
+    if (it.arg === 'quickadd') quickAddFocus();
+    else if (it.arg.indexOf('theme-') === 0) setTheme(it.arg.slice(6));
+    else if (it.arg === 'side') toggleSide();
+    else if (it.arg === 'keys') openKeys();
+    else if (it.arg === 'sync') { D.files.requestSync(true); D.ops.toastShow('Reading your files again.'); }
+    else D.render.render();
+  }
+}
+function syncNow() { D.files.requestSync(true); }
+async function reconnect() {
+  var ok = await regainAccess();
+  if (!ok) { D.ops.toastShow((D.files.srv ? 'The Discerny server still isn’t running.' : 'Permission wasn’t given.') + ' Your changes are still kept on screen.'); D.render.render(); return; }
+  D.files.Q.blocked = null;
+  D.files.requestSync(false);
+  D.files.kick();
+  D.render.render();
+}
+
+/* ===================== click actions ===================== */
+function did(el) { return el.getAttribute('data-id'); }
+function dvv(el) { return el.getAttribute('data-v'); }
+var ACT = {
+  go: function (el) { var v = dvv(el); if (v === 'people-gaps') { go('people'); S.pf = 'gaps'; D.render.render(); } else go(v); },
+  palette: function () { openPalette(); },
+  keys: function () { openKeys(); },
+  theme: function () { setTheme({ system: 'light', light: 'dark', dark: 'system' }[S.theme] || 'system'); },
+  side: function () { toggleSide(); },
+  'dlg-close': function () { closeDialog(); },
+  'dlg-bg': function () { closeDialog(); },
+  'pal-pick': function (el) { runResult(D.model.flatResults(D.links.search(S.palQ))[+el.getAttribute('data-i')]); },
+  open: function (el) { var id = did(el); if (kindOf(id) === 'T') { if (S.panel && S.sel === id && !D.model.isDrawer()) { D.render.focusLater('#panel-top'); return; } select(id); } else goAny(id); },
+  any: function (el) { goAny(did(el)); },
+  'any-page': function (el) { goAny(did(el)); },
+  'home-view': function (el) { var id = did(el); go(D.model.homeView(D.model.item(id))); select(id); },
+  person: function (el) { if (did(el)) go('person', did(el)); },
+  ent: function (el) { goAny(did(el)); },
+  close: function () { closePanel(); },
+  tab: function (el) { S.tab = dvv(el); S.linkQ = ''; S.editAsk = null; D.render.focusLater('#tab-' + S.tab); },
+  copy: function (el) {
+    var id = did(el), done = function () { S.copied = id; D.render.render(); setTimeout(function () { if (S.copied === id) { S.copied = null; D.render.render(); } }, 1500); };
+    copyText(id, done);
+  },
+  // with an ID, from the Side panel: an Item on this View, or a Record's own page
+  'copy-link': function (el) {
+    var id = did(el), link = !id ? D.links.linkNow() + D.links.linkQuery() : kindOf(id) === 'T' ? D.links.linkNow(id) + D.links.linkQuery(id) : id;
+    copyText(link, function (ok) { D.ops.toastShow(ok ? 'Copied the Link ' + link : 'Couldn’t reach the clipboard. The Link is ' + link); });
+  },
+  status: function (el) { D.ops.patch(did(el), { status: dvv(el) || '' }); },
+  accept: function (el) { accept(did(el)); },
+  'done-now': function (el) { doneNow(did(el)); },
+  snooze: function (el) { D.ops.snoozeItem(did(el), +dvv(el)); },
+  'snooze-open': function (el) { var id = did(el); S.snoozeFor = S.snoozeFor === id ? null : id; if (S.snoozeFor) D.render.focusLater('.main [data-row="' + id + '"] .reasons button'); else D.render.render(); },
+  'snooze-cancel': function () { S.snoozeFor = null; D.render.render(); },
+  'dismiss-open': function (el) { var id = did(el), at = el.closest('.panel') ? 'panel' : 'row'; S.dupFor = null; if (S.dismissFor === id && S.dismissAt === at) { S.dismissFor = null; D.render.render(); return; } S.dismissFor = id; S.dismissAt = at; D.render.focusLater(at === 'panel' ? '.panel .reasons .chipbtn' : '.main [data-row="' + id + '"] .reasons .chipbtn'); },
+  'dismiss-cancel': function () { S.dismissFor = null; S.dupFor = null; D.render.render(); },
+  'dup-pick': function (el) { if (S.dupFor) mergeItems(dvv(el), S.dupFor); },
+  'merge-open': function (el) { var id = did(el); if (S.mergeFor === id) { S.mergeFor = null; D.render.render(); return; } S.mergeFor = id; S.mergeQ = ''; D.model.forceClear('f-mergeq'); D.render.focusLater('#f-mergeq'); },
+  'merge-cancel': function () { S.mergeFor = null; S.mergeQ = ''; D.render.render(); },
+  'merge-pick': function (el) { if (S.mergeFor) mergeItems(S.mergeFor, dvv(el)); },
+  dismiss: function (el) { dismiss(did(el), dvv(el)); },
+  'chg-yes': function (el) { D.ops.relYes(dvv(el)); },
+  'chg-no': function (el) { D.ops.changeNo(dvv(el)); },
+  'email-yes': function (el) { D.ops.emailYes(dvv(el)); },
+  'person-add': function (el) { D.ops.personAdd(dvv(el), false); },
+  'person-prio': function (el) { D.ops.personAdd(dvv(el), true); },
+  'prio-yes': function (el) { D.ops.prioYes(dvv(el)); },
+  'chg-undo': function (el) { D.ops.undoChange(did(el), dvv(el)); },
+  'cmt-done': function (el) { D.ops.markDoneAck(did(el)); },
+  chase: function (el) { D.ops.chase(did(el)); },
+  gotit: function (el) { D.ops.gotIt(did(el)); },
+  ack: function (el) { D.ops.acknowledge(did(el)); },
+  maketask: function (el) { D.ops.makeTask(did(el)); },
+  reopen: function (el) { toggleDone(did(el)); },
+  'qa-add': function () { addQuick(); },
+  'qa-type': function () { var q = D.model.parseQuick(S.qa || '', S.qaType); S.qaType = D.model.QA_TYPES[(D.model.QA_TYPES.indexOf(q.ty) + 1) % D.model.QA_TYPES.length]; D.render.render(); },
+  'prj-del': function (el) { var id = did(el), v = dvv(el); D.ops.commit(D.ops.OPS.setPrj(id, v, false), { toast: 'Removed ' + id + ' from ' + (D.model.labelOf(v) || v) + '.', undo: D.ops.OPS.setPrj(id, v, true) }); D.render.focusLater('#f-prj'); },
+  'tag-del': function (el) { D.ops.commit(D.ops.OPS.removeTag(did(el), dvv(el))); D.render.focusLater('#f-tag'); },
+  'cmt-add': function (el) { addCommentFrom(did(el)); },
+  'cmt-edit': function (el) { var id = did(el), k = +dvv(el), c = D.model.commentAt(id, k); if (!c || c.f.author !== 'user') return; S.cmtEdit = id + '|' + k; S.cmtEditText = c.v; D.render.render(); D.render.focusLater('#cmt-edit'); },
+  'cmt-cancel': function () { S.cmtEdit = null; D.render.render(); },
+  'cmt-save': function (el) { D.ops.saveComment(did(el), +dvv(el)); },
+  'cmt-del': function (el) {
+    var id = did(el), k = +dvv(el), c = D.model.commentAt(id, k);
+    if (!c) return;
+    S.cmtEdit = null;
+    D.ops.commit(D.ops.OPS.delComment(id, k, c.v), { toast: 'Deleted the comment “' + D.model.clip(c.v, 40) + '”.', undo: D.ops.OPS.putComment(id, k, { f: Object.assign({}, c.f), v: c.v }) });
+  },
+  'cmt-ack': function (el) {
+    var id = did(el), x = D.model.recOf(id);
+    if (!x) return;
+    var list = commentsOf(x), which = list.filter(toAck).map(function (c) { return [list.indexOf(c), c.v]; });
+    var st = {};
+    if (which.length) D.ops.commit(D.ops.OPS.ack(id, which, false, st), { toast: 'Acknowledged ' + D.model.plural(which.length, 'comment') + ' on ' + id + '.', undo: D.ops.OPS.ack(id, which, true, st) });
+  },
+  'sub-del': function (el) {
+    var id = did(el), k = +el.getAttribute('data-i'), i = D.model.item(id), s = i ? D.model.subsOf(i)[k] : null;
+    if (!s) return;
+    D.ops.commit(D.ops.OPS.removeSub(id, k, s.v), { toast: 'Removed sub-task “' + D.model.clip(s.v, 40) + '”', undo: D.ops.OPS.insertSub(id, k, { v: s.v, x: s.x }) });
+    D.render.focusLater('#f-sub');
+  },
+  'add-person': function (el) {
+    var name = D.model.cleanName(dvv(el));
+    if (!name) return;
+    if (D.model.personByName(name)) { D.ops.toastShow(name + ' is already in People.'); return; }
+    D.ops.commit(did(el) ? D.ops.OPS.addPersonOn(name, did(el), D.model.todayStr()) : D.ops.OPS.addPerson(name, 'Other'), { toast: 'Added ' + name + ' to People. Fill in their details.', undo: D.ops.OPS.removePerson(name) });
+    var p = D.model.personByName(name);
+    if (p && p.meta.id && (S.view === 'people' || !S.panel)) select(p.meta.id);
+  },
+  'hide-who': function (el) { var a = D.model.lsJson('discerny-hide-who', []); a.push(dvv(el)); D.model.lsSet('discerny-hide-who', JSON.stringify(a)); D.ops.toastShow('“' + dvv(el) + '” won’t be suggested for People again.'); },
+  del: function (el) { deleteTask(did(el)); },
+  'dep-del': function (el) { var id = did(el), d = dvv(el); D.ops.commit(D.ops.OPS.removeDep(id, d), { toast: id + ' no longer depends on ' + d + '.', undo: D.ops.OPS.addDep(id, d) }); },
+  'rel-del': function (el) { var raw = dvv(el); D.ops.commit(D.ops.OPS.removeRel(raw), { toast: 'Relationship removed.', undo: D.ops.OPS.addRel(raw) }); },
+  'link-kind': function (el) { S.linkKind = dvv(el); D.render.focusLater('#f-linkq'); },
+  'sys-add': function (el) { addSystem(S.sel, dvv(el)); },
+  'link-mode': function (el) { S.linkMode = dvv(el); S.linkKind = 'All'; S.linkQ = ''; D.model.forceClear('f-linkq'); D.render.focusLater('#f-linkq'); },
+  'link-add': function (el) { if (S.sel) addLink(S.sel, dvv(el)); },
+  prompt: function (el) {
+    var id = S.sel, label = dvv(el), base;
+    if (!id) return;
+    if (kindOf(id) === 'T') { var i = D.model.item(id), w = i ? D.model.realWho(i) : ''; base = label + (w ? ' (' + w + ')' : '') + ': ' + (i ? i.title : id); }
+    else base = label + ': ' + (D.model.labelOf(id) || id);
+    S.composer[id] = base;
+    D.model.forceClear('f-composer');
+    D.render.focusLater('#f-composer');
+  },
+  'ask-add': function () { if (S.sel) queueAsk(S.sel); },
+  'ask-edit': function (el) { var raw = dvv(el), n = S.m.asks.notes.filter(function (x) { return x.raw === raw; })[0]; if (!n) return; S.editAsk = raw; S.editAskText = n.text; D.render.focusLater('#ask-edit'); },
+  'ask-cancel': function () { S.editAsk = null; D.render.render(); },
+  'ask-save': function () {
+    var n = S.m.asks.notes.filter(function (x) { return x.raw === S.editAsk; })[0];
+    S.editAsk = null;
+    if (!n) { D.render.render(); return; }
+    var text = String(S.editAskText || '').trim();
+    if (!text) { D.render.render(); return; }
+    var nl = aLine(n.id, n.ts, text);
+    if (nl !== n.raw) D.ops.commit(D.ops.OPS.editAsk(n.raw, nl), { toast: 'Note for the agent updated.', undo: D.ops.OPS.editAsk(nl, n.raw) }); else D.render.render();
+  },
+  'ask-del': function (el) { var raw = dvv(el); D.ops.commit(D.ops.OPS.removeAsk(raw), { toast: 'Removed a note for the agent.', undo: D.ops.OPS.addAsk(raw) }); },
+  'draft-open': function (el) { select(did(el), { tab: 'claude' }); },
+  undo: function (el) { D.ops.toastUndo(+dvv(el)); },
+  'toast-x': function (el) { D.ops.toastDrop(+dvv(el)); },
+  retry: function () { S.confirm = null; retrySave(); },
+  reconnect: function () { reconnect(); },
+  discard: function () { S.confirm = 'discard'; D.render.render(); },
+  'discard-yes': function () { S.confirm = null; D.files.discardPending(); D.ops.toastShow('Unsaved changes discarded. Showing what is in your files.'); },
+  'discard-no': function () { S.confirm = null; D.render.render(); },
+  group: function (el) { S.group = dvv(el); D.model.lsSet('discerny-group', S.group); D.render.render(); },
+  'wb-group': function (el) { setWb({ group: dvv(el) }); },
+  'wb-tag': function (el) { var t = dvv(el); setWb({ tag: S.wb.tag === t ? '' : t }); if (S.view !== 'all') go('all'); },
+  'qa-more': function () { S.qaMore = !S.qaMore; D.render.render(); if (S.qaMore) D.render.focusLater('#qa-urg'); },
+  pf: function (el) { S.pf = dvv(el); D.render.render(); },
+  // Under a filter it would leave, a Promote or Demote takes the row away, so focus moves to the next one
+  promote: function (el) { var nb = rowAfter(el, ['high']); D.ops.promotePerson(did(el)); if (nb) focusRow(nb); },
+  demote: function (el) { var nb = rowAfter(el, ['priority', 'low']); D.ops.demotePerson(did(el)); if (nb) focusRow(nb); },
+  'add-open': function (el) { S.adding = dvv(el); S.addName = ''; S.addGrp = ''; S.addType = ''; D.render.focusLater('#add-name'); },
+  'add-cancel': function () { S.adding = null; D.render.render(); },
+  'review-reset': function () { D.model.lsSet('discerny-review', JSON.stringify({ week: D.model.isoWeek(D.model.todayStr()), done: {} })); D.render.render(); },
+  'done-more': function () { S.doneLimit += 60; D.render.render(); },
+  'edit-ent': function (el) { select(did(el)); },
+  'ask-ent': function (el) { select(did(el), { tab: 'claude', focus: '#f-composer' }); },
+  'check-person': function (el) {
+    var p = D.model.personOf(did(el));
+    if (!p) return;
+    var prev = p.meta['checked-date'] || '';
+    D.ops.commit(D.ops.OPS.patchPerson(p.name, { 'checked-date': D.model.todayStr() }, D.model.todayStr()), { toast: p.name + ' marked as checked today.', undo: D.ops.OPS.patchPerson(p.name, { 'checked-date': prev }, D.model.todayStr()) });
+  },
+  'p-st': function (el) {
+    var p = D.model.personOf(did(el)), v = dvv(el);
+    if (!p || (p.meta.status || '') === v) return;
+    D.ops.commit(D.ops.OPS.patchPerson(p.name, { status: v }, D.model.todayStr()), { toast: v === 'left' ? p.name + ' marked as left.' : p.name + ' is active again.', undo: D.ops.OPS.patchPerson(p.name, { status: p.meta.status || '' }, D.model.todayStr()) });
+  },
+  'p-remove': function (el) {
+    var p = D.model.personOf(did(el));
+    if (!p) return;
+    var text = pSerItem(p), grp = p.grp, idx = S.m.people.people.indexOf(p), name = p.name, st = {};
+    S.panel = false; S.sel = null;
+    if (S.view === 'person' && S.entity === did(el)) go('people');
+    D.ops.commit(D.ops.OPS.removePerson(name, st), { toast: 'Removed ' + name + ' from People.', undo: D.ops.OPS.restorePerson(text, grp, idx, st) });
+  },
+  'e-del': function (el) { S.confirm = 'del:' + did(el); D.render.render(); },
+  'e-del-no': function () { S.confirm = null; D.render.render(); },
+  'e-del-yes': function (el) {
+    var id = did(el), kind = kindOf(id);
+    if (!D.model.entById(id)) return;
+    var snap = D.model.entSnapshot(id);
+    S.confirm = null; S.panel = false; S.sel = null;
+    if (S.entity === id) go(kind === 'PRJ' ? 'projects' : 'systems');
+    D.ops.commit(D.ops.OPS.deleteEnt(kind, id), { toast: 'Deleted ' + id + '.', undo: D.ops.OPS.restoreEnt(kind, snap) });
+  },
+  'e-link-add': function (el) { addEntityLink(did(el)); },
+  'e-link-del': function (el) { var id = did(el), v = dvv(el); D.ops.commit(D.ops.OPS.removeEntLink(kindOf(id), id, v), { toast: 'URL removed.', undo: D.ops.OPS.addEntLink(kindOf(id), id, v) }); },
+  pick: function () { pickFolder(); },
+  // From a folder refused after it was open, switching reloads the page so nothing of it carries over.
+  refolder: function () { if (S.m || D.files.srv) changeFolder(); else pickFolder(); },
+  folder: function () { changeFolder(); },
+  'folder-sug': function (el) { S.folderPath = dvv(el); S.folderErr = ''; D.render.render(); D.render.focusLater('#folder-path'); },
+  reload: function () { location.reload(); },
+  srvretry: function () { openFolder(); },
+  regrant: function () { regrant(); }
+};
+// done(whether it reached the clipboard)
+function copyText(text, done) {
+  var older = function () { done(fallbackCopy(text)); };
+  try { navigator.clipboard.writeText(text).then(function () { done(true); }, older); } catch (e) { older(); }
+}
+function fallbackCopy(text) {
+  var ok = false, back = document.activeElement;
+  try { var ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0'; document.body.appendChild(ta); ta.select(); ok = document.execCommand('copy'); document.body.removeChild(ta); } catch (e) { /* ignore */ }
+  if (back && back.focus) back.focus();
+  return ok;
+}
+
+/* ===================== field changes (committed when you leave the field) ===================== */
+function linesOf(v) { return String(v || '').split(/[\r\n\u2028\u2029\u0085]/).map(function (s) { return s.trim(); }).filter(Boolean); }
+function same(a, b) { return a.length === b.length && a.every(function (x, k) { return x === b[k]; }); }
+var CH = {
+  done: function (el) { var id = did(el), had = document.activeElement === el, nb = neighbour(id); toggleDone(id); if (had && nb) D.render.focusLater('.main [data-row="' + nb + '"] input[type="checkbox"], .main [data-row="' + nb + '"] .t'); },
+  title: function (el) { var id = did(el), i = D.model.item(id), v = D.model.cleanTitle(el.value); if (!i) return; if (!v) { D.model.forceClear(el.id); D.render.render(); return; } if (v !== i.title) D.ops.commit(D.ops.OPS.title(id, v)); },
+  due: function (el) { var id = did(el), i = D.model.item(id); if (i) D.ops.setItemDue(id, el.value, i.meta['due-time'] || ''); },
+  'due-time': function (el) { var id = did(el), i = D.model.item(id); if (!i) return; var d = i.meta['due-date'] || ''; if (!D.model.isDay(d)) { if (!el.value) return; d = D.model.todayStr(); } D.ops.setItemDue(id, d, el.value); },
+  urg: function (el) { D.ops.patch(did(el), { urgency: el.value }); },
+  p: function (el) { D.ops.patch(did(el), { priority: el.value }); },
+  ty: function (el) { var p = { type: el.value }, i = D.model.item(did(el)); if (i && !D.model.isDay(dueOf(i.meta))) { if (el.value === 'fyi') p.urgency = 'fyi'; else if (i.meta.urgency === 'fyi') p.urgency = 'this week'; } D.ops.patch(did(el), p); },
+  who: function (el) { var i = D.model.item(did(el)), v = D.model.cleanName(el.value); if (i && v !== D.model.realWho(i)) D.ops.patch(did(el), { who: v }); },
+  asg: function (el) { var v = el.value ? el.value.replace('T', ' ').slice(0, 16) : ''; D.ops.patch(did(el), { 'received-datetime': v, 'received-date': '' }); },
+  desc: function (el) { var id = did(el), r = D.model.recIn(S.m, id); if (r && cleanText(el.value) !== descOf(r.x)) D.ops.commit(D.ops.OPS.desc(id, el.value)); },
+  sub: function (el) { var id = did(el), k = +el.getAttribute('data-i'), i = D.model.item(id), s = i ? D.model.subsOf(i)[k] : null; if (s) D.ops.commit(D.ops.OPS.setSub(id, k, s.v, el.checked)); },
+  'link-done': function (el) { S.linkDone = el.checked; D.render.render(); },
+  suggest: function (el) { S.suggestOn[did(el) + '|' + dvv(el)] = el.checked; D.render.render(); },
+  intro: function (el) { S.introOn[dvv(el)] = el.checked; D.render.render(); },
+  review: function (el) { var st = D.model.reviewState(); st.done[dvv(el)] = el.checked; D.model.lsSet('discerny-review', JSON.stringify(st)); D.render.render(); },
+  'tag-add': function (el) { addTagFrom(el); },
+  pf: function (el) {
+    var p = D.model.personOf(did(el)), k = el.getAttribute('data-f'), v = D.model.cleanName(el.value);
+    if (!p) return;
+    if ((k === 'group' ? p.grp : (p.meta[k] || '')) === v) return;
+    var o = {}; o[k] = v;
+    D.ops.commit(D.ops.OPS.patchPerson(p.name, o, D.model.todayStr()));
+  },
+  'p-ext': function (el) { var p = D.model.personOf(did(el)); if (p) D.ops.commit(D.ops.OPS.patchPerson(p.name, { external: el.checked ? 'yes' : '' }, D.model.todayStr())); },
+  'e-name': function (el) { var id = did(el), e = D.model.entById(id), v = D.model.cleanName(el.value); if (!e) return; if (!v) { D.model.forceClear(el.id); D.render.render(); return; } if (v !== e.name) D.ops.commit(D.ops.OPS.renameEnt(kindOf(id), id, v)); },
+  'e-type': function (el) { D.ops.commit(D.ops.OPS.patchEnt(kindOf(did(el)), did(el), { type: el.value })); },
+  'e-st': function (el) { D.ops.commit(D.ops.OPS.patchEnt(kindOf(did(el)), did(el), { status: el.value })); },
+  'e-parent': function (el) { var id = did(el), kindDef = D.model.EDEF[kindOf(id)], o = {}; o[kindDef.pk] = el.value; D.ops.commit(D.ops.OPS.patchEnt(kindOf(id), id, o)); },
+  'e-owner': function (el) { var e = D.model.entById(did(el)), v = D.model.cleanName(el.value); if (e && v !== (e.meta.owner || '')) D.ops.commit(D.ops.OPS.patchEnt('SYS', did(el), { owner: v })); },
+  'e-grp': function (el) { var e = D.model.entById(did(el)), v = D.model.cleanName(el.value); if (e && v !== e.grp) D.ops.commit(D.ops.OPS.entGroup(kindOf(did(el)), did(el), v)); },
+  pgroup: function (el) { S.pgroup = el.value; D.model.lsSet('discerny-pgroup', S.pgroup); D.render.render(); },
+  psort: function (el) { S.psort = el.value; D.render.render(); },
+  'wb-sort': function (el) { setWb({ sort: el.value }); },
+  'wb-tag': function (el) { setWb({ tag: el.value }); },
+  'qa-urg': function (el) { S.qaUrg = el.value; D.render.render(); },
+  addType: function (el) { S.addType = el.value; }
+};
+function addPrjFrom(el, mayCreate) {
+  var id = did(el), text = String(el.value || '').trim(), i = D.model.item(id);
+  if (!text || !i) return;
+  var hit = D.model.resolvePrj(text);
+  if (!hit && !mayCreate) return;
+  S.newPrj = ''; D.model.forceClear(el.id);
+  if (hit) { if (prjOf(i).indexOf(hit.meta.id) < 0) D.ops.commit(D.ops.OPS.setPrj(id, hit.meta.id, true)); else D.render.render(); return; }
+  var name = D.model.cleanName(text), out = {};
+  D.ops.commit(D.ops.OPS.newPrjOnTask(id, name, out), { toast: 'Created project “' + name + '”' + (out.id ? ' (' + out.id + ')' : '') + ' and added ' + id + ' to it.' });
+}
+function addTagFrom(el) {
+  var id = did(el), t = cleanTag(el.value);
+  S.tagDraft = '';
+  D.model.forceClear(el.id);
+  if (!t) { D.render.render(); return; }
+  var i = D.model.item(id);
+  if (i && tagsOf(i).indexOf(t) < 0) D.ops.commit(D.ops.OPS.addTag(id, t)); else D.render.render();
+}
+
+/* ===================== typing (drafts kept in state so a redraw never loses them) ===================== */
+var IN = {
+  qa: function (el) { S.qa = el.value; S.qaType = null; D.render.render(); },
+  palQ: function (el) { S.palQ = el.value; S.palI = 0; D.render.render(); },
+  linkQ: function (el) { S.linkQ = el.value; D.render.render(); },
+  sysQ: function (el) { S.sysQ = el.value; D.render.render(); },
+  dupQ: function (el) { S.dupQ = el.value; D.render.render(); },
+  mergeQ: function (el) { S.mergeQ = el.value; D.render.render(); },
+  pq: function (el) { S.pq = el.value; D.render.render(); },
+  eq: function (el) { S.eq = el.value; D.render.render(); },
+  wq: function (el) { S.wq = el.value; D.render.render(); },
+  qaDesc: function (el) { S.qaDesc = el.value; },
+  composer: function (el) { if (S.sel) S.composer[S.sel] = el.value; },
+  cmtDraft: function (el) { S.cmtDraft = el.value; },
+  cmtEditText: function (el) { S.cmtEditText = el.value; },
+  subDraft: function (el) { S.subDraft = el.value; },
+  tagDraft: function (el, ev) { S.tagDraft = el.value; if (ev && ev.inputType === 'insertReplacementText') addTagFrom(el); },
+  newPrj: function (el, ev) { S.newPrj = el.value; if (ev && ev.inputType === 'insertReplacementText') addPrjFrom(el, false); else D.render.render(); },
+  addName: function (el) { S.addName = el.value; },
+  addGrp: function (el) { S.addGrp = el.value; },
+  linkLabel: function (el) { S.linkLabel = el.value; },
+  linkUrl: function (el) { S.linkUrl = el.value; },
+  editAskText: function (el) { S.editAskText = el.value; },
+  folderPath: function (el) { S.folderPath = el.value; }
+};
+var SUB = {
+  // Asks the server to open another folder, which it also records for the agent, then reloads on it.
+  'folder-switch': async function () {
+    if (S.folderBusy) return;
+    if (D.files.Q.jobs.some(function (j) { return !j.sync; })) { S.folderErr = 'Wait until your changes are saved, then change folder.'; D.render.render(); return; }
+    var p = S.folderPath.trim();
+    if (!p) { D.render.focusLater('#folder-path'); return; }
+    S.folderErr = ''; S.folderBusy = true; D.render.render();
+    var r;
+    try { r = await D.files.api('/api/folder', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p }) }); }
+    catch (e) { S.folderBusy = false; S.folderErr = 'The Discerny server isn’t running. Start it again with node tools/discern.mjs serve, then try again.'; D.render.render(); return; }
+    if (r.ok) { location.reload(); return; }
+    S.folderBusy = false; S.folderErr = (await r.text()) || 'The server answered ' + r.status + '.'; D.render.render(); D.render.focusLater('#folder-path');
+  },
+  'add-ent': function (f) {
+    var kind = f.getAttribute('data-v'), kindDef = D.model.EDEF[kind], name = D.model.cleanName(S.addName);
+    if (!name) { D.render.focusLater('#add-name'); return; }
+    var ex = D.model.entsOf(kind).filter(function (e) { return e.name.toLowerCase() === name.toLowerCase(); })[0];
+    if (ex) { D.ops.toastShow('There is already a ' + kindDef.word + ' called “' + ex.name + '”.'); return; }
+    var out = {}, meta = { type: S.addType || kindDef.types[0] };
+    if (kind === 'PRJ') meta.status = 'active';
+    D.ops.commit(D.ops.OPS.createEnt(kind, name, meta, out), { toast: 'Added ' + kindDef.word + ' ' + (out.id || '') + '.' });
+    S.adding = null; S.addName = '';
+    if (out.id) { go(kind === 'PRJ' ? 'project' : 'system', out.id); select(out.id); }
+  },
+  'add-person': function () {
+    var name = D.model.cleanName(S.addName), grp = D.model.cleanName(S.addGrp) || 'Other';
+    if (!name) { D.render.focusLater('#add-name'); return; }
+    if (D.model.personByName(name)) { D.ops.toastShow(name + ' is already in People.'); return; }
+    D.ops.commit(D.ops.OPS.addPerson(name, grp), { toast: 'Added ' + name + ' to People.', undo: D.ops.OPS.removePerson(name) });
+    S.adding = null; S.addName = ''; S.addGrp = '';
+    var p = D.model.personByName(name);
+    if (p && p.meta.id) select(p.meta.id, { focus: '#pf-company' }); else D.render.render();
+  }
+};
+
+/* ===================== keys ===================== */
+function isTyping(t) {
+  if (!t || !t.tagName) return false;
+  if (t.isContentEditable) return true;
+  if (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return true;
+  if (t.tagName === 'INPUT') return !/^(checkbox|radio|button|submit|reset|range|color|file)$/i.test(t.type);
+  return false;
+}
+var KD = {
+  qa: function (el, ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); addQuick(); }
+    else if (ev.key === 'Escape' && (S.qa || el.value)) { ev.preventDefault(); S.qa = ''; S.qaType = null; D.model.forceClear('qa-in'); D.render.render(); }
+  },
+  pal: function (el, ev) {
+    var flat = D.model.flatResults(D.links.search(S.palQ)), idx = Math.min(S.palI, Math.max(flat.length - 1, 0));
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); S.palI = Math.min(idx + 1, flat.length - 1); D.render.render(); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); S.palI = Math.max(idx - 1, 0); D.render.render(); }
+    else if (ev.key === 'Enter') { ev.preventDefault(); runResult(flat[idx]); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); closeDialog(); }
+  },
+  title: function (el, ev) { if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); el.blur(); } },
+  sub: function (el, ev) {
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    var t = String(el.value || '').trim(), id = did(el);
+    if (!t || !D.model.item(id)) return;
+    S.subDraft = ''; D.model.forceClear(el.id);
+    D.ops.commit(D.ops.OPS.addSub(id, t));
+  },
+  tag: function (el, ev) { if (ev.key === 'Enter') { ev.preventDefault(); addTagFrom(el); } },
+  prj: function (el, ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); addPrjFrom(el, true); }
+    else if (ev.key === 'Escape' && el.value) { ev.preventDefault(); S.newPrj = ''; D.model.forceClear(el.id); D.render.render(); }
+  },
+  composer: function (el, ev) { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); if (S.sel) queueAsk(S.sel); } },
+  cmt: function (el, ev) { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); addCommentFrom(did(el)); } },
+  'cmt-edit': function (el, ev) {
+    if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); var k = String(S.cmtEdit || '').split('|')[1]; if (k !== undefined) D.ops.saveComment(did(el), +k); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); S.cmtEdit = null; D.render.render(); }
+  },
+  dupq: function (el, ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); var r = S.dupFor ? D.views.mergeCands(S.dupFor, S.dupQ) : null; if (r && r.list.length) mergeItems(r.list[0].id, S.dupFor); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); S.dupFor = null; S.dismissFor = null; D.render.render(); }
+  },
+  mergeq: function (el, ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); var r = S.mergeFor ? D.views.mergeCands(S.mergeFor, S.mergeQ) : null; if (r && r.list.length) mergeItems(S.mergeFor, r.list[0].id); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); S.mergeFor = null; S.mergeQ = ''; D.render.render(); }
+  },
+  linkq: function (el, ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); var lm = S.sel && kindOf(S.sel) === 'T' ? S.linkMode : 'related', r = S.sel ? D.views.linkCands(S.sel, lm, S.linkQ, { kind: S.linkKind, done: S.linkDone && lm !== 'blocked' }) : null; if (r && r.list.length) addLink(S.sel, r.list[0].id); }
+    else if (ev.key === 'Escape' && el.value) { ev.preventDefault(); S.linkQ = ''; D.model.forceClear(el.id); D.render.render(); }
+  },
+  sys: function (el, ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); var r = S.sel ? D.views.linkCands(S.sel, 'related', S.sysQ, { kind: 'System' }) : null; if (r && r.list.length) addSystem(S.sel, r.list[0].id); }
+    else if (ev.key === 'Escape' && el.value) { ev.preventDefault(); S.sysQ = ''; D.model.forceClear(el.id); D.render.render(); }
+  },
+  'e-link': function (el, ev) { if (ev.key === 'Enter') { ev.preventDefault(); addEntityLink(did(el)); } }
+};
+function handleEsc(ev) {
+  var t = ev.target;
+  if (S.dialog) { ev.preventDefault(); closeDialog(); return; }
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') && isTyping(t) && t.hasAttribute('data-ch')) {
+    ev.preventDefault();
+    if (t.value !== t.defaultValue) { t.value = t.defaultValue; }
+    t.blur();
+    return;
+  }
+  if (S.dismissFor) { S.dismissFor = null; D.render.render(); return; }
+  if (S.confirm) { S.confirm = null; D.render.render(); return; }
+  if (S.editAsk) { S.editAsk = null; D.render.render(); return; }
+  if (S.adding) { S.adding = null; D.render.render(); return; }
+  if (S.panel && S.sel) { ev.preventDefault(); closePanel(); return; }
+  if (S.cur) { S.cur = null; D.render.render(); }
+}
+function trapTab(ev) {
+  var d = document.querySelector('.dlg');
+  if (!d) return;
+  var f = Array.prototype.filter.call(d.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])'), function (x) { return !x.disabled && x.offsetParent !== null; });
+  if (!f.length) return;
+  var first = f[0], last = f[f.length - 1];
+  if (!d.contains(document.activeElement)) { ev.preventDefault(); first.focus(); return; }
+  if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+  else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+}
+var GO_KEYS = { t: 'today', i: 'inbox', n: 'next', w: 'waiting', u: 'upcoming', f: 'fyi', a: 'all', p: 'projects', e: 'people', s: 'systems', r: 'review', c: 'claude', d: 'done' };
+function onKey(ev) {
+  var t = ev.target;
+  var kd = t && t.closest ? t.closest('[data-kd]') : null;
+  if (kd && KD[kd.getAttribute('data-kd')]) { KD[kd.getAttribute('data-kd')](kd, ev); if (ev.defaultPrevented) return; }
+  if (!S.ready) return;
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && (ev.key === 'k' || ev.key === 'K')) { ev.preventDefault(); if (S.dialog === 'palette') closeDialog(); else openPalette(); return; }
+  if (ev.key === 'Escape') { handleEsc(ev); return; }
+  if (S.dialog) { if (ev.key === 'Tab') trapTab(ev); return; }
+  if (t && t.getAttribute && t.getAttribute('role') === 'tab' && !ev.altKey && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft')) {
+    ev.preventDefault();
+    var tabs = ['details', 'links', 'claude'], k = tabs.indexOf(S.tab) + (ev.key === 'ArrowRight' ? 1 : -1);
+    S.tab = tabs[(k + 3) % 3]; S.linkQ = '';
+    D.render.focusLater('#tab-' + S.tab);
+    return;
+  }
+  var typing = isTyping(t);
+  if ((ev.ctrlKey || ev.metaKey) && !ev.shiftKey && !ev.altKey && (ev.key === 'z' || ev.key === 'Z') && !typing) { if (D.ops.undoLast()) ev.preventDefault(); return; }
+  if (typing || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  var key = ev.key.length === 1 ? ev.key.toLowerCase() : ev.key;
+  if (S.gAt && Date.now() - S.gAt < 1500 && GO_KEYS[key]) { S.gAt = 0; ev.preventDefault(); go(GO_KEYS[key]); return; }
+  S.gAt = 0;
+  var onButton = t && (t.tagName === 'BUTTON' || t.tagName === 'A' || (t.tagName === 'INPUT'));
+  switch (key) {
+    case '/': ev.preventDefault(); openPalette(); return;
+    case '?': ev.preventDefault(); openKeys(); return;
+    case 'g': S.gAt = Date.now(); return;
+    case 'n': ev.preventDefault(); quickAddFocus(); return;
+    case 'j': ev.preventDefault(); moveCursor(1); return;
+    case 'k': ev.preventDefault(); moveCursor(-1); return;
+    case 'ArrowDown': if (!onButton && t === document.body) { ev.preventDefault(); moveCursor(1); } return;
+    case 'ArrowUp': if (!onButton && t === document.body) { ev.preventDefault(); moveCursor(-1); } return;
+    case 'Enter': if (!onButton && S.cur) { ev.preventDefault(); select(S.cur); } return;
+    case 'x': { var id = targetId(); if (id && kindOf(id) === 'T' && (D.model.whereOf(id) === 'open' || D.model.whereOf(id) === 'done')) { ev.preventDefault(); toggleDone(id, true); } return; }
+    case 'a': { var a = targetId(); if (a && D.model.whereOf(a) === 'inbox') { ev.preventDefault(); accept(a); } return; }
+    case 'd': { var d = targetId(); if (d && D.model.whereOf(d) === 'inbox') { ev.preventDefault(); S.dismissFor = d; S.dupFor = null; S.dismissAt = S.panel && S.sel === d ? 'panel' : 'row'; if (!S.panel) S.cur = d; D.render.focusLater(S.dismissAt === 'panel' ? '.panel .reasons .chipbtn' : '.main [data-row="' + d + '"] .reasons .chipbtn'); } return; }
+    case 'c': { var c = S.panel && S.sel ? S.sel : targetId(); if (c) { ev.preventDefault(); select(c, { tab: 'claude', focus: '#f-composer' }); } return; }
+  }
+}
+
+/* ===================== folder access and start-up ===================== */
+async function loadFolderSugs() {
+  try { var sugs = await D.files.folderSuggestions(); if (sugs) { S.folderSugs = sugs; D.render.render(); } } catch (e) { /* no suggestions */ }
+}
+async function pickFolder() {
+  var h;
+  try { h = await window.showDirectoryPicker({ id: 'discerny', mode: 'readwrite' }); }
+  catch (e) { if (e && e.name === 'AbortError') return; S.gate = { mode: 'error', msg: D.files.errText(e) }; D.render.render(); return; }
+  D.files.useFolder(h); S.folder = h.name;
+  try { await h.getFileHandle('TASKS.md'); }
+  catch (e) { if (e && e.name === 'NotFoundError') { S.gate = { mode: 'wrong', msg: '“' + h.name + '” has no TASKS.md.' }; D.render.render(); return; } }
+  await D.files.idbSet('dir', h);
+  openFolder();
+}
+// Switching data folders reloads the page, so nothing from the old folder (undo, selection, timestamps) carries over.
+async function changeFolder() {
+  if (D.files.srv) {
+    if (S.dialog !== 'folder') { S.dlgReturn = document.activeElement; S.folderPath = ''; S.folderErr = ''; }
+    S.dialog = 'folder'; D.render.render();
+    if (D.files.srv.canSwitch) { loadFolderSugs(); D.render.focusLater('#folder-path'); } else D.render.focusLater('.dlg .xbtn');
+    return;
+  }
+  if (D.files.Q.jobs.some(function (j) { return !j.sync; })) { D.ops.toastShow('Wait until your changes are saved, then change folder.'); return; }
+  var h;
+  try { h = await window.showDirectoryPicker({ id: 'discerny', mode: 'readwrite' }); }
+  catch (e) { if (!e || e.name !== 'AbortError') D.ops.toastShow('Couldn’t open the folder: ' + D.files.errText(e)); return; }
+  try { await h.getFileHandle('TASKS.md'); }
+  catch (e) { D.ops.toastShow('“' + h.name + '” has no TASKS.md, so it isn’t a Discerny data folder.'); return; }
+  if (!(await D.files.idbSet('dir', h))) { D.ops.toastShow('Couldn’t remember the new folder.'); return; }
+  location.reload();
+}
+async function regrant() {
+  if (!D.files.dir) { pickFolder(); return; }
+  try {
+    var p = await D.files.dir.requestPermission({ mode: 'readwrite' });
+    if (p === 'granted') { openFolder(); return; }
+    S.gate = { mode: 'denied', msg: '' };
+  } catch (e) { S.gate = { mode: 'error', msg: D.files.errText(e) }; }
+  D.render.render();
+}
+async function openFolder() {
+  if (D.files.srv && D.files.srv.problem === 'none') { S.gate = { mode: 'nofolder', msg: '' }; D.render.render(); loadFolderSugs(); D.render.focusLater('#folder-path'); return; }
+  if (D.files.srv && D.files.srv.canSwitch) loadFolderSugs();
+  S.folder = D.files.srv ? D.files.srv.name : D.files.dir.name;
+  if (!D.files.srv) try { await D.files.dir.getFileHandle('TASKS.md'); }
+  catch (e) {
+    if (e && e.name === 'NotFoundError') S.gate = { mode: 'wrong', msg: '“' + D.files.dir.name + '” has no TASKS.md.' };
+    else if (D.files.isPermErr(e)) S.gate = { mode: D.files.srv ? 'srvdown' : 'reconnect', msg: '' };
+    else S.gate = { mode: 'error', msg: D.files.errText(e) };
+    D.render.render();
+    return;
+  }
+  S.gate = { mode: 'loading', msg: '' };
+  D.render.render();
+  try {
+    var g = await D.files.formatGate();
+    if (g) { S.gate = g; D.render.render(); return; }
+    D.model.setSettings(readSettings(await D.files.readText(SETTINGS_FILE)));
+    var m = await D.ops.loadAll(); D.ops.applyLoaded(m); S.lastSync = Date.now();
+  }
+  catch (e) {
+    console.error(e);
+    // The server switched folders between /api/info and these reads: open the folder it serves now.
+    if (D.files.isMoved(e)) { location.reload(); return; }
+    S.gate = D.files.isPermErr(e) ? { mode: D.files.srv ? 'srvdown' : 'reconnect', msg: '' } : { mode: 'error', msg: D.files.errText(e) }; D.render.render(); return;
+  }
+  S.ready = true;
+  land();
+  startTimers();
+  D.render.focusLater('#page-title');
+  if (D.files.Q.jobs.length) D.files.kick();
+}
+var timersOn = false, lastDay = '';
+function startTimers() {
+  if (timersOn) return;
+  timersOn = true;
+  lastDay = D.model.todayStr();
+  setInterval(poll, 3000);
+  setInterval(function () { if (!document.hidden) D.render.render(); if (D.model.todayStr() !== lastDay) { lastDay = D.model.todayStr(); D.render.render(); } }, 30000);
+  window.addEventListener('focus', function () { poll(); D.render.render(); });
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { poll(); D.render.render(); } });
+}
+
+D.input = {
+  land: land, go: go, goAny: goAny, select: select, closePanel: closePanel, toggleDone: toggleDone, accept: accept,
+  dismiss: dismiss, mergeItems: mergeItems, deleteTask: deleteTask, addQuick: addQuick, addCommentFrom: addCommentFrom,
+  addLink: addLink, ACT: ACT, CH: CH, IN: IN, SUB: SUB, onKey: onKey, openFolder: openFolder
+};
+// The page-meaning half of drawing, set off by render after each frame.
+D.files.install('afterDraw', function () {
+  if (S.scrollRow) {
+    var r = document.querySelector('.main [data-row="' + S.scrollRow + '"]');
+    S.scrollRow = null;
+    if (r && r.scrollIntoView) r.scrollIntoView({ block: 'nearest' });
+  }
+  if (D.links.nav.offView && document.querySelector('.main [data-row="' + D.links.nav.offView + '"], .main [data-k="ack-' + D.links.nav.offView + '"]')) { D.links.nav.offView = null; D.render.render(); }
+  var n = S.ready && S.m ? D.model.inboxCount() : 0, h1 = document.getElementById('page-title');
+  if (S.ready && S.m) D.links.syncLink();
+  var it = S.ready && S.m ? D.links.linkItem() : null;
+  var title = (it ? D.model.item(it).title + ' · ' : '') + (S.ready && h1 ? h1.textContent + ' · ' : '') + 'Discerny' + (n ? ' (' + n + ' in inbox)' : '');
+  if (document.title !== title) document.title = title;
+});
+})();

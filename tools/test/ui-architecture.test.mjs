@@ -351,6 +351,19 @@ function innerHtmlProblems(where, src) {
   return /\.\s*(?:innerHTML|outerHTML)\s*=(?!=)|\.\s*insertAdjacentHTML\s*\(/.test(codeOf(src)) ? [`${where} writes markup to the page, which only render does`] : [];
 }
 
+// ---------------------------------------------------------------- input's rules
+
+// What input may use from the browser, beyond itself, core and JavaScript's own built-ins: the page and the address, timers, the clipboard, and setThemeColor from the page's head.
+const INPUT_BROWSER = new Set(['D', 'document', 'window', 'location', 'navigator', 'setTimeout', 'setInterval', 'requestAnimationFrame', 'console', 'setThemeColor']);
+
+// What's wrong with input's source: anything from outside itself and core, which is how it would lean on the page's script or reach the folder without files; or markup.
+function inputProblems(src, core = CORE) {
+  const code = codeOf(src), out = [];
+  const known = new Set([...namesDeclared(code), ...namesAtTopLevel(codeOf(core))]);
+  for (const n of namesUsed(code)) if (!known.has(n) && !BUILT_INS.has(n) && !INPUT_BROWSER.has(n)) out.push(`input uses ${n}, from outside itself and core`);
+  return out.concat(markupProblems('input', src));
+}
+
 // ---------------------------------------------------------------- the hooks
 
 // The whole set. A new hook needs a row here and in files's registry; if the need can be met by moving code, move the code.
@@ -362,7 +375,7 @@ const HOOK_TABLE = {
   folderState: { firedBy: ['files'], installedBy: 'model' },
   afterDraw: { firedBy: ['render'], installedBy: 'input' },
 };
-const PAGE_OWN = 'page'; // the page's own script installs what hasn't moved yet, so it's held only to the table's names and the one-installer rule
+const PAGE_OWN = 'page'; // the page's own script could install what hasn't moved, so it's held only to the table's names and the one-installer rule
 
 // Each install(...) and fire(...) call in a source, with the hook's name; a name that isn't a plain string comes back as null.
 function hookCalls(src) {
@@ -409,7 +422,8 @@ test('core offers only what it has, and the page reaches it through D.core', () 
 
 test('the page\'s own script is read whole, or the bare-call rule would miss what is in it', () => {
   const names = namesAtTopLevel(codeOf(inlineScript(PAGE)));
-  for (const n of ['S', 'boot', 'go', 'toggleDone', 'poll']) assert.ok(names.has(n), n);
+  for (const n of ['S', 'boot']) assert.ok(names.has(n), n);
+  assert.equal(names.has('ev'), false, 'a parameter inside the script is not at its top level');
   assert.equal(names.has('setThemeColor'), false);
 });
 
@@ -460,12 +474,26 @@ test('no concern but render writes markup to the page', () => {
   assert.match(codeOf(readRepo('ui/render.js')), /\.innerHTML\s*=/);
 });
 
-test('the views and render have left the page, whose callers reach them through D.views and D.render', () => {
+test('input uses only the concerns before it, and never builds markup', () => {
+  assert.deepEqual(inputProblems(readRepo('ui/input.js')), []);
+});
+
+test('input has left the page, whose listeners reach it through D.input', () => {
+  const inline = inlineScript(PAGE), names = namesAtTopLevel(codeOf(inline));
+  for (const n of ['ACT', 'CH', 'IN', 'SUB', 'KD', 'onKey', 'go', 'goAny', 'select', 'closePanel', 'rowIds', 'neighbour', 'moveCursor', 'targetId', 'toggleDone', 'accept', 'addQuick', 'addPrjFrom', 'addTagFrom', 'openPalette', 'closeDialog', 'poll', 'regainAccess', 'retrySave', 'openState', 'openLink', 'land', 'pickFolder', 'changeFolder', 'regrant', 'openFolder', 'startTimers', 'setWb', 'loadFolderSugs']) assert.equal(names.has(n), false, n);
+  assert.deepEqual([...names].sort(), ['S', 'boot'], 'only start-up is left');
+  for (const n of ['ACT', 'CH', 'IN', 'SUB', 'onKey', 'land', 'openFolder']) assert.match(codeOf(inline), new RegExp(`D\\.input\\.${n}\\b`), n);
+  assert.deepEqual(hookCalls(inline), [], 'the page installs no hook now');
+  assert.deepEqual(hookCalls(readRepo('ui/input.js')), [{ call: 'install', name: 'afterDraw' }]);
+});
+
+test('the views and render have left the page, whose callers in input and start-up reach them through D.views and D.render', () => {
   const inline = inlineScript(PAGE), names = namesAtTopLevel(codeOf(inline));
   for (const n of ['prioMark', 'scoreCell', 'scoreFact', 'prioToggle', 'esc', 'bt', 'ic', 'vRow', 'vSec', 'viewToday', 'viewInbox', 'viewAll', 'viewDone', 'vChange', 'viewProject', 'viewPeople', 'viewReview', 'viewClaude', 'vPanel', 'panelTask', 'vSide', 'vMain', 'viewFor', 'vPalette', 'vGate', 'vApp', 'keyOf', 'morphNode', 'morphChildren', 'renderQ', 'measure', 'render', 'renderNow', 'afterRender', 'focusLater']) assert.equal(names.has(n), false, n);
-  assert.match(codeOf(inline), /D\.views\.viewFor\(/);
-  assert.match(codeOf(inline), /D\.render\.render\(/);
-  assert.match(codeOf(inline), /D\.render\.focusLater\(/);
+  const input = codeOf(readRepo('ui/input.js'));
+  assert.match(input, /D\.views\.viewFor\(/);
+  assert.match(input, /D\.render\.render\(/);
+  assert.match(input, /D\.render\.focusLater\(/);
   assert.match(codeOf(inline), /D\.render\.measure\(/);
 });
 
@@ -1279,6 +1307,344 @@ test('focusLater moves focus at once when it can, or draws so that it can', () =
   assert.equal(frames.length, 1);
 });
 
+// ---------------------------------------------------------------- input as it runs
+
+// A fresh copy of input over every concern before it, in Node, with a small stand-in for the document. rows are the rows on the page, in order; els are what a selector finds.
+function loadInput({ hash = '', rows = ['T-0001'], picker = null, store = {}, fetch = null } = {}) {
+  const frames = [], focused = [], scrolled = [], els = {}, timers = [], intervals = [], listeners = [];
+  const template = { innerHTML: null, content: { childNodes: [] } }, root = { nodeType: 1, firstChild: null };
+  const element = (sel, more = {}) => { els[sel] = { focus() { focused.push(sel); }, scrollIntoView() { scrolled.push(sel); }, ...more }; return els[sel]; };
+  const location = { hash, protocol: 'http:', reloaded: 0, replace(h) { location.hash = h; }, reload() { location.reloaded++; } };
+  const document = {
+    activeElement: null, body: {}, title: '', hidden: false,
+    documentElement: { attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; } },
+    getElementById: (id) => (id === 'app' ? root : els['#' + id] || null), createElement: () => template,
+    querySelector: (sel) => els[sel] || null, querySelectorAll: () => rows.map(id => ({ getAttribute: () => id })), contains: () => true,
+    addEventListener: (name) => listeners.push(name),
+  };
+  const window = { innerWidth: 1600, addEventListener: (name) => listeners.push(name) };
+  if (picker) window.showDirectoryPicker = picker;
+  const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+  const themes = [];
+  const load = new Function('localStorage', 'location', 'document', 'window', 'requestAnimationFrame', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'navigator', 'setThemeColor', 'fetch',
+    `${CORE}\n${movedScripts().filter(f => f !== 'ui/core.js' && f !== 'ui/main.js').map(readRepo).join('\n')}\n;return D;`);
+  const D = load(localStorage, location, document, window, (f) => { frames.push(f); return frames.length; }, { error() {} }, (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, () => {}, (fn, ms) => { intervals.push({ fn, ms }); }, {}, (t) => themes.push(t), fetch);
+  withData(D);
+  const S = D.model.S;
+  S.ready = true; S.width = 1600; S.eq = ''; S.view = 'today';
+  return { D, I: D.input, S, location, document, window, frames, focused, scrolled, element, store, themes, timers, intervals, listeners };
+}
+// A key press, as onKey reads one.
+const keyOn = (key, target, more = {}) => { const ev = { key, target: target || { tagName: 'BODY', closest: () => null, getAttribute: () => null }, defaultPrevented: false, preventDefault() { ev.defaultPrevented = true; }, stopPropagation() {}, ...more }; return ev; };
+// A click or field element, as the handlers read one.
+const elWith = (attrs = {}, more = {}) => ({ getAttribute: (k) => (k in attrs ? attrs[k] : null), closest: () => null, ...more });
+
+test('input offers what start-up and the steps use on D.input, and keeps the rest private', () => {
+  const { D, I } = loadInput();
+  assert.deepEqual(Object.keys(D), ['core', 'files', 'model', 'ops', 'links', 'views', 'render', 'input']);
+  for (const n of ['ACT', 'CH', 'IN', 'SUB']) assert.equal(typeof I[n], 'object', n);
+  for (const n of ['onKey', 'land', 'openFolder', 'go', 'goAny', 'select', 'closePanel', 'toggleDone', 'accept', 'dismiss', 'mergeItems', 'deleteTask', 'addQuick', 'addCommentFrom', 'addLink']) assert.equal(typeof I[n], 'function', n);
+  for (const n of ['KD', 'GO_KEYS', 'rowIds', 'neighbour', 'moveCursor', 'targetId', 'did', 'dvv', 'poll', 'regainAccess', 'retrySave', 'setWb', 'openState', 'openLink', 'copyText', 'addPrjFrom', 'addTagFrom', 'pickFolder', 'changeFolder', 'regrant', 'startTimers', 'loadFolderSugs']) assert.equal(n in I, false, n);
+});
+
+test('input installs afterDraw, and only once', () => {
+  const { D } = loadInput();
+  assert.throws(() => D.files.install('afterDraw', () => {}), /bad hook install: afterDraw/);
+});
+
+test('afterDraw scrolls to the row asked for, clears an Item now on the View, keeps the Link and sets the title', () => {
+  const { D, S, document, element, scrolled, location } = loadInput();
+  element('.main [data-row="T-0001"]');
+  element('#page-title', { textContent: 'Today' });
+  element('.main [data-row="T-0001"], .main [data-k="ack-T-0001"]');
+  S.scrollRow = 'T-0001';
+  D.links.nav.offView = 'T-0001';
+  D.links.nav.hashOwn = location.hash;
+  D.files.fire('afterDraw');
+  assert.deepEqual(scrolled, ['.main [data-row="T-0001"]']);
+  assert.equal(S.scrollRow, null);
+  assert.equal(D.links.nav.offView, null);
+  assert.equal(location.hash, '#/today');
+  assert.match(document.title, /^Today · Discerny \(\d+ in inbox\)$/);
+});
+
+test('afterDraw before the folder is read leaves the Link alone', () => {
+  const { D, S, document, location } = loadInput({ hash: '#/inbox' });
+  S.ready = false;
+  D.files.fire('afterDraw');
+  assert.equal(location.hash, '#/inbox');
+  assert.equal(document.title, 'Discerny');
+});
+
+test('go changes the View, clears what belonged to the old one, and asks for history only when it changed', () => {
+  const { D, I, S, focused, element } = loadInput();
+  element('#page-title');
+  S.sel = 'T-0001'; S.panel = true; S.pq = 'x'; S.dialog = 'keys';
+  I.go('today');
+  assert.equal(D.links.nav.linkPush, false, 'the same View adds no history');
+  assert.equal(S.panel, false);
+  assert.equal(S.sel, null);
+  assert.equal(S.dialog, null);
+  assert.equal(S.pq, 'x', 'a filter stays on the same View');
+  I.go('projects');
+  assert.equal(S.view, 'projects');
+  assert.equal(D.links.nav.linkPush, true);
+  assert.equal(S.pq, '');
+  assert.equal(focused.at(-1), '#page-title');
+});
+
+test('going to the Inbox opens its first Proposal, unless the window is a drawer', () => {
+  const wide = loadInput();
+  wide.I.go('inbox');
+  assert.equal(wide.S.sel, 'T-0002');
+  assert.equal(wide.D.links.nav.autoOpen, 'T-0002');
+  const narrow = loadInput();
+  narrow.S.width = 500;
+  narrow.I.go('inbox');
+  assert.equal(narrow.S.sel, null);
+});
+
+test('goAny goes where each kind of ID lives', () => {
+  const { I, S } = loadInput();
+  I.goAny('P-0001');
+  assert.deepEqual([S.view, S.entity], ['person', 'P-0001']);
+  I.goAny('PRJ-0001');
+  assert.deepEqual([S.view, S.entity], ['project', 'PRJ-0001']);
+  I.goAny('T-0001');
+  assert.deepEqual([S.sel, S.panel], ['T-0001', true]);
+});
+
+test('select opens the Item and clears the last one\'s drafts, and closePanel puts focus back on its row', () => {
+  const { D, I, S, focused, element } = loadInput();
+  S.cmtDraft = 'half written';
+  element('.main [data-row="T-0001"] .t');
+  element('#panel-top');
+  I.select('T-0001');
+  assert.deepEqual([S.sel, S.panel, S.cur, S.cmtDraft], ['T-0001', true, 'T-0001', '']);
+  assert.equal(D.links.nav.linkPush, true);
+  assert.equal(focused.at(-1), '#panel-top');
+  I.closePanel();
+  assert.deepEqual([S.sel, S.panel], [null, false]);
+  assert.equal(focused.at(-1), '.main [data-row="T-0001"] .t');
+});
+
+test('a click on Go, Theme and Retry does what the button says', () => {
+  const { D, I, S, themes, store } = loadInput();
+  I.ACT.go(elWith({ 'data-v': 'people-gaps' }));
+  assert.deepEqual([S.view, S.pf], ['people', 'gaps']);
+  S.theme = 'light';
+  I.ACT.theme();
+  assert.equal(S.theme, 'dark');
+  assert.deepEqual(themes, ['dark']);
+  assert.equal(store['discerny-theme'], 'dark');
+  D.files.Q.blocked = { msg: 'x' };
+  S.confirm = 'discard';
+  I.ACT.retry();
+  assert.equal(S.confirm, null);
+});
+
+test('Retry after a lost folder asks for access first, and stays blocked without it', async () => {
+  const { D, I, S } = loadInput();
+  D.files.useFolder({ name: 'f', requestPermission: async () => 'denied' });
+  D.files.Q.blocked = { msg: 'x' };
+  S.lost = true;
+  I.ACT.retry();
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.equal(S.lost, true);
+  assert.deepEqual(D.files.Q.blocked, { msg: 'x' });
+  D.files.useFolder({ name: 'f', requestPermission: async () => 'granted', getFileHandle: async () => { throw Object.assign(new Error('gone'), { name: 'NotFoundError' }); } });
+  I.ACT.retry();
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.equal(S.lost, false);
+  assert.equal(D.files.Q.blocked, null);
+});
+
+test('keys: Ctrl K opens and closes the palette, G then a letter goes to a View, ? opens the shortcuts', () => {
+  const { I, S } = loadInput();
+  const ctrlK = keyOn('k', undefined, { ctrlKey: true });
+  I.onKey(ctrlK);
+  assert.equal(ctrlK.defaultPrevented, true);
+  assert.equal(S.dialog, 'palette');
+  I.onKey(keyOn('K', undefined, { ctrlKey: true }));
+  assert.equal(S.dialog, null);
+  I.onKey(keyOn('g'));
+  assert.ok(S.gAt > 0);
+  I.onKey(keyOn('p'));
+  assert.equal(S.view, 'projects');
+  I.onKey(keyOn('?'));
+  assert.equal(S.dialog, 'keys');
+  I.onKey(keyOn('Escape'));
+  assert.equal(S.dialog, null);
+});
+
+test('keys: J and K walk the rows, Enter opens the one you are on, and Escape closes it', () => {
+  const { I, S } = loadInput({ rows: ['T-0001', 'T-0002'] });
+  I.onKey(keyOn('j'));
+  assert.equal(S.cur, 'T-0001');
+  I.onKey(keyOn('j'));
+  assert.equal(S.cur, 'T-0002');
+  I.onKey(keyOn('j'));
+  assert.equal(S.cur, 'T-0002', 'it stops at the last row');
+  I.onKey(keyOn('k'));
+  assert.equal(S.cur, 'T-0001');
+  I.onKey(keyOn('Enter'));
+  assert.deepEqual([S.sel, S.panel], ['T-0001', true]);
+  I.onKey(keyOn('Escape'));
+  assert.equal(S.panel, false);
+});
+
+test('keys: a letter typed in a field stays in the field', () => {
+  const { I, S } = loadInput();
+  const input = { tagName: 'INPUT', type: 'text', closest: () => null, getAttribute: () => null };
+  const ev = keyOn('j', input);
+  I.onKey(ev);
+  assert.equal(ev.defaultPrevented, false);
+  assert.ok(!S.cur);
+  const ctrlZ = keyOn('z', input, { ctrlKey: true });
+  I.onKey(ctrlZ);
+  assert.equal(ctrlZ.defaultPrevented, false, 'the field undoes its own typing');
+});
+
+test('keys: X completes the Item under the cursor and moves to the next row, and a field\'s own keys go first', () => {
+  const { D, I, S } = loadInput({ rows: ['T-0001', 'T-0002'] });
+  S.cur = 'T-0001';
+  I.onKey(keyOn('x'));
+  assert.equal(D.model.whereOf('T-0001'), 'done');
+  assert.equal(S.cur, 'T-0002');
+  S.qa = 'typed';
+  const box = { tagName: 'INPUT', type: 'text', value: 'typed', getAttribute: (k) => (k === 'data-kd' ? 'qa' : null) };
+  box.closest = () => box;
+  I.onKey(keyOn('Escape', box));
+  assert.equal(S.qa, '', 'Escape in quick add clears it');
+});
+
+test('typing keeps the draft in state, and leaving a field commits only a real change', () => {
+  const { D, I, S } = loadInput();
+  I.IN.qa(elWith({}, { value: 'Ring Ann' }));
+  assert.equal(S.qa, 'Ring Ann');
+  I.IN.composer(elWith({}, { value: 'no panel open' }));
+  assert.deepEqual(S.composer, {}, 'the composer belongs to the open Item');
+  const before = S.ver;
+  I.CH.title(elWith({ 'data-id': 'T-0001' }, { value: 'Order the widgets', id: 'f-title' }));
+  assert.equal(S.ver, before, 'no change, no commit');
+  I.CH.title(elWith({ 'data-id': 'T-0001' }, { value: 'Order more widgets', id: 'f-title' }));
+  assert.equal(D.model.item('T-0001').title, 'Order more widgets');
+  assert.equal(S.ver, before + 1);
+  I.CH.title(elWith({ 'data-id': 'T-0001' }, { value: '  ', id: 'f-title' }));
+  assert.equal(D.model.item('T-0001').title, 'Order more widgets', 'an empty title puts the old one back');
+  assert.ok(D.model.forced.has('f-title'));
+});
+
+test('quick add makes the Item, clears the box and offers Undo; an empty box only moves focus', () => {
+  const { D, I, S, focused, element } = loadInput();
+  element('#qa-in');
+  I.addQuick();
+  assert.equal(focused.at(-1), '#qa-in');
+  S.qa = 'Ring Ann';
+  I.addQuick();
+  assert.equal(S.qa, '');
+  assert.ok(D.model.allItems().some(i => i.title === 'Ring Ann'));
+  assert.match(S.toasts.at(-1).text, /^Added T-0003 /);
+});
+
+test('Done, Reopen and Accept move the Item and say so, and Accept moves on to the next Proposal', () => {
+  const { D, I, S } = loadInput();
+  I.toggleDone('T-0001');
+  assert.equal(D.model.whereOf('T-0001'), 'done');
+  assert.match(S.toasts.at(-1).text, /^Done: /);
+  I.toggleDone('T-0001');
+  assert.equal(D.model.whereOf('T-0001'), 'open');
+  assert.match(S.toasts.at(-1).text, /^Reopened T-0001/);
+  S.view = 'inbox';
+  I.accept('T-0002');
+  assert.equal(D.model.whereOf('T-0002'), 'open');
+  assert.match(S.toasts.at(-1).text, /^Accepted T-0002 into /);
+  assert.equal(S.sel, null, 'nothing left to clarify');
+});
+
+test('Dismiss as Duplicate only opens the search; Already handled accepts and completes', () => {
+  const { D, I, S } = loadInput();
+  I.dismiss('T-0002', 'Duplicate');
+  assert.equal(S.dupFor, 'T-0002');
+  assert.equal(D.model.whereOf('T-0002'), 'inbox');
+  I.dismiss('T-0002', 'Already handled');
+  assert.equal(D.model.whereOf('T-0002'), 'done');
+});
+
+test('the All items filters are remembered', () => {
+  const { I, S, store } = loadInput();
+  I.CH['wb-sort'](elWith({}, { value: 'due' }));
+  assert.equal(S.wb.sort, 'due');
+  assert.equal(JSON.parse(store['discerny-wb']).sort, 'due');
+});
+
+test('landing on a Link opens its View and Item, and says what it couldn\'t find', () => {
+  const t = loadInput({ hash: '#/inbox/T-0002' });
+  t.I.land();
+  assert.deepEqual([t.S.view, t.S.sel], ['inbox', 'T-0002']);
+  assert.equal(t.D.links.nav.linkPush, false, 'the browser has already made its history entry');
+  assert.equal(t.D.links.nav.hashOwn, '#/inbox/T-0002');
+  const gone = loadInput({ hash: '#/T-0009' });
+  gone.I.land();
+  assert.equal(gone.S.view, 'today');
+  assert.match(gone.S.toasts.at(-1).text, /T-0009 isn’t in this Data folder/);
+  const named = loadInput({ hash: '#/nowhere' });
+  named.I.land();
+  assert.equal(named.S.view, 'today');
+  assert.match(named.S.toasts.at(-1).text, /no View called “nowhere”/);
+});
+
+test('picking a folder with no TASKS.md says so, and a cancelled picker does nothing', async () => {
+  const notThere = () => Object.assign(new Error('not there'), { name: 'NotFoundError' });
+  const wrong = loadInput({ picker: async () => ({ name: 'Holiday', getFileHandle: async () => { throw notThere(); } }) });
+  wrong.S.ready = false;
+  wrong.I.ACT.pick();
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.deepEqual(wrong.S.gate, { mode: 'wrong', msg: '“Holiday” has no TASKS.md.' });
+  const cancelled = loadInput({ picker: async () => { throw Object.assign(new Error('no'), { name: 'AbortError' }); } });
+  cancelled.S.ready = false;
+  cancelled.S.gate = { mode: 'pick', msg: '' };
+  cancelled.I.ACT.pick();
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.deepEqual(cancelled.S.gate, { mode: 'pick', msg: '' });
+});
+
+test('Change folder, by the picker: refuses unsaved work and a folder with no TASKS.md', async () => {
+  const notThere = () => Object.assign(new Error('not there'), { name: 'NotFoundError' });
+  const t = loadInput({ picker: async () => ({ name: 'Holiday', getFileHandle: async () => { throw notThere(); } }) });
+  t.D.files.Q.jobs.push({ label: 'a' });
+  t.D.files.Q.running = true;
+  t.I.ACT.folder();
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.match(t.S.toasts.at(-1).text, /Wait until your changes are saved/);
+  t.D.files.Q.jobs.length = 0;
+  t.I.ACT.folder();
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.match(t.S.toasts.at(-1).text, /“Holiday” has no TASKS\.md/);
+  assert.equal(t.location.reloaded, 0);
+});
+
+test('Change folder, on a served page: opens the dialog, and a switch reloads on the new folder or says why not', async () => {
+  const t = loadInput({ fetch: async (p, o) => {
+    if (p === '/api/info') return { ok: true, json: async () => ({ folder: 'x', name: 'x', session: 's', canSwitch: true }) };
+    if (p === '/api/folders') return { ok: true, json: async () => [{ name: 'a', folder: '/a' }] };
+    return JSON.parse(o.body).path === '/bad' ? { ok: false, status: 400, text: async () => 'No such folder.' } : { ok: true };
+  } });
+  await t.D.files.serverInfo();
+  t.I.ACT.folder();
+  assert.equal(t.S.dialog, 'folder');
+  for (let i = 0; i < 5; i++) await new Promise(r => setImmediate(r));
+  assert.deepEqual(t.S.folderSugs, [{ name: 'a', folder: '/a' }]);
+  t.S.folderPath = '/bad';
+  await t.I.SUB['folder-switch']();
+  assert.equal(t.S.folderErr, 'No such folder.');
+  assert.equal(t.S.folderBusy, false);
+  assert.equal(t.location.reloaded, 0);
+  t.S.folderPath = '/good';
+  await t.I.SUB['folder-switch']();
+  assert.equal(t.location.reloaded, 1);
+});
+
 // ---------------------------------------------------------------- and the test would catch it if they didn't
 
 const tags = (...names) => names.map(n => `<script src="ui/${n}.js"></script>`).join('\n');
@@ -1490,6 +1856,35 @@ test('render: fails when it reaches a concern after it, or sets off a hook not i
   assert.match(namespaceProblems('render', 'D.views.page = f;').join(), /assigns to D\.views\.page/);
   assert.match(hookProblems([{ concern: 'render', src: "D.files.fire('redraw');" }]).join(), /render fires redraw/);
   assert.match(hookProblems([{ concern: 'render', src: "D.files.install('afterDraw', f);" }]).join(), /render installs afterDraw/);
+});
+
+const goodInput = "(function () { 'use strict'; var S = D.model.S; function f(a) { document.querySelector(a); window.innerWidth; location.reload(); navigator.clipboard; setTimeout(f, 1); setInterval(f, 1); requestAnimationFrame(f); console.error(a); setThemeColor(a); D.ops.commit(a); D.links.nav.linkPush = true; D.render.render(); D.views.viewFor(); return parse(a) + S.view; } D.input = { f: f }; D.files.install('afterDraw', f); })();\n";
+
+test('input: a good file passes, and quiet words are not uses', () => {
+  assert.deepEqual(inputProblems(goodInput, smallCore), []);
+  assert.deepEqual(hookProblems([{ concern: 'input', src: goodInput }]), []);
+  assert.deepEqual(namespaceProblems('input', goodInput), []);
+  assert.deepEqual(inputProblems(`${goodInput}// fetch(a) and '<div>'\nvar x = 'fetch(a) and localStorage and a < b';\n`, smallCore), []);
+});
+
+test('input: fails when it builds markup, in a string or a template', () => {
+  for (const use of ["'<div>' + a", '"<span class=x>"', '`<b>${a}</b>`', "'</div>'"])
+    assert.match(inputProblems(`${goodInput}function g(a) { return ${use}; }\n`, smallCore).join(), /builds markup/, use);
+});
+
+test('input: fails when it reaches round a concern, by the browser or the page\'s script', () => {
+  for (const use of ['fetch(a)', 'localStorage.x', 'indexedDB.open(a)', 'boot()', 'vRow(a)', 'commit(a)', 'kick()'])
+    assert.ok(inputProblems(`${goodInput}function g(a) { return ${use}; }\n`, smallCore).length, use);
+});
+
+test('input: fails when it reaches a concern after it, or sets off a hook not its own', () => {
+  assert.match(namespaceProblems('input', 'D.main.boot();').join(), /input uses D\.main/);
+  assert.match(namespaceProblems('input', 'D.ops.commit = f;').join(), /assigns to D\.ops\.commit/);
+  assert.match(namespaceProblems('input', 'D.render.render = f;').join(), /assigns to D\.render\.render/);
+  assert.match(hookProblems([{ concern: 'input', src: "D.files.fire('redraw');" }]).join(), /input fires redraw/);
+  assert.match(hookProblems([{ concern: 'input', src: "D.files.fire('afterDraw');" }]).join(), /input fires afterDraw/);
+  assert.match(hookProblems([{ concern: 'input', src: "D.files.install('toast', f);" }]).join(), /input installs toast/);
+  assert.match(inlineCallProblems('input', 'boot();', 'function boot() {}').join(), /calls boot\(\) bare/);
 });
 
 test('only render writes markup to the page', () => {
