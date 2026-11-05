@@ -282,6 +282,21 @@ function opsProblems(src, core = CORE) {
   return out.concat(markupProblems('ops', src));
 }
 
+// ---------------------------------------------------------------- links's rules
+
+// What links may use from the browser, beyond itself, core and JavaScript's own built-ins: reading and writing the hash, and nothing else of the address.
+const LINKS_BROWSER = new Set(['D', 'location']);
+
+// What's wrong with links's source: anything from outside itself and core, which is how it would navigate or use the DOM; ops; any other use of the address; or markup.
+function linksProblems(src, core = CORE) {
+  const code = codeOf(src), out = [];
+  const known = new Set([...namesDeclared(code), ...namesAtTopLevel(codeOf(core))]);
+  for (const n of namesUsed(code)) if (!known.has(n) && !BUILT_INS.has(n) && !LINKS_BROWSER.has(n)) out.push(`links uses ${n}, from outside itself and core`);
+  if (/(?<![\w$.])D\.ops\b/.test(code)) out.push('links uses D.ops: it never changes Items');
+  if (/(?<![\w$.])location\b(?!\s*\.\s*(?:hash|replace)\b)/.test(code)) out.push('links uses location for more than the hash');
+  return out.concat(markupProblems('links', src));
+}
+
 // ---------------------------------------------------------------- the hooks
 
 // The whole set. A new hook needs a row here and in files's registry; if the need can be met by moving code, move the code.
@@ -361,6 +376,17 @@ test('model uses only core and its hook, never changes files, never uses DOM API
 
 test('ops uses only the concerns before it, never builds markup and never uses DOM APIs or location', () => {
   assert.deepEqual(opsProblems(readRepo('ui/ops.js')), []);
+});
+
+test('links uses only the concerns before it, never calls ops, never navigates and never builds markup', () => {
+  assert.deepEqual(linksProblems(readRepo('ui/links.js')), []);
+});
+
+test('the Link code has left the page, whose callers reach it through D.links', () => {
+  const inline = inlineScript(PAGE), names = namesAtTopLevel(codeOf(inline));
+  for (const n of ['LINK_VIEW', 'VIEW_LINK', 'RECORD_VIEW', 'stateKey', 'ENT_Q', 'LINK_STATE', 'TAB_LINK', 'linkValue', 'linkQuery', 'stateOfHash', 'linkItem', 'linkNow', 'linkOfHash', 'mergedInto', 'idShaped', 'linkText', 'missingId', 'linkResult', 'syncLink', 'search', 'linkPush', 'hashOwn', 'landing', 'autoOpen', 'offView']) assert.equal(names.has(n), false, n);
+  assert.match(codeOf(inline), /D\.links\.search\(/);
+  assert.match(codeOf(inline), /D\.links\.nav\.hashOwn/);
 });
 
 test('no local D hides the namespace, and S is the only alias, in any moved concern or the page\'s own script', () => {
@@ -882,6 +908,150 @@ test('the Side panel\'s extra operations change the Record and restore it', asyn
   assert.match(t.folder['PROJECTS.md'], /- Gadgets \{id: PRJ-0002/);
 });
 
+// ---------------------------------------------------------------- links as it runs
+
+// A fresh copy of links over the concerns it may use, in Node, with a small model and an address of its own. ops isn't loaded: links has no need of it.
+function loadLinks(hash = '') {
+  const replaced = [], location = { hash, replace(h) { location.hash = h; replaced.push(h); } };
+  const load = new Function('localStorage', 'location', `${CORE}\n${readRepo('ui/files.js')}\n${readRepo('ui/model.js')}\n${readRepo('ui/links.js')}\n;return D;`);
+  const D = load({ getItem: () => null, setItem() {} }, location);
+  withData(D);
+  return { D, L: D.links, S: D.model.S, location, replaced };
+}
+
+test('links offers its interface on D.links, and keeps the rest private', () => {
+  const { D, L } = loadLinks();
+  assert.deepEqual(Object.keys(D), ['core', 'files', 'model', 'links']);
+  for (const n of ['LINK_VIEW', 'VIEW_LINK', 'RECORD_VIEW', 'LINK_STATE', 'TAB_LINK', 'linkQuery', 'stateOfHash', 'linkItem', 'linkNow', 'linkOfHash', 'mergedInto', 'missingId', 'syncLink', 'search', 'nav']) {
+    assert.ok(n in L, n);
+    assert.notEqual(L[n], undefined, n);
+  }
+  for (const n of ['stateKey', 'ENT_Q', 'linkValue', 'idShaped', 'linkText', 'linkResult', 'openState', 'linkTarget', 'onThisView', 'openLink', 'openView', 'land', 'go', 'select']) assert.equal(n in L, false, n);
+});
+
+test('nav holds the Link variables, and they start as a fresh page needs', () => {
+  const { L } = loadLinks();
+  assert.deepEqual(L.nav, { linkPush: false, hashOwn: '', landing: false, autoOpen: null, offView: null });
+  assert.equal(Object.getOwnPropertyDescriptor(L, 'nav').get, undefined, 'one object, never reassigned, so it needs no accessor');
+});
+
+test('every View has one Link name, which reads back to that View', () => {
+  const { L } = loadLinks();
+  assert.equal(Object.keys(L.LINK_VIEW).length, 13);
+  for (const name of Object.keys(L.LINK_VIEW)) assert.equal(L.VIEW_LINK[L.LINK_VIEW[name]], name);
+  assert.equal(L.LINK_VIEW['next-actions'], 'next');
+  assert.equal(L.VIEW_LINK.claude, 'agent');
+  assert.deepEqual({ ...L.RECORD_VIEW }, { P: 'person', PRJ: 'project', SYS: 'system' });
+});
+
+test('a hash reads as its Link and its state', () => {
+  const { L } = loadLinks();
+  assert.equal(L.linkOfHash('#/today'), 'today');
+  assert.equal(L.linkOfHash('#/next-actions/T-0001?group=kind'), 'next-actions/T-0001');
+  assert.equal(L.linkOfHash(''), '');
+  assert.equal(L.linkOfHash('#/%E0%A4'), '%E0%A4', 'what will not decode stays as typed');
+  assert.deepEqual(L.stateOfHash('#/all-items?q=a%20%26%20b&group=type'), [['q', 'a & b'], ['group', 'type']]);
+  assert.deepEqual(L.stateOfHash('#/all-items?flag'), [['flag', '']]);
+  assert.deepEqual(L.stateOfHash('#/today'), []);
+});
+
+test('the Link now names the View or Record, the Item, and only state that differs from its default', () => {
+  const { L, S } = loadLinks();
+  assert.equal(L.linkNow(), 'today');
+  assert.equal(L.linkNow('T-0001'), 'today/T-0001');
+  S.view = 'project'; S.entity = 'PRJ-0001';
+  assert.equal(L.linkNow(), 'PRJ-0001');
+  S.view = 'all'; S.entity = null;
+  assert.equal(L.linkQuery(), '');
+  S.wq = 'a & b'; S.wb.group = 'type'; S.wb.sort = 'due';
+  assert.equal(L.linkQuery(), '?q=a%20%26%20b&group=type&sort=due-date');
+  S.tab = 'links';
+  assert.equal(L.linkQuery(), '?q=a%20%26%20b&group=type&sort=due-date');
+  assert.equal(L.linkQuery('T-0001'), '?q=a%20%26%20b&group=type&sort=due-date&tab=relationships');
+});
+
+test('a View state setter clears the field it fills', () => {
+  const { D, L, S } = loadLinks();
+  L.LINK_STATE.people.q.set('ann');
+  assert.equal(S.pq, 'ann');
+  assert.equal(D.model.forced.has('people-q'), true);
+  assert.equal(L.LINK_STATE.projects.q, L.LINK_STATE.systems.q, 'Projects and Systems share one key');
+});
+
+test('the Link names an Item the User opened, not one the Inbox opened by itself', () => {
+  const { L, S } = loadLinks();
+  assert.equal(L.linkItem(), null);
+  S.panel = true; S.sel = 'T-0001';
+  assert.equal(L.linkItem(), 'T-0001');
+  L.nav.autoOpen = 'T-0001';
+  assert.equal(L.linkItem(), null);
+  L.nav.autoOpen = null; S.sel = 'P-0001';
+  assert.equal(L.linkItem(), null);
+  S.sel = 'T-9999';
+  assert.equal(L.linkItem(), null);
+});
+
+test('syncLink replaces the hash it wrote last, or adds history when asked', () => {
+  const t = loadLinks('#/today');
+  t.L.nav.hashOwn = '#/today';
+  t.S.view = 'inbox';
+  t.L.syncLink();
+  assert.deepEqual(t.replaced, ['#/inbox']);
+  assert.equal(t.L.nav.hashOwn, '#/inbox');
+  t.S.view = 'fyi'; t.L.nav.linkPush = true;
+  t.L.syncLink();
+  assert.deepEqual(t.replaced, ['#/inbox'], 'not replaced');
+  assert.equal(t.location.hash, '#/fyi');
+  assert.equal(t.L.nav.hashOwn, '#/fyi');
+  assert.equal(t.L.nav.linkPush, false);
+});
+
+test('syncLink leaves alone a hash the page didn\'t write', () => {
+  const t = loadLinks('#/fyi');
+  t.L.nav.hashOwn = '#/today'; t.L.nav.linkPush = true;
+  t.L.syncLink();
+  assert.equal(t.location.hash, '#/fyi');
+  assert.deepEqual(t.replaced, []);
+  assert.equal(t.L.nav.hashOwn, '#/today', 'land takes that hash as its own');
+  assert.equal(t.L.nav.linkPush, true);
+});
+
+test('syncLink writes nothing when the hash is right already', () => {
+  const t = loadLinks('#/today');
+  t.L.nav.hashOwn = '#/today';
+  t.L.syncLink();
+  assert.deepEqual(t.replaced, []);
+});
+
+test('an ID that was merged is found by its Comment', () => {
+  const { D, L } = loadLinks();
+  assert.equal(L.mergedInto('T-0009'), null);
+  const parse = new Function(`${CORE}\n;return parse;`)();
+  D.model.S.m.tasks = parse('# Tasks\n\n- [ ] T-0001 Order the widgets {type: task}\n  - comment: {added-datetime: 2026-01-01 09:00; author: user}\n    Merged T-0009 into this.\n');
+  assert.equal(L.mergedInto('T-0009'), 'T-0001');
+});
+
+test('missingId names an ID, typed or in a whole address, and nothing else', () => {
+  const { L } = loadLinks();
+  assert.equal(L.missingId('t-0009'), 'T-0009');
+  assert.equal(L.missingId('http://127.0.0.1:4790/#/PRJ-0009'), 'PRJ-0009');
+  assert.equal(L.missingId('widgets'), null);
+  assert.equal(L.missingId('today/T-0009'), null);
+});
+
+test('search adds the Link row to searchAll, and adds nothing when the text is no Link', () => {
+  const { D, L } = loadLinks();
+  assert.deepEqual(L.search('widgets'), D.model.searchAll('widgets'));
+  const row = (q) => { const g = L.search(q); return g[0] && g[0].title === 'Link' ? g[0].items[0] : null; };
+  assert.deepEqual(row('inbox'), { label: 'Go to inbox', sub: 'View', id: '', act: 'link', arg: 'inbox' });
+  assert.deepEqual(row('http://127.0.0.1:4790/#/PRJ-0001'), { label: 'Go to PRJ-0001', sub: 'Widgets', id: '', act: 'link', arg: 'PRJ-0001' });
+  assert.equal(row('T-0001').sub, D.model.labelOf('T-0001'));
+  assert.equal(row('today/T-0009').sub, 'T-0009 isn’t in this Data folder');
+  assert.equal(row('T-0009'), null, 'a bare ID with nothing behind it stays a search');
+  assert.equal(row('a/b/c'), null);
+  assert.equal(row('nowhere'), null);
+});
+
 // ---------------------------------------------------------------- and the test would catch it if they didn't
 
 const tags = (...names) => names.map(n => `<script src="ui/${n}.js"></script>`).join('\n');
@@ -1009,6 +1179,37 @@ test('ops: fails when it reaches a concern after it, fires a hook not its own, o
   assert.match(hookProblems([{ concern: 'ops', src: "D.files.install('redraw', f);" }]).join(), /ops installs redraw/);
   assert.deepEqual(hookProblems([{ concern: 'ops', src: "D.files.fire('redraw'); D.files.install('toast', f); D.files.install('runJob', f); D.files.install('afterJob', f);" }]), []);
   assert.match(inlineCallProblems('ops', 'select(a);', 'function select(a) {}').join(), /calls select\(\) bare/);
+});
+
+const goodLinks = "(function () { 'use strict'; var S = D.model.S, nav = { hashOwn: '' }; function f(a) { if (location.hash !== nav.hashOwn) return encodeURIComponent(a); location.replace(a); location.hash = a; return parse(D.model.item(a)); } D.links = { f: f, nav: nav }; })();\n";
+
+test('links: a good file passes, and quiet words are not uses', () => {
+  assert.deepEqual(linksProblems(goodLinks, smallCore), []);
+  assert.deepEqual(linksProblems(`${goodLinks}var x = 'D.ops.commit(a) and document.title and a < b'; // go(a)\n`, smallCore), []);
+});
+
+test('links: fails when it changes Items, navigates, uses the DOM or anything else outside itself and core', () => {
+  for (const use of ['D.ops.commit(a)', 'D.ops.toastShow(a)', 'go(a)', 'select(a)', 'openLink(a)', 'render()', 'focusLater(a)', 'document.title', 'window.innerWidth', 'fetch(a)', 'localStorage.x', 'OPS.ack(a)', 'commit(a)'])
+    assert.ok(linksProblems(`${goodLinks}function g(a) { return ${use}; }\n`, smallCore).length, use);
+});
+
+test('links: fails when it uses the address for more than the hash', () => {
+  for (const use of ['location.href', 'location.reload()', 'location.assign(a)', 'location', 'location.pathname'])
+    assert.match(linksProblems(`${goodLinks}function g(a) { return ${use}; }\n`, smallCore).join(), /location for more than the hash/, use);
+});
+
+test('links: fails when it builds markup, in a string or a template', () => {
+  for (const use of [`'<div class="x">'`, `"<span>"`, '`<li>${a}</li>`'])
+    assert.match(linksProblems(`${goodLinks}function g(a) { return ${use}; }\n`, smallCore).join(), /builds markup/, use);
+});
+
+test('links: fails when it reaches a concern after it, sets off any hook, or leans on the page\'s script', () => {
+  assert.match(namespaceProblems('links', 'D.views.page(); ').join(), /links uses D\.views/);
+  assert.match(namespaceProblems('links', 'D.input.go(); ').join(), /links uses D\.input/);
+  assert.match(namespaceProblems('links', 'D.model.S = 1; ').join(), /assigns to D\.model\.S/);
+  assert.match(hookProblems([{ concern: 'links', src: "D.files.fire('redraw');" }]).join(), /links fires redraw/);
+  assert.match(hookProblems([{ concern: 'links', src: "D.files.install('afterDraw', f);" }]).join(), /links installs afterDraw/);
+  assert.match(inlineCallProblems('links', 'go(a);', 'function go(a) {}').join(), /calls go\(\) bare/);
 });
 
 test('a local D hiding the namespace fails, and so does any alias but S', () => {

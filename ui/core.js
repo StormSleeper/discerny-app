@@ -3,7 +3,7 @@
 // tools/discern.mjs and the parser tests load this file by itself and pick out its top-level names, so they stay
 // globals, unwrapped, and other concerns may call them bare. It also creates the one global namespace, D.
 'use strict';
-var VERSION='0.4.1.4'; // the app's version; tools/discern.mjs reads it from here
+var VERSION='0.4.1.5'; // the app's version; tools/discern.mjs reads it from here
 var FORMAT='0.4.0.2'; // the Format version this app reads and writes: the newest folder in migrations/, next while one is unlanded, or 0.1.0.0 while there are none
 // An Item's field values as the files write them, and the words the page shows for them
 var URG={today:'Today','this week':'This week',soon:'Soon',later:'Later',fyi:'FYI'};

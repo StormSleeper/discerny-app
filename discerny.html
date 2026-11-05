@@ -30,6 +30,7 @@ if (location.protocol === 'http:' || location.protocol === 'https:') { var mf = 
 <script src="ui/files.js"></script>
 <script src="ui/model.js"></script>
 <script src="ui/ops.js"></script>
+<script src="ui/links.js"></script>
 <script>
 'use strict';
 var S = D.model.S;
@@ -82,13 +83,6 @@ function prioToggle(p, cls) {
   if (s === 'user' || !p.meta.id || (s === 'off' && p.meta.status === 'left')) return '';
   var label = s === 'on' ? 'Demote ' + p.name + ', so they are no longer a Priority person' : 'Promote ' + p.name + ' to a Priority person';
   return bt(s === 'on' ? 'Demote' : 'Promote', s === 'on' ? 'demote' : 'promote', { id: p.meta.id, cls: c, attrs: ' aria-label="' + esc(label) + '" title="' + esc(label) + '"' });
-}
-
-/* ===================== the Link row in search ===================== */
-function search(qs) {
-  var groups = D.model.searchAll(qs), link = linkResult(qs);
-  if (link) groups.unshift({ title: 'Link', items: [link] });
-  return groups;
 }
 
 /* ===================== html helpers ===================== */
@@ -896,7 +890,7 @@ function panelTask(i) {
   var h = panelHead(id, (inbox ? 'Proposal · ' : '') + (D.model.TYPE_WORD[i.meta.type || 'task'] || i.meta.type) + ' · ' + D.model.listName(i), false);
   if (inbox) h += '<div class="note" data-k="note-inbox">Proposed by the agent from ' + esc(D.model.srcKind(i)) + (got ? ' on ' + esc(D.model.fmtDT(got)) : '') + '. Correct anything below, then accept or dismiss.</div>';
   if (done) h += '<div class="note ok" data-k="note-done" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">Done on ' + esc(i.meta['done-date'] ? D.model.fmt(i.meta['done-date']) : 'an earlier date') + '.</span>' + bt('Reopen', 'reopen', { id: id, cls: 'sm' }) + '</div>';
-  if (offView === id) h += '<div class="note warn" data-k="note-off-view" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">' + id + ' isn’t on this View.</span>' + bt('Go to ' + navName(D.model.homeView(i)), 'home-view', { id: id, cls: 'sm' }) + '</div>';
+  if (D.links.nav.offView === id) h += '<div class="note warn" data-k="note-off-view" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1">' + id + ' isn’t on this View.</span>' + bt('Go to ' + navName(D.model.homeView(i)), 'home-view', { id: id, cls: 'sm' }) + '</div>';
   h += '<label class="sr" for="f-title">Title</label><textarea id="f-title" class="title-in" rows="2" data-ch="title" data-kd="title" data-id="' + id + '">' + esc(i.title) + '</textarea>';
   if (!done) h += '<div class="pills" data-k="row-status"><div class="seg" data-k="seg-status" role="group" aria-label="Status">' + STATUS.map(function (x) { return '<button type="button" data-act="status" data-id="' + id + '" data-v="' + esc(x) + '"' + pressed((i.meta.status || '') === x) + '>' + esc(STATUS_LABEL[x]) + '</button>'; }).join('') + '</div>' + doneBtn(i, '') + '</div>';
   h += vTabs(id, rels.length + deps.length, asks.length);
@@ -1118,14 +1112,14 @@ function vToasts() {
   }).join('') + '</div>';
 }
 function vPalette() {
-  var groups = search(S.palQ), flat = D.model.flatResults(groups), idx = Math.min(S.palI, Math.max(flat.length - 1, 0)), k = 0;
+  var groups = D.links.search(S.palQ), flat = D.model.flatResults(groups), idx = Math.min(S.palI, Math.max(flat.length - 1, 0)), k = 0;
   var body = groups.map(function (g) {
     return '<div role="group" aria-label="' + esc(g.title) + '"><div class="res-h" aria-hidden="true">' + esc(g.title) + (g.more > 0 ? ' · ' + g.more + ' more' : '') + '</div>' + g.items.map(function (it) {
       var n = k++;
       return '<div class="res" role="option" id="pal-i-' + n + '" aria-selected="' + (n === idx) + '" data-act="pal-pick" data-i="' + n + '"><span class="grow"><span>' + esc(it.label) + '</span><span class="sub">' + esc(it.sub) + '</span></span>' + (it.id ? '<span class="id">' + esc(it.id) + '</span>' : '') + '</div>';
     }).join('') + '</div>';
   }).join('');
-  if (!flat.length) { var gone = missingId(S.palQ); body = '<div class="empty" style="padding:12px">' + (gone ? esc(gone) + ' isn’t in this Data folder.' : 'No matches.') + '</div>'; }
+  if (!flat.length) { var gone = D.links.missingId(S.palQ); body = '<div class="empty" style="padding:12px">' + (gone ? esc(gone) + ' isn’t in this Data folder.' : 'No matches.') + '</div>'; }
   return '<div class="dlg-scrim" data-k="dlg-pal" data-act="dlg-bg"><div class="dlg" role="dialog" aria-modal="true" aria-label="Search and commands"><div class="dlg-h">' + ic('search') +
     '<label class="sr" for="pal-q">Search tasks, people, projects and systems</label><input id="pal-q" class="in" type="text" autocomplete="off" spellcheck="false" data-in="palQ" data-kd="pal" value="' + esc(S.palQ) + '" placeholder="Search everything, or type a command" role="combobox" aria-expanded="true" aria-controls="pal-list" aria-autocomplete="list"' + (flat.length ? ' aria-activedescendant="pal-i-' + idx + '"' : '') + '>' +
     bt('Esc', 'dlg-close', { cls: 'sm', attrs: ' aria-label="Close search"' }) + '</div><div class="dlg-b" id="pal-list" role="listbox" aria-label="Results">' + body + '</div>' +
@@ -1269,10 +1263,10 @@ function afterRender() {
     S.scrollRow = null;
     if (r && r.scrollIntoView) r.scrollIntoView({ block: 'nearest' });
   }
-  if (offView && document.querySelector('.main [data-row="' + offView + '"], .main [data-k="ack-' + offView + '"]')) { offView = null; render(); }
+  if (D.links.nav.offView && document.querySelector('.main [data-row="' + D.links.nav.offView + '"], .main [data-k="ack-' + D.links.nav.offView + '"]')) { D.links.nav.offView = null; render(); }
   var n = S.ready && S.m ? D.model.inboxCount() : 0, h1 = document.getElementById('page-title');
-  if (S.ready && S.m) syncLink();
-  var it = S.ready && S.m ? linkItem() : null;
+  if (S.ready && S.m) D.links.syncLink();
+  var it = S.ready && S.m ? D.links.linkItem() : null;
   var title = (it ? D.model.item(it).title + ' · ' : '') + (S.ready && h1 ? h1.textContent + ' · ' : '') + 'Discerny' + (n ? ' (' + n + ' in inbox)' : '');
   if (document.title !== title) document.title = title;
 }
@@ -1284,126 +1278,27 @@ function focusLater(sel) {
   render();
 }
 
-/* ===================== links ===================== */
-// A Link is the page's hash after "#/": a View's Link name, or a Record's ID for its page, then "/" and the ID of
-// the Item open in the Side panel, if the User opened one, then the View's state after "?" as key=value pairs. Link names
-// last across versions, so they are kept apart from the code's own View names by this two-way table.
-var LINK_VIEW = { today: 'today', inbox: 'inbox', 'next-actions': 'next', 'waiting-for': 'waiting', upcoming: 'upcoming', fyi: 'fyi', 'all-items': 'all', done: 'done', projects: 'projects', people: 'people', systems: 'systems', 'weekly-review': 'review', agent: 'claude' };
-var VIEW_LINK = {};
-Object.keys(LINK_VIEW).forEach(function (k) { VIEW_LINK[LINK_VIEW[k]] = k; });
-var RECORD_VIEW = { P: 'person', PRJ: 'project', SYS: 'system' };
-// A View's state in its Link: search or filter text, and grouping, each key written only when it differs from its default,
-// so a Link without one opens with the default. Where a key has a vals table, Link values map to the code's own like Link names.
-// Scroll position and how many done Items are loaded stay out.
-function stateKey(get, set, def, vals) { return { get: get, set: set, def: def, vals: vals || null }; }
-var ENT_Q = stateKey(function () { return S.eq; }, function (v) { S.eq = v; D.model.forceClear('ent-q'); }, '');
-var LINK_STATE = {
-  next: { group: stateKey(function () { return S.group; }, function (v) { S.group = v; }, 'project', { project: 'project', kind: 'kind', 'one-list': 'none' }) },
-  all: {
-    q: stateKey(function () { return S.wq; }, function (v) { S.wq = v; D.model.forceClear('wb-q'); }, ''),
-    group: stateKey(function () { return S.wb.group; }, function (v) { S.wb.group = v; }, 'urg', { urgency: 'urg', type: 'type', person: 'person', project: 'project', tag: 'tag' }),
-    sort: stateKey(function () { return S.wb.sort; }, function (v) { S.wb.sort = v; }, 'urg', { urgency: 'urg', 'due-date': 'due', newest: 'new', oldest: 'old' }),
-    tag: stateKey(function () { return S.wb.tag; }, function (v) { S.wb.tag = v; }, '')
-  },
-  people: {
-    q: stateKey(function () { return S.pq; }, function (v) { S.pq = v; D.model.forceClear('people-q'); }, ''),
-    show: stateKey(function () { return S.pf; }, function (v) { S.pf = v; }, 'all', { all: 'all', internal: 'internal', external: 'external', priority: 'priority', 'high-score': 'high', 'low-score': 'low', 'missing-details': 'gaps', left: 'left' }),
-    group: stateKey(function () { return S.pgroup; }, function (v) { S.pgroup = v; }, 'none', { none: 'none', organisation: 'co', department: 'dept', group: 'grp' }),
-    sort: stateKey(function () { return S.psort; }, function (v) { S.psort = v; }, 'name', { name: 'name', 'interaction-score': 'score' })
-  },
-  projects: { q: ENT_Q },
-  systems: { q: ENT_Q }
-};
-// the Side panel's tab, written beside an Item the Link names
-var TAB_LINK = { details: 'details', relationships: 'links', agent: 'claude' };
-function linkValue(vals, v) { return Object.keys(vals).filter(function (k) { return vals[k] === v; })[0]; }
-function linkQuery(it) {
-  var keys = LINK_STATE[S.view] || {}, out = [];
-  Object.keys(keys).forEach(function (k) {
-    var d = keys[k], v = d.get();
-    if (v === d.def) return;
-    if (d.vals) v = linkValue(d.vals, v);
-    if (v) out.push(k + '=' + encodeURIComponent(v));
-  });
-  if (it && S.tab !== 'details') out.push('tab=' + linkValue(TAB_LINK, S.tab));
-  return out.length ? '?' + out.join('&') : '';
-}
-// the hash's state as [[key, value]], in the order written
-function stateOfHash(h) {
-  var s = String(h || ''), at = s.indexOf('?');
-  if (at < 0) return [];
-  var dec = function (x) { try { return decodeURIComponent(x); } catch (e) { return x; } };
-  return s.slice(at + 1).split('&').filter(Boolean).map(function (p) {
-    var e = p.indexOf('=');
-    return e < 0 ? [dec(p), ''] : [dec(p.slice(0, e)), dec(p.slice(e + 1))];
-  });
-}
+/* ===================== acting on a Link ===================== */
 // sets the View's state from the Link, a key it leaves out to its default, and names what this version doesn't know.
 // -> the Side panel's tab for the Item the Link names
 function openState(pairs, withItem) {
-  var keys = LINK_STATE[S.view] || {}, own = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); }, tab = 'details', bad = [];
+  var keys = D.links.LINK_STATE[S.view] || {}, own = function (o, k) { return Object.prototype.hasOwnProperty.call(o, k); }, tab = 'details', bad = [];
   Object.keys(keys).forEach(function (k) { keys[k].set(keys[k].def); });
   pairs.forEach(function (p) {
     var k = p[0], v = p[1], d = own(keys, k) ? keys[k] : null;
-    if (k === 'tab' && withItem && own(TAB_LINK, v)) tab = TAB_LINK[v];
+    if (k === 'tab' && withItem && own(D.links.TAB_LINK, v)) tab = D.links.TAB_LINK[v];
     else if (d && (!d.vals || own(d.vals, v))) d.set(d.vals ? d.vals[v] : v);
     else bad.push(k + (v ? '=' + v : ''));
   });
   if (bad.length) D.ops.toastShow('This version doesn’t know ' + bad.join(', ') + ' in this Link, so it opened without ' + (bad.length > 1 ? 'them.' : 'it.'));
   return tab;
 }
-// linkPush: the next hash write adds a history entry; hashOwn: the hash the UI wrote last, whose hashchange it ignores;
-// autoOpen: the Item the Inbox opened by itself, which the Link leaves out; offView: the Item a Link opened on a View it isn't on
-var linkPush = false, hashOwn = '', landing = false, autoOpen = null, offView = null;
-// the Item the Link and the document title name: one open in the Side panel that the User opened
-function linkItem() { return S.panel && S.sel && kindOf(S.sel) === 'T' && S.sel !== autoOpen && D.model.item(S.sel) ? S.sel : null; }
-function linkNow(it) {
-  var v = S.entity || VIEW_LINK[S.view] || 'today';
-  return it ? v + '/' + it : v;
-}
-function linkOfHash(h) {
-  var s = String(h || '').replace(/^#\/?/, '');
-  s = s.split('?')[0];
-  try { s = decodeURIComponent(s); } catch (e) { /* keep it as typed */ }
-  return s.trim();
-}
-// the Item an ID was merged into, found by its Comment
-function mergedInto(id) {
-  var said = 'Merged ' + id + ' into this.', s = D.model.allItems().filter(function (i) { return commentsOf(i).some(function (c) { return c.v.trim() === said; }); })[0];
-  return s ? s.id : null;
-}
 // the Item an ID in a Link names now: itself, or the Item it was merged into, and says so
 function linkTarget(id) {
   if (D.model.whereOf(id)) return id;
-  var to = mergedInto(id);
+  var to = D.links.mergedInto(id);
   if (to) D.ops.toastShow(id + ' was merged into ' + to + ', so here’s ' + to + '.');
   return to;
-}
-function idShaped(s) { return /^(T|P|PRJ|SYS)-\d+$/.test(s); }
-// the Link in text in Ctrl K: the text itself, or what follows the #/ of a whole address
-function linkText(text) {
-  var s = String(text || '').trim(), at = s.indexOf('#/');
-  return at >= 0 ? s.slice(at + 2).trim() : s;
-}
-// the ID to name when Ctrl K finds nothing for an ID, or a whole address holding one; otherwise null
-function missingId(text) {
-  var id = linkOfHash(linkText(text)).toUpperCase();
-  return idShaped(id) ? id : null;
-}
-// "Go to …" for text in Ctrl K that is a Link, or a whole address holding one, when the View it names is here; otherwise null.
-// A bare ID with nothing behind it stays a search: it may be an ID half typed.
-function linkResult(text) {
-  var s = linkText(text);
-  var parts = linkOfHash(s).split('/'), head = parts[0], id = head.toUpperCase(), it = (parts[1] || '').toUpperCase(), sub;
-  if (parts.length > 2) return null;
-  var itemSub = function (i) { var to = D.model.whereOf(i) ? i : mergedInto(i); return to && D.model.labelOf(to); };
-  if (!it && /^T-\d+$/.test(id)) sub = itemSub(id);
-  else {
-    var isView = Object.prototype.hasOwnProperty.call(LINK_VIEW, head.toLowerCase()), isRec = RECORD_VIEW[kindOf(id)] && /^[A-Z]+-\d+$/.test(id) && D.model.exists(id);
-    if (!isView && !isRec) return null;
-    sub = it ? itemSub(it) || (idShaped(it) && !D.model.exists(it) && it + ' isn’t in this Data folder') : isRec ? D.model.labelOf(id) : 'View';
-  }
-  return sub ? { label: 'Go to ' + s, sub: sub, id: '', act: 'link', arg: s } : null;
 }
 // a View's own rows hold what is on it. The Item's home View counts whatever it shows: Done loads only some of its Items.
 function onThisView(id) {
@@ -1424,14 +1319,14 @@ function openLink(link, state) {
   to = linkTarget(it);
   if (!to) { D.ops.toastShow(it + ' isn’t in this Data folder.'); return; }
   select(to, { tab: tab });
-  if (named && !onThisView(to)) offView = to;
+  if (named && !onThisView(to)) D.links.nav.offView = to;
 }
 // -> whether the View the Link names is the one that opened
 function openView(link) {
   if (!link) { go('today'); return false; }
-  var v = LINK_VIEW[link.toLowerCase()];
+  var v = D.links.LINK_VIEW[link.toLowerCase()];
   if (v) { go(v); return true; }
-  var id = link.toUpperCase(), rv = RECORD_VIEW[kindOf(id)];
+  var id = link.toUpperCase(), rv = D.links.RECORD_VIEW[kindOf(id)];
   if (rv && /^[A-Z]+-\d+$/.test(id)) {
     if (D.model.exists(id)) { go(rv, id); return true; }
     go('today'); D.ops.toastShow(id + ' isn’t in this Data folder, so here’s Today.');
@@ -1442,28 +1337,20 @@ function openView(link) {
 }
 // goes to the Link in the hash; the browser has already made its history entry, so this replaces rather than adds one
 function land() {
-  hashOwn = location.hash; linkPush = false;
-  landing = true;
-  try { openLink(linkOfHash(location.hash), stateOfHash(location.hash)); } finally { landing = false; }
-}
-function syncLink() {
-  // the User has just gone somewhere and its hashchange is still on the way: that lands on it, so a frame before it mustn't write over it
-  if (location.hash !== hashOwn) return;
-  var it = linkItem(), h = '#/' + linkNow(it) + linkQuery(it), push = linkPush;
-  linkPush = false; hashOwn = h;
-  if (location.hash === h) return;
-  if (push) location.hash = h; else location.replace(h);
+  D.links.nav.hashOwn = location.hash; D.links.nav.linkPush = false;
+  D.links.nav.landing = true;
+  try { openLink(D.links.linkOfHash(location.hash), D.links.stateOfHash(location.hash)); } finally { D.links.nav.landing = false; }
 }
 
 /* ===================== navigation and selection ===================== */
 function go(view, entity) {
   var changed = S.view !== view || S.entity !== (entity || null);
-  if (changed && !landing) linkPush = true;
+  if (changed && !D.links.nav.landing) D.links.nav.linkPush = true;
   S.view = view; S.entity = entity || null;
   S.panel = false; S.sel = null; S.cur = null; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.confirm = null; S.adding = null; S.linkQ = ''; S.tab = 'details'; S.editAsk = null; S.dialog = null;
   if (changed) { S.eq = ''; S.pq = ''; S.pf = 'all'; S.psort = 'name'; S.doneLimit = 60; }
-  autoOpen = null; offView = null;
-  if (view === 'inbox' && !D.model.isDrawer()) { var l = D.model.inboxList(); if (l.length) { S.sel = autoOpen = l[0].id; S.panel = true; S.cur = l[0].id; } }
+  D.links.nav.autoOpen = null; D.links.nav.offView = null;
+  if (view === 'inbox' && !D.model.isDrawer()) { var l = D.model.inboxList(); if (l.length) { S.sel = D.links.nav.autoOpen = l[0].id; S.panel = true; S.cur = l[0].id; } }
   if (changed) { var m = document.getElementById('main'); if (m) m.scrollTop = 0; S.scrolled = false; }
   focusLater('#page-title');
 }
@@ -1477,12 +1364,12 @@ function goAny(id) {
 function select(id, o) {
   o = o || {};
   if (S.sel !== id) {
-    if (!landing && !o.move && kindOf(id) === 'T') linkPush = true;
-    offView = null;
+    if (!D.links.nav.landing && !o.move && kindOf(id) === 'T') D.links.nav.linkPush = true;
+    D.links.nav.offView = null;
     S.tab = o.tab || 'details';
     S.subDraft = ''; S.cmtDraft = ''; S.cmtEdit = null; S.tagDraft = ''; S.newPrj = ''; S.sysQ = ''; S.linkQ = ''; S.dismissFor = null; S.dupFor = null; S.mergeFor = null; S.mergeQ = ''; S.confirm = null; S.editAsk = null; S.linkLabel = ''; S.linkUrl = ''; S.linkMode = 'related';
   } else if (o.tab) S.tab = o.tab;
-  S.sel = id; S.panel = true; autoOpen = null;
+  S.sel = id; S.panel = true; D.links.nav.autoOpen = null;
   if (kindOf(id) === 'T') S.cur = id;
   S.fresh.delete(id);
   if (o.focus === false) render();
@@ -1694,7 +1581,7 @@ function runResult(it) {
   S.dialog = null; S.dlgReturn = null;
   if (it.act === 'go') { if (it.arg === 'people-gaps') { go('people'); S.pf = 'gaps'; } else go(it.arg); return; }
   if (it.act === 'open') { openLink(it.arg, []); return; }
-  if (it.act === 'link') { openLink(linkOfHash(it.arg), stateOfHash(it.arg)); return; }
+  if (it.act === 'link') { openLink(D.links.linkOfHash(it.arg), D.links.stateOfHash(it.arg)); return; }
   if (it.act === 'all') { S.wq = it.arg; D.model.forceClear('wb-q'); go('all'); return; }
   if (it.act === 'person' && it.arg) { go('person', it.arg); return; }
   if (it.act === 'ent') { goAny(it.arg); return; }
@@ -1728,7 +1615,7 @@ var ACT = {
   side: function () { toggleSide(); },
   'dlg-close': function () { closeDialog(); },
   'dlg-bg': function () { closeDialog(); },
-  'pal-pick': function (el) { runResult(D.model.flatResults(search(S.palQ))[+el.getAttribute('data-i')]); },
+  'pal-pick': function (el) { runResult(D.model.flatResults(D.links.search(S.palQ))[+el.getAttribute('data-i')]); },
   open: function (el) { var id = did(el); if (kindOf(id) === 'T') { if (S.panel && S.sel === id && !D.model.isDrawer()) { focusLater('#panel-top'); return; } select(id); } else goAny(id); },
   any: function (el) { goAny(did(el)); },
   'any-page': function (el) { goAny(did(el)); },
@@ -1743,7 +1630,7 @@ var ACT = {
   },
   // with an ID, from the Side panel: an Item on this View, or a Record's own page
   'copy-link': function (el) {
-    var id = did(el), link = !id ? linkNow() + linkQuery() : kindOf(id) === 'T' ? linkNow(id) + linkQuery(id) : id;
+    var id = did(el), link = !id ? D.links.linkNow() + D.links.linkQuery() : kindOf(id) === 'T' ? D.links.linkNow(id) + D.links.linkQuery(id) : id;
     copyText(link, function (ok) { D.ops.toastShow(ok ? 'Copied the Link ' + link : 'Couldn’t reach the clipboard. The Link is ' + link); });
   },
   status: function (el) { D.ops.patch(did(el), { status: dvv(el) || '' }); },
@@ -2046,7 +1933,7 @@ var KD = {
     else if (ev.key === 'Escape' && (S.qa || el.value)) { ev.preventDefault(); S.qa = ''; S.qaType = null; D.model.forceClear('qa-in'); render(); }
   },
   pal: function (el, ev) {
-    var flat = D.model.flatResults(search(S.palQ)), idx = Math.min(S.palI, Math.max(flat.length - 1, 0));
+    var flat = D.model.flatResults(D.links.search(S.palQ)), idx = Math.min(S.palI, Math.max(flat.length - 1, 0));
     if (ev.key === 'ArrowDown') { ev.preventDefault(); S.palI = Math.min(idx + 1, flat.length - 1); render(); }
     else if (ev.key === 'ArrowUp') { ev.preventDefault(); S.palI = Math.max(idx - 1, 0); render(); }
     else if (ev.key === 'Enter') { ev.preventDefault(); runResult(flat[idx]); }
@@ -2260,7 +2147,7 @@ async function boot() {
   }, true);
   window.addEventListener('resize', function () { measure(); render(); });
   // Back, Forward, an edited address or a bookmark; before the folder is read, openFolder lands on the Link instead
-  window.addEventListener('hashchange', function () { if (S.ready && S.m && location.hash !== hashOwn) land(); });
+  window.addEventListener('hashchange', function () { if (S.ready && S.m && location.hash !== D.links.nav.hashOwn) land(); });
   window.addEventListener('beforeunload', function (ev) { if (D.files.Q.jobs.some(function (j) { return !j.sync; })) { ev.preventDefault(); ev.returnValue = ''; } });
   // Served by node tools/discern.mjs serve: the server reads and writes the folder, so no picker or permission.
   if (location.protocol === 'http:' && (await D.files.serverInfo())) { openFolder(); return; }

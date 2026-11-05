@@ -8,6 +8,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - Nothing to notice: the UI's folder access and save queue now sit in their own file in `ui/`, and saving works as before, served or opened as a file.
 - Nothing to notice: the UI's state, lookups and search now sit in their own file in `ui/`, and the page looks and behaves as before.
 - Nothing to notice: the UI's changes to items and records, saving and undo now sit in their own file in `ui/`, and the page looks and behaves as before.
+- Nothing to notice: the UI's link handling now sits in its own file in `ui/`, and every link and bookmark works as before.
 
 ## 0.4.0.11 (2026-11-04)
 
