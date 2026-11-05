@@ -24,7 +24,7 @@ const STYLESHEET = 'ui/discerny.css';
 const BEFORE_REGEX = /(^|[(,=:[!&|?{};+\-*%<>~^\n]|\b(?:return|typeof|case|in|of|delete|void|throw|new|else|do))\s*$/;
 
 // The source with comments gone, and each string, template text and regular expression emptied. Code inside a
-// template's ${...} stays, as it runs. With keepStrings, plain quoted strings stay, for reading hook names.
+// template's ${...} stays, as it runs. With keepStrings, strings and template text stay, for reading hook names and markup.
 function codeOf(src, { keepStrings = false } = {}) {
   const n = src.length;
   let i = 0;
@@ -33,9 +33,9 @@ function codeOf(src, { keepStrings = false } = {}) {
     let out = '`';
     i++;
     while (i < n && src[i] !== '`') {
-      if (src[i] === '\\') i += 2;
+      if (src[i] === '\\') { if (keepStrings) out += src.slice(i, i + 2); i += 2; }
       else if (src[i] === '$' && src[i + 1] === '{') { i += 2; out += ' ' + scan(true) + ' '; }
-      else i++;
+      else { if (keepStrings) out += src[i]; i++; }
     }
     i++;
     return out + '`';
@@ -217,6 +217,25 @@ function inlineCallProblems(concern, src, inline) {
   return out;
 }
 
+// Strings that start a tag: building markup, which only the views do.
+function markupProblems(concern, src) {
+  return [...codeOf(src, { keepStrings: true }).matchAll(/(['"`])\s*<\/?[A-Za-z][^'"`]{0,30}/g)].map(m => `${concern} builds markup: ${m[0]}`);
+}
+
+// A local D would hide the namespace, in the concern's files and in the page's own script alike.
+function shadowProblems(where, src) {
+  return namesDeclared(codeOf(src)).has('D') ? [`${where} declares a local D, which hides the namespace`] : [];
+}
+
+// Call sites name what they use in full. The one alias a file may have is var S = D.model.S.
+function aliasProblems(where, src) {
+  const out = [];
+  for (const m of codeOf(src).matchAll(/\b(?:var|let|const)\s+([A-Za-z_$][\w$]*)\s*=\s*(D\.[a-z]+\.[A-Za-z_$][\w$]*)\s*[;,\n]/g)) {
+    if (m[1] !== 'S' || m[2] !== 'D.model.S') out.push(`${where} aliases ${m[2]} as ${m[1]}`);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- files's rules
 
 // What files may use from the browser, beyond JavaScript's own built-ins. `get` is the word in its accessors.
@@ -231,6 +250,22 @@ function filesProblems(src, core = CORE) {
     if (re.test(code)) out.push(`files mentions ${what}`);
   }
   return out;
+}
+
+// ---------------------------------------------------------------- model's rules
+
+// What model may use beyond itself, core and JavaScript's own built-ins: its one word from the browser is localStorage, for the User's preferences.
+const MODEL_BROWSER = new Set(['D', 'get', 'localStorage']);
+
+// What's wrong with model's source: anything from outside itself and core, the DOM, markup, or reaching files for anything but its hook.
+function modelProblems(src, core = CORE) {
+  const code = codeOf(src), out = [];
+  const known = new Set([...namesDeclared(code), ...namesAtTopLevel(codeOf(core))]);
+  for (const n of namesUsed(code)) if (!known.has(n) && !BUILT_INS.has(n) && !MODEL_BROWSER.has(n)) out.push(`model uses ${n}, from outside itself and core`);
+  const used = namesUsed(code);
+  for (const what of ['document', 'window', 'location', 'OPS']) if (used.has(what)) out.push(`model mentions ${what}`);
+  for (const m of code.matchAll(/(?<![\w$.])D\.files\.([A-Za-z_$][\w$]*)/g)) if (m[1] !== 'install') out.push(`model reaches D.files.${m[1]}: it never changes files`);
+  return out.concat(markupProblems('model', src));
 }
 
 // ---------------------------------------------------------------- the hooks
@@ -304,6 +339,18 @@ test('every moved concern uses only those before it, and calls nothing bare from
 
 test('files uses only core, and knows nothing of Items, state or the DOM', () => {
   assert.deepEqual(filesProblems(readRepo('ui/files.js')), []);
+});
+
+test('model uses only core and its hook, never changes files, never uses DOM APIs and never builds markup', () => {
+  assert.deepEqual(modelProblems(readRepo('ui/model.js')), []);
+});
+
+test('no local D hides the namespace, and S is the only alias, in any moved concern or the page\'s own script', () => {
+  const sources = movedScripts().filter(f => f !== 'ui/core.js').map(f => [f, readRepo(f)]).concat([['the page', inlineScript(PAGE)]]);
+  for (const [where, src] of sources) {
+    assert.deepEqual(shadowProblems(where, src), []);
+    assert.deepEqual(aliasProblems(where, src), []);
+  }
 });
 
 test('the hooks keep to the table: who fires each, who installs each, and one installer', () => {
@@ -456,6 +503,103 @@ test('a folder whose Format changed is refused through folderState, and pending 
   assert.equal(t.events.filter(e => e[0] === 'runJob').length, 0);
 });
 
+// ---------------------------------------------------------------- model as it runs
+
+// A fresh copy of model over core and files, in Node, where no window or document exists. store is its localStorage.
+function loadModel(store = {}) {
+  const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+  const load = new Function('localStorage', `${CORE}\n${readRepo('ui/files.js')}\n${readRepo('ui/model.js')}\n;return D;`);
+  return load(localStorage);
+}
+
+// A small model: an open Task, a Proposal, a change Proposal, a Comment to acknowledge and two Records.
+function withData(D) {
+  const parse = new Function(`${CORE}\n;return { parse, pParse, eParse, rParse, aParse };`)();
+  const inbox = parse.parse('# Inbox\n\n- [ ] T-0002 A proposal {received-datetime: 2026-01-01 09:00}\n\n## Changes\n- Relate T-0001 and P-0001 {kind: involves; source: x; received-datetime: 2026-01-01 09:00}\n  - why: y\n');
+  D.model.S.m = {
+    tasks: parse.parse('# Tasks\n\n<!-- next-id: 3 -->\n- [ ] T-0001 Order the widgets {type: task}\n  - comment: {added-datetime: 2026-01-01 09:00; author: email; acknowledged: no}\n    News\n'),
+    inbox, done: parse.parse('# Done\n'),
+    people: parse.pParse('# People\n\n## Us\n- Ann Example {id: P-0001}\n'),
+    projects: parse.eParse('# Projects\n\n- Widgets {id: PRJ-0001; type: project; status: active}\n'),
+    systems: parse.eParse('# Systems\n'),
+    rels: parse.rParse(''), asks: parse.aParse(''), log: [], sources: [], drafts: [],
+    settings: { text: '' }, interactions: { text: '' },
+  };
+  return D.model;
+}
+
+test('model offers its interface on D.model, and keeps the rest private', () => {
+  const D = loadModel();
+  assert.deepEqual(Object.keys(D), ['core', 'files', 'model']);
+  for (const n of ['S', 'SET', 'setSettings', 'pauseDays', 'searchAll', 'flatResults', 'ix', 'item', 'allItems', 'entsOf', 'inboxList', 'nextList', 'prjItems', 'scored', 'todayStr', 'whereOf', 'homeView', 'recOf', 'inboxCount', 'changeByLine', 'relOf', 'undosOf', 'CHANGE_WORD', 'changeVal', 'canSnooze', 'prjName', 'commentAt', 'personOf', 'entSnapshot', 'cur', 'panelOpen', 'isRail', 'isDrawer', 'forced', 'forceClear', 'lsSet']) {
+    assert.ok(n in D.model, n);
+    assert.notEqual(D.model[n], undefined, n);
+  }
+  for (const n of ['IX', 'SCORED', 'STOP', 'search', 'prioMark', 'scoreFact', 'prioToggle', 'scoreCell']) assert.equal(n in D.model, false, n);
+});
+
+test('SET reads live, and only setSettings changes it', () => {
+  const D = loadModel(), M = D.model;
+  assert.equal(M.pauseDays(), 28);
+  const now = D.core.readSettings('[priority]\npause-days = 7\n');
+  M.setSettings(now);
+  assert.equal(M.SET, now);
+  assert.equal(M.pauseDays(), 7);
+  assert.throws(() => { 'use strict'; M.SET = {}; }, TypeError);
+});
+
+test('layout is read from S.width, with no window to ask', () => {
+  const { S, isRail, isDrawer, panelOpen } = loadModel().model;
+  S.side = 'auto';
+  S.width = 1439;
+  assert.equal(isRail(), true);
+  S.width = 1440;
+  assert.equal(isRail(), false);
+  S.side = 'rail';
+  assert.equal(isRail(), true);
+  S.side = 'full';
+  S.width = 600;
+  assert.equal(isRail(), false);
+  S.side = 'auto';
+  S.width = 700;
+  assert.equal(isDrawer(), true);
+  S.width = 2000;
+  assert.equal(isDrawer(), false);
+  assert.equal(panelOpen(), false);
+});
+
+test('model installs folderState, which patches S, and only once', () => {
+  const D = loadModel();
+  D.files.fire('folderState', { lost: true });
+  assert.equal(D.model.S.lost, true);
+  D.files.fire('folderState', { ready: false, gate: { mode: 'fmtold' } });
+  assert.equal(D.model.S.gate.mode, 'fmtold');
+  assert.throws(() => D.files.install('folderState', () => {}), /bad hook install: folderState/);
+});
+
+test('searchAll is search without the Link row', () => {
+  const M = withData(loadModel());
+  assert.deepEqual(M.searchAll('').map(g => g.title), ['Jump to']);
+  assert.deepEqual(M.searchAll('widgets').map(g => g.title), ['Tasks', 'Projects and systems']);
+  assert.deepEqual(M.searchAll('T-0001').map(g => g.title), ['Tasks']);
+  assert.deepEqual(M.searchAll('today').map(g => g.title), ['Commands']);
+  assert.equal(M.flatResults(M.searchAll('T-0001'))[0].id, 'T-0001');
+});
+
+test('the helpers stranded in later sections work from state alone', () => {
+  const M = withData(loadModel());
+  assert.equal(M.inboxCount(), 3, 'a Proposal, a change Proposal and a Comment to acknowledge');
+  assert.equal(M.item('T-0001').title, 'Order the widgets');
+  assert.equal(M.cur('T-0001'), M.item('T-0001'));
+  assert.equal(M.recOf('PRJ-0001').name, 'Widgets');
+  assert.equal(M.commentAt('T-0001', 0).v, 'News');
+  assert.equal(M.personOf('P-0001').name, 'Ann Example');
+  assert.equal(M.prjName('PRJ-0001'), 'Widgets');
+  assert.equal(M.entSnapshot('PRJ-0001').id, 'PRJ-0001');
+  M.forceClear('qa-in');
+  assert.equal(M.forced.has('qa-in'), true);
+});
+
 // ---------------------------------------------------------------- and the test would catch it if they didn't
 
 const tags = (...names) => names.map(n => `<script src="ui/${n}.js"></script>`).join('\n');
@@ -533,6 +677,39 @@ test('files: a good file passes', () => {
 test('files: fails when it knows of state or Items, uses the DOM, or uses anything outside itself and core', () => {
   for (const use of ['S.m', 'S', 'OPS.x', 'j.items', 'j.meta', 'm.people', 'document.title', 'window.x', 'location.reload()', 'render()', 'toastShow(a)', 'localStorage.x', 'parseFake(a)'])
     assert.ok(filesProblems(`${goodFiles}function g(a) { return ${use}; }\n`, smallCore).length, use);
+});
+
+const goodModel = "(function () { 'use strict'; var S = { a: 1 }; function f(k) { return parse(localStorage.getItem(k)); } D.model = { S: S, f: f }; D.files.install('folderState', f); })();\n";
+
+test('model: a good file passes, and quiet words are not uses', () => {
+  assert.deepEqual(modelProblems(goodModel, smallCore), []);
+  assert.deepEqual(modelProblems(`${goodModel}var x = 'document.title and a < b'; // window.x\n`, smallCore), []);
+});
+
+test('model: fails when it uses the DOM or anything outside itself and core', () => {
+  for (const use of ['document.title', 'window.innerWidth', 'location.hash', 'fetch(a)', 'indexedDB.open(a)', 'setTimeout(f)', 'render()', 'OPS.x', 'commit(a)', 'esc(a)'])
+    assert.ok(modelProblems(`${goodModel}function g(a) { return ${use}; }\n`, smallCore).length, use);
+});
+
+test('model: fails when it reaches files for anything but its hook', () => {
+  for (const use of ['D.files.writeText(a, a)', 'D.files.requestSync()', 'D.files.Q.jobs', 'D.files.kick()', 'D.files.srv'])
+    assert.match(modelProblems(`${goodModel}function g(a) { return ${use}; }\n`, smallCore).join(), /never changes files/, use);
+});
+
+test('model: fails when it builds markup, in a string or a template', () => {
+  for (const use of [`'<div class="x">'`, `"<span>"`, `'</div>'`, `'  <b>'`, '`<li>${a}</li>`'])
+    assert.match(modelProblems(`${goodModel}function g(a) { return ${use}; }\n`, smallCore).join(), /builds markup/, use);
+  assert.deepEqual(markupProblems('model', "var a = '<' + b; var c = x < y; var d = '< 3';"), []);
+});
+
+test('a local D hiding the namespace fails, and so does any alias but S', () => {
+  assert.match(shadowProblems('x', 'function f(k) { var D = EDEF[k]; return D.key; }').join(), /local D/);
+  assert.match(shadowProblems('x', 'function f(D) { return D.key; }').join(), /local D/);
+  assert.deepEqual(shadowProblems('x', 'function f(k) { var kindDef = EDEF[k]; return D.model.x(kindDef); } var a = { D: 1 };'), []);
+  assert.deepEqual(aliasProblems('x', 'var S = D.model.S;\nvar n = D.model.item(id);\n'), []);
+  assert.match(aliasProblems('x', 'var Q = D.files.Q;').join(), /aliases D\.files\.Q as Q/);
+  assert.match(aliasProblems('x', 'function f() { var i = D.model.item, j = 1; }').join(), /aliases D\.model\.item as i/);
+  assert.match(aliasProblems('x', 'var T = D.model.S;').join(), /aliases D\.model\.S as T/);
 });
 
 test('namespaces: a concern fails when it uses one after it, or assigns to another\'s', () => {
