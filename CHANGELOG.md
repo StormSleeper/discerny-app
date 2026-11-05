@@ -11,6 +11,7 @@ What's changed in Discerny, newest first. Each line is one build. A dated sectio
 - Nothing to notice: the UI's link handling now sits in its own file in `ui/`, and every link and bookmark works as before.
 - Nothing to notice: the UI's views and drawing now sit in their own files in `ui/`, and the page looks and behaves as before.
 - Nothing to notice: the UI's clicks, keys and typing now sit in their own file in `ui/`, and every shortcut and field works as before.
+- Nothing to notice: the UI's start-up now sits in its own file in `ui/`, which finishes the split, and the page opens as before, served or as a file.
 
 ## 0.4.0.11 (2026-11-04)
 

@@ -1,6 +1,6 @@
 // Keeps the UI's concerns apart. Plain scripts share one global scope and there's no build or linter, so this
 // test is what holds the boundaries: it reads the page and the files in ui/ as text, with strings and comments
-// stripped. Each concern may use only those before it in CONCERNS. Each concern's rules join this file as it moves.
+// stripped. Each concern may use only those before it in CONCERNS.
 //   node --test tools/test/ui-architecture.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -156,13 +156,13 @@ function layoutProblems(html, files) {
   tags.filter(t => t.kind === 'script' && /\b(type|async|defer)\b/.test(t.attrs)).forEach(t => out.push(`${t.src} isn't an ordinary script tag`));
   const styles = tags.filter(t => t.kind === 'style').map(t => t.src);
   if (styles.join() !== STYLESHEET) out.push(`the page's stylesheets should be just ${STYLESHEET}: ${styles.join(', ')}`);
-  // The page's own script runs last, so it can reach everything; the theme snippet before the styles runs first.
-  const lastInline = tags.map(t => t.kind).lastIndexOf('inline'), lastFile = tags.map(t => t.kind).lastIndexOf('script');
-  if (lastInline >= 0 && lastFile > lastInline) out.push("a script tag comes after the page's own script");
-  for (const f of files) {
-    if (f !== STYLESHEET && !SCRIPTS.includes(f)) out.push(`ui/ holds an unlisted file: ${f}`);
-    else if (f !== STYLESHEET && !scripts.includes(f)) out.push(`no script tag loads ${f}`);
-  }
+  // The page's one script of its own is the snippet in its head, which runs before first paint. Everything else is in a file.
+  const own = [...html.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>/gi)], headEnd = html.indexOf('</head>');
+  if (own.some(m => m.index > headEnd)) out.push("the page's body holds a script of its own");
+  if (own.filter(m => m.index < headEnd).length !== 1) out.push("the page's head should hold one script of its own, the snippet that runs before first paint");
+  if (/<style\b/i.test(html)) out.push('the page holds a style of its own');
+  for (const f of files) if (f !== STYLESHEET && !SCRIPTS.includes(f)) out.push(`ui/ holds an unlisted file: ${f}`);
+  SCRIPTS.filter(s => !scripts.includes(s)).forEach(s => out.push(`no script tag loads ${s}`));
   [...scripts, ...styles].filter(s => (SCRIPTS.includes(s) || s === STYLESHEET) && !files.includes(s)).forEach(s => out.push(`the page names ${s}, which isn't there`));
   return out;
 }
@@ -184,18 +184,16 @@ function coreProblems(src) {
   return out;
 }
 
-// ---------------------------------------------------------------- rules for every moved concern
+// ---------------------------------------------------------------- rules for every concern
 
 // A file's concern: the views- files are all one.
 const concernOf = (file) => path.basename(file, '.js').replace(/^views-.*/, 'views');
 const ORDER = ['core', 'files', 'model', 'ops', 'links', 'views', 'render', 'input', 'main'];
-const movedScripts = () => SCRIPTS.filter(f => fs.existsSync(path.join(REPO, f)));
 const readRepo = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
-// The page's own script, in the body: what's left of the UI until every concern has moved. The theme snippet in the head is not part of it.
-function inlineScript(html) {
-  const body = html.slice(html.indexOf('<body'));
-  return [...body.matchAll(/<script\b(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi)].map(m => m[1]).join('\n');
+// The snippet in the page's head, the one script that isn't in a file.
+function headSnippet(html) {
+  return /<head>[\s\S]*?<script>([\s\S]*?)<\/script>/.exec(html)?.[1] ?? '';
 }
 
 // A concern uses only the namespaces before it, and assigns only to its own.
@@ -208,21 +206,12 @@ function namespaceProblems(concern, src) {
   return out;
 }
 
-// A moved concern calling a function still in the page's own script would be leaning on code that hasn't moved.
-function inlineCallProblems(concern, src, inline) {
-  const code = codeOf(src), out = [];
-  for (const n of namesAtTopLevel(codeOf(inline))) {
-    if (new RegExp(`(?<![\\w$.])${n.replace(/\$/g, '\\$')}\\s*\\(`).test(code)) out.push(`${concern} calls ${n}() bare, from the page's own script`);
-  }
-  return out;
-}
-
 // Strings that start a tag: building markup, which only the views do.
 function markupProblems(concern, src) {
   return [...codeOf(src, { keepStrings: true }).matchAll(/(['"`])\s*<\/?[A-Za-z][^'"`]{0,30}/g)].map(m => `${concern} builds markup: ${m[0]}`);
 }
 
-// A local D would hide the namespace, in the concern's files and in the page's own script alike.
+// A local D would hide the namespace.
 function shadowProblems(where, src) {
   return namesDeclared(codeOf(src)).has('D') ? [`${where} declares a local D, which hides the namespace`] : [];
 }
@@ -312,7 +301,7 @@ function changesTo(code, root) {
   ].some(re => re.test(code));
 }
 
-// What's wrong with a views file: anything from outside itself and core, which is how it would reach the DOM, fetch or the page's script; ops; files beyond Q and srv; or changing app state.
+// What's wrong with a views file: anything from outside itself and core, which is how it would reach the DOM, fetch or a later concern's private names; ops; files beyond Q and srv; or changing app state.
 function viewsProblems(src, core = CORE) {
   const code = codeOf(src), out = [];
   const known = new Set([...namesDeclared(code), ...namesAtTopLevel(codeOf(core)), 'D']);
@@ -356,12 +345,34 @@ function innerHtmlProblems(where, src) {
 // What input may use from the browser, beyond itself, core and JavaScript's own built-ins: the page and the address, timers, the clipboard, and setThemeColor from the page's head.
 const INPUT_BROWSER = new Set(['D', 'document', 'window', 'location', 'navigator', 'setTimeout', 'setInterval', 'requestAnimationFrame', 'console', 'setThemeColor']);
 
-// What's wrong with input's source: anything from outside itself and core, which is how it would lean on the page's script or reach the folder without files; or markup.
+// What's wrong with input's source: anything from outside itself and core, which is how it would lean on start-up or reach the folder without files; or markup.
 function inputProblems(src, core = CORE) {
   const code = codeOf(src), out = [];
   const known = new Set([...namesDeclared(code), ...namesAtTopLevel(codeOf(core))]);
   for (const n of namesUsed(code)) if (!known.has(n) && !BUILT_INS.has(n) && !INPUT_BROWSER.has(n)) out.push(`input uses ${n}, from outside itself and core`);
   return out.concat(markupProblems('input', src));
+}
+
+// ---------------------------------------------------------------- main's rules
+
+// What main may use from the browser, beyond itself, core and JavaScript's own built-ins: the page and the address, for its listeners and the first gate.
+const MAIN_BROWSER = new Set(['D', 'document', 'window', 'location']);
+const MAIN_OWN = ['S', 'boot'];
+
+// main's code inside its wrapper, or null if it isn't wrapped.
+function mainInner(src) {
+  return /^\s*\(function \(\) \{([\s\S]*)\}\)\(\);\s*$/.exec(codeOf(src))?.[1] ?? null;
+}
+
+// What's wrong with main's source: not wrapped, anything but start-up in it, offering anything, anything from outside itself and core, or markup.
+function mainProblems(src, core = CORE) {
+  const code = codeOf(src), inner = mainInner(src), out = [];
+  if (inner === null) out.push('main should be wrapped, so that nothing of it reaches the global');
+  else for (const n of namesAtTopLevel(inner)) if (!MAIN_OWN.includes(n)) out.push(`main holds only start-up, but declares ${n}`);
+  if (/(?<![\w$.])D\.main\b/.test(code)) out.push('main offers nothing: no concern comes after it');
+  const known = new Set([...namesDeclared(code), ...namesAtTopLevel(codeOf(core))]);
+  for (const n of namesUsed(code)) if (!known.has(n) && !BUILT_INS.has(n) && !MAIN_BROWSER.has(n)) out.push(`main uses ${n}, from outside itself and core`);
+  return out.concat(markupProblems('main', src));
 }
 
 // ---------------------------------------------------------------- the hooks
@@ -375,7 +386,6 @@ const HOOK_TABLE = {
   folderState: { firedBy: ['files'], installedBy: 'model' },
   afterDraw: { firedBy: ['render'], installedBy: 'input' },
 };
-const PAGE_OWN = 'page'; // the page's own script could install what hasn't moved, so it's held only to the table's names and the one-installer rule
 
 // Each install(...) and fire(...) call in a source, with the hook's name; a name that isn't a plain string comes back as null.
 function hookCalls(src) {
@@ -385,8 +395,8 @@ function hookCalls(src) {
     .map(m => ({ call: m[2], name: m[3] ?? m[4] ?? null }));
 }
 
-// What's wrong with the hooks across every source, each { concern, src }. Once main has landed, every hook has an installer.
-function hookProblems(sources, { mainLanded = false } = {}) {
+// What's wrong with the hooks across every source, each { concern, src }. With `whole`, the sources are all of the UI, so every hook must have an installer.
+function hookProblems(sources, { whole = false } = {}) {
   const out = [], installs = {};
   for (const { concern, src } of sources) {
     for (const { call, name } of hookCalls(src)) {
@@ -394,12 +404,12 @@ function hookProblems(sources, { mainLanded = false } = {}) {
       if (!row) { out.push(`${concern} calls ${call} with ${name === null ? 'a name that is not a plain string' : `${name}, which isn't in the table`}`); continue; }
       if (call === 'install') {
         (installs[name] ||= []).push(concern);
-        if (concern !== PAGE_OWN && row.installedBy !== concern) out.push(`${concern} installs ${name}, which is ${row.installedBy}'s to install`);
-      } else if (concern !== PAGE_OWN && !row.firedBy.includes(concern)) out.push(`${concern} fires ${name}, which only ${row.firedBy.join(' and ')} may fire`);
+        if (row.installedBy !== concern) out.push(`${concern} installs ${name}, which is ${row.installedBy}'s to install`);
+      } else if (!row.firedBy.includes(concern)) out.push(`${concern} fires ${name}, which only ${row.firedBy.join(' and ')} may fire`);
     }
   }
   for (const [name, who] of Object.entries(installs)) if (who.length > 1) out.push(`${name} is installed more than once: ${who.join(', ')}`);
-  if (mainLanded) for (const name of Object.keys(HOOK_TABLE)) if (!installs[name]) out.push(`${name} has no installer`);
+  if (whole) for (const name of Object.keys(HOOK_TABLE)) if (!installs[name]) out.push(`${name} has no installer`);
   return out;
 }
 
@@ -420,18 +430,31 @@ test('core offers only what it has, and the page reaches it through D.core', () 
   assert.equal(D.core.VERSION, /var VERSION='([^']+)'/.exec(CORE)[1]);
 });
 
-test('the page\'s own script is read whole, or the bare-call rule would miss what is in it', () => {
-  const names = namesAtTopLevel(codeOf(inlineScript(PAGE)));
-  for (const n of ['S', 'boot']) assert.ok(names.has(n), n);
+test('main is read whole, or its rule on what it holds would miss what is in it', () => {
+  const names = namesAtTopLevel(mainInner(readRepo('ui/main.js')));
+  assert.deepEqual([...names].sort(), MAIN_OWN);
   assert.equal(names.has('ev'), false, 'a parameter inside the script is not at its top level');
   assert.equal(names.has('setThemeColor'), false);
 });
 
-test('every moved concern uses only those before it, and calls nothing bare from the page\'s own script', () => {
-  for (const f of movedScripts().filter(f => f !== 'ui/core.js')) {
-    assert.deepEqual(namespaceProblems(concernOf(f), readRepo(f)), [], f);
-    assert.deepEqual(inlineCallProblems(concernOf(f), readRepo(f), inlineScript(PAGE)), [], f);
-  }
+test('every concern uses only those before it', () => {
+  for (const f of SCRIPTS.filter(f => f !== 'ui/core.js')) assert.deepEqual(namespaceProblems(concernOf(f), readRepo(f)), [], f);
+});
+
+test('main is start-up only: wrapped, offering nothing, and using only what is before it', () => {
+  assert.deepEqual(mainProblems(readRepo('ui/main.js')), []);
+});
+
+test('the page\'s head still defines setThemeColor, and only input calls it', () => {
+  assert.match(codeOf(headSnippet(PAGE)), /\bfunction setThemeColor\(/);
+  const callers = SCRIPTS.filter(f => /(?<![\w$.])setThemeColor\s*\(/.test(codeOf(readRepo(f))));
+  assert.deepEqual(callers, ['ui/input.js']);
+});
+
+test('no name is offered by two concerns', () => {
+  const { D } = loadInput(), offered = Object.keys(D).filter(c => c !== 'core').flatMap(c => Object.keys(D[c]));
+  assert.ok(offered.length > 100);
+  assert.deepEqual(offered.filter((n, i) => offered.indexOf(n) !== i), []);
 });
 
 test('files uses only core, and knows nothing of Items, state or the DOM', () => {
@@ -469,7 +492,7 @@ test('render uses only the concerns before it, and never knows what a View means
 });
 
 test('no concern but render writes markup to the page', () => {
-  const sources = movedScripts().filter(f => f !== 'ui/render.js').map(f => [f, readRepo(f)]).concat([['the page', inlineScript(PAGE)]]);
+  const sources = SCRIPTS.filter(f => f !== 'ui/render.js').map(f => [f, readRepo(f)]).concat([['the page', headSnippet(PAGE)]]);
   for (const [where, src] of sources) assert.deepEqual(innerHtmlProblems(where, src), []);
   assert.match(codeOf(readRepo('ui/render.js')), /\.innerHTML\s*=/);
 });
@@ -478,34 +501,34 @@ test('input uses only the concerns before it, and never builds markup', () => {
   assert.deepEqual(inputProblems(readRepo('ui/input.js')), []);
 });
 
-test('input has left the page, whose listeners reach it through D.input', () => {
-  const inline = inlineScript(PAGE), names = namesAtTopLevel(codeOf(inline));
+test('input has left start-up, whose listeners reach it through D.input', () => {
+  const inline = mainInner(readRepo('ui/main.js')), names = namesAtTopLevel(inline);
   for (const n of ['ACT', 'CH', 'IN', 'SUB', 'KD', 'onKey', 'go', 'goAny', 'select', 'closePanel', 'rowIds', 'neighbour', 'moveCursor', 'targetId', 'toggleDone', 'accept', 'addQuick', 'addPrjFrom', 'addTagFrom', 'openPalette', 'closeDialog', 'poll', 'regainAccess', 'retrySave', 'openState', 'openLink', 'land', 'pickFolder', 'changeFolder', 'regrant', 'openFolder', 'startTimers', 'setWb', 'loadFolderSugs']) assert.equal(names.has(n), false, n);
   assert.deepEqual([...names].sort(), ['S', 'boot'], 'only start-up is left');
-  for (const n of ['ACT', 'CH', 'IN', 'SUB', 'onKey', 'land', 'openFolder']) assert.match(codeOf(inline), new RegExp(`D\\.input\\.${n}\\b`), n);
-  assert.deepEqual(hookCalls(inline), [], 'the page installs no hook now');
+  for (const n of ['ACT', 'CH', 'IN', 'SUB', 'onKey', 'land', 'openFolder']) assert.match(inline, new RegExp(`D\\.input\\.${n}\\b`), n);
+  assert.deepEqual(hookCalls(readRepo('ui/main.js')), [], 'start-up installs and fires no hook');
   assert.deepEqual(hookCalls(readRepo('ui/input.js')), [{ call: 'install', name: 'afterDraw' }]);
 });
 
-test('the views and render have left the page, whose callers in input and start-up reach them through D.views and D.render', () => {
-  const inline = inlineScript(PAGE), names = namesAtTopLevel(codeOf(inline));
+test('the views and render have left start-up, and their callers in input and start-up reach them through D.views and D.render', () => {
+  const inline = mainInner(readRepo('ui/main.js')), names = namesAtTopLevel(inline);
   for (const n of ['prioMark', 'scoreCell', 'scoreFact', 'prioToggle', 'esc', 'bt', 'ic', 'vRow', 'vSec', 'viewToday', 'viewInbox', 'viewAll', 'viewDone', 'vChange', 'viewProject', 'viewPeople', 'viewReview', 'viewClaude', 'vPanel', 'panelTask', 'vSide', 'vMain', 'viewFor', 'vPalette', 'vGate', 'vApp', 'keyOf', 'morphNode', 'morphChildren', 'renderQ', 'measure', 'render', 'renderNow', 'afterRender', 'focusLater']) assert.equal(names.has(n), false, n);
   const input = codeOf(readRepo('ui/input.js'));
   assert.match(input, /D\.views\.viewFor\(/);
   assert.match(input, /D\.render\.render\(/);
   assert.match(input, /D\.render\.focusLater\(/);
-  assert.match(codeOf(inline), /D\.render\.measure\(/);
+  assert.match(inline, /D\.render\.measure\(/);
 });
 
-test('the Link code has left the page, whose callers reach it through D.links', () => {
-  const inline = inlineScript(PAGE), names = namesAtTopLevel(codeOf(inline));
+test('the Link code has left start-up, whose callers reach it through D.links', () => {
+  const inline = mainInner(readRepo('ui/main.js')), names = namesAtTopLevel(inline);
   for (const n of ['LINK_VIEW', 'VIEW_LINK', 'RECORD_VIEW', 'stateKey', 'ENT_Q', 'LINK_STATE', 'TAB_LINK', 'linkValue', 'linkQuery', 'stateOfHash', 'linkItem', 'linkNow', 'linkOfHash', 'mergedInto', 'idShaped', 'linkText', 'missingId', 'linkResult', 'syncLink', 'search', 'linkPush', 'hashOwn', 'landing', 'autoOpen', 'offView']) assert.equal(names.has(n), false, n);
   assert.match(codeOf(readRepo('ui/views-shell.js')), /D\.links\.search\(/);
-  assert.match(codeOf(inline), /D\.links\.nav\.hashOwn/);
+  assert.match(inline, /D\.links\.nav\.hashOwn/);
 });
 
-test('no local D hides the namespace, and S is the only alias, in any moved concern or the page\'s own script', () => {
-  const sources = movedScripts().filter(f => f !== 'ui/core.js').map(f => [f, readRepo(f)]).concat([['the page', inlineScript(PAGE)]]);
+test('no local D hides the namespace, and S is the only alias, in any concern', () => {
+  const sources = SCRIPTS.filter(f => f !== 'ui/core.js').map(f => [f, readRepo(f)]);
   for (const [where, src] of sources) {
     assert.deepEqual(shadowProblems(where, src), []);
     assert.deepEqual(aliasProblems(where, src), []);
@@ -513,8 +536,8 @@ test('no local D hides the namespace, and S is the only alias, in any moved conc
 });
 
 test('the hooks keep to the table: who fires each, who installs each, and one installer', () => {
-  const sources = movedScripts().map(f => ({ concern: concernOf(f), src: readRepo(f) })).concat({ concern: PAGE_OWN, src: inlineScript(PAGE) });
-  assert.deepEqual(hookProblems(sources, { mainLanded: fs.existsSync(path.join(UI, 'main.js')) }), []);
+  const sources = SCRIPTS.map(f => ({ concern: concernOf(f), src: readRepo(f) })).concat({ concern: 'the page', src: headSnippet(PAGE) });
+  assert.deepEqual(hookProblems(sources, { whole: true }), []);
 });
 
 test('files\'s registry names exactly the hooks in the table', () => {
@@ -1310,29 +1333,30 @@ test('focusLater moves focus at once when it can, or draws so that it can', () =
 // ---------------------------------------------------------------- input as it runs
 
 // A fresh copy of input over every concern before it, in Node, with a small stand-in for the document. rows are the rows on the page, in order; els are what a selector finds.
-function loadInput({ hash = '', rows = ['T-0001'], picker = null, store = {}, fetch = null } = {}) {
-  const frames = [], focused = [], scrolled = [], els = {}, timers = [], intervals = [], listeners = [];
+function loadInput({ hash = '', rows = ['T-0001'], picker = null, store = {}, fetch = null, protocol = 'http:' } = {}) {
+  const frames = [], focused = [], scrolled = [], els = {}, timers = [], intervals = [], listeners = [], handlers = {};
+  const listen = (name, fn) => { listeners.push(name); handlers[name] = fn; };
   const template = { innerHTML: null, content: { childNodes: [] } }, root = { nodeType: 1, firstChild: null };
   const element = (sel, more = {}) => { els[sel] = { focus() { focused.push(sel); }, scrollIntoView() { scrolled.push(sel); }, ...more }; return els[sel]; };
-  const location = { hash, protocol: 'http:', reloaded: 0, replace(h) { location.hash = h; }, reload() { location.reloaded++; } };
+  const location = { hash, protocol, reloaded: 0, replace(h) { location.hash = h; }, reload() { location.reloaded++; } };
   const document = {
     activeElement: null, body: {}, title: '', hidden: false,
     documentElement: { attrs: {}, setAttribute(k, v) { this.attrs[k] = v; }, removeAttribute(k) { delete this.attrs[k]; } },
     getElementById: (id) => (id === 'app' ? root : els['#' + id] || null), createElement: () => template,
     querySelector: (sel) => els[sel] || null, querySelectorAll: () => rows.map(id => ({ getAttribute: () => id })), contains: () => true,
-    addEventListener: (name) => listeners.push(name),
+    addEventListener: listen,
   };
-  const window = { innerWidth: 1600, addEventListener: (name) => listeners.push(name) };
+  const window = { innerWidth: 1600, addEventListener: listen };
   if (picker) window.showDirectoryPicker = picker;
   const localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
   const themes = [];
   const load = new Function('localStorage', 'location', 'document', 'window', 'requestAnimationFrame', 'console', 'setTimeout', 'clearTimeout', 'setInterval', 'navigator', 'setThemeColor', 'fetch',
-    `${CORE}\n${movedScripts().filter(f => f !== 'ui/core.js' && f !== 'ui/main.js').map(readRepo).join('\n')}\n;return D;`);
+    `${CORE}\n${SCRIPTS.filter(f => f !== 'ui/core.js' && f !== 'ui/main.js').map(readRepo).join('\n')}\n;return D;`);
   const D = load(localStorage, location, document, window, (f) => { frames.push(f); return frames.length; }, { error() {} }, (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, () => {}, (fn, ms) => { intervals.push({ fn, ms }); }, {}, (t) => themes.push(t), fetch);
   withData(D);
   const S = D.model.S;
   S.ready = true; S.width = 1600; S.eq = ''; S.view = 'today';
-  return { D, I: D.input, S, location, document, window, frames, focused, scrolled, element, store, themes, timers, intervals, listeners };
+  return { D, I: D.input, S, location, document, window, frames, focused, scrolled, element, store, themes, timers, intervals, listeners, handlers };
 }
 // A key press, as onKey reads one.
 const keyOn = (key, target, more = {}) => { const ev = { key, target: target || { tagName: 'BODY', closest: () => null, getAttribute: () => null }, defaultPrevented: false, preventDefault() { ev.defaultPrevented = true; }, stopPropagation() {}, ...more }; return ev; };
@@ -1645,36 +1669,195 @@ test('Change folder, on a served page: opens the dialog, and a switch reloads on
   assert.equal(t.location.reloaded, 1);
 });
 
+// ---------------------------------------------------------------- start-up as it runs
+
+// Runs main over a fresh copy of the rest, with openFolder counted and `stored` as the folder handle the browser remembers.
+async function startUp({ stored = null, ...opts } = {}) {
+  const t = loadInput(opts);
+  t.S.ready = false; t.S.width = 0;
+  t.opened = 0;
+  t.I.openFolder = () => { t.opened++; };
+  t.D.files.idbGet = async (k) => (k === 'dir' ? stored : null);
+  new Function('D', 'document', 'window', 'location', readRepo('ui/main.js'))(t.D, t.document, t.window, t.location);
+  for (let i = 0; i < 10; i++) await new Promise(r => setImmediate(r));
+  return t;
+}
+const noServer = async () => { throw new Error('no server'); };
+const aPicker = async () => null;
+const folderHandle = (permission) => ({ kind: 'directory', name: 'Work', queryPermission: async () => { if (permission instanceof Error) throw permission; return permission; } });
+const uiEvent = (target, more = {}) => { const ev = { target, returnValue: undefined, defaultPrevented: false, preventDefault() { ev.defaultPrevented = true; }, ...more }; return ev; };
+
+test('start-up adds to nothing on D, measures first and sets its listeners', async () => {
+  const { D, S, listeners } = await startUp({ protocol: 'file:' });
+  assert.deepEqual(Object.keys(D), ['core', 'files', 'model', 'ops', 'links', 'views', 'render', 'input']);
+  assert.equal(S.width, 1600);
+  assert.deepEqual([...listeners].sort(), ['beforeunload', 'change', 'click', 'hashchange', 'input', 'keydown', 'resize', 'scroll', 'submit']);
+});
+
+test('the first gate: a served page opens the folder, with no picker or permission', async () => {
+  const t = await startUp({ fetch: async () => ({ ok: true, json: async () => ({ folder: 'x', session: 's' }) }) });
+  assert.equal(t.opened, 1);
+  assert.equal(t.S.gate.mode, 'pick', 'the gate is as it started, and openFolder takes it from here');
+  assert.equal(t.D.files.srv.folder, 'x');
+});
+
+test('the first gate: a browser with no picker says so, served or not', async () => {
+  for (const opts of [{ protocol: 'file:' }, { protocol: 'http:', fetch: noServer }]) {
+    const t = await startUp(opts);
+    assert.equal(t.S.gate.mode, 'nosupport');
+    assert.equal(t.opened, 0);
+    assert.ok(t.frames.length, 'and it draws');
+  }
+});
+
+test('the first gate: with the picker and nothing remembered, it asks for a folder', async () => {
+  for (const stored of [null, { kind: 'file', name: 'Work' }]) {
+    const t = await startUp({ protocol: 'file:', picker: aPicker, stored });
+    assert.equal(t.S.gate.mode, 'pick');
+    assert.equal(t.opened, 0);
+    assert.ok(t.frames.length, 'and it draws');
+  }
+});
+
+test('the first gate: a remembered folder with permission opens, without it asks to reconnect', async () => {
+  const handle = folderHandle('granted'), yes = await startUp({ protocol: 'file:', picker: aPicker, stored: handle });
+  assert.equal(yes.opened, 1);
+  assert.equal(yes.D.files.dir, handle);
+  assert.equal(yes.S.folder, 'Work');
+  for (const answer of ['prompt', 'denied', new Error('no')]) {
+    const t = await startUp({ protocol: 'file:', picker: aPicker, stored: folderHandle(answer) });
+    assert.equal(t.opened, 0);
+    assert.equal(t.S.gate.mode, 'reconnect');
+    assert.equal(t.S.folder, 'Work');
+    assert.ok(t.frames.length, 'and it draws');
+  }
+});
+
+test('start-up\'s listeners hand clicks, field changes, typing, forms and keys to input', async () => {
+  const { I, handlers } = await startUp({ protocol: 'file:' }), got = [];
+  const el = (attr, name, more) => elWith({ [attr]: name }, { closest: (s) => (s === '[data-act]' ? elOn : null), ...more });
+  let elOn = null;
+  I.ACT.probe = (e) => got.push(['act', e]); I.CH.probe = (e) => got.push(['ch', e]); I.IN.probe = (e) => got.push(['in', e]); I.SUB.probe = (f) => got.push(['sub', f]);
+  elOn = el('data-act', 'probe');
+  handlers.click(uiEvent(elOn));
+  assert.deepEqual(got.pop(), ['act', elOn]);
+  elOn = el('data-act', 'probe', { disabled: true });
+  handlers.click(uiEvent(elOn));
+  elOn = null;
+  handlers.click(uiEvent(el('data-act', 'probe')));
+  handlers.click(uiEvent({}));
+  assert.equal(got.length, 0, 'a disabled button, a click on nothing and a target with no closest all do nothing');
+  const f = el('data-ch', 'probe');
+  handlers.change(uiEvent(f));
+  assert.deepEqual(got.pop(), ['ch', f]);
+  const i = el('data-in', 'probe');
+  handlers.input(uiEvent(i));
+  assert.deepEqual(got.pop(), ['in', i]);
+  const s = el('data-sub', 'probe'), sent = uiEvent(s);
+  handlers.submit(sent);
+  assert.deepEqual(got.pop(), ['sub', s]);
+  assert.equal(sent.defaultPrevented, true);
+  const other = uiEvent(el('data-sub', 'nothing-here'));
+  handlers.submit(other);
+  assert.equal(other.defaultPrevented, false);
+  assert.equal(handlers.keydown, I.onKey);
+});
+
+test('a click on the dialog\'s background closes only when it is on the background itself', async () => {
+  const { I, handlers } = await startUp({ protocol: 'file:' });
+  let closed = 0;
+  I.ACT['dlg-bg'] = () => { closed++; };
+  const bg = elWith({ 'data-act': 'dlg-bg' });
+  handlers.click(uiEvent({ closest: () => bg }));
+  assert.equal(closed, 0, 'a click inside the dialog');
+  bg.closest = () => bg;
+  handlers.click(uiEvent(bg));
+  assert.equal(closed, 1);
+});
+
+test('start-up\'s resize measures, hashchange lands only on a hash the page didn\'t write, and leaving warns only of unsaved work', async () => {
+  const { D, I, S, handlers, window, location } = await startUp({ protocol: 'file:' });
+  window.innerWidth = 900;
+  handlers.resize();
+  assert.equal(S.width, 900);
+  let landed = 0;
+  I.land = () => { landed++; };
+  location.hash = '#/waiting-for';
+  handlers.hashchange();
+  assert.equal(landed, 0, 'before the folder is read');
+  S.ready = true;
+  handlers.hashchange();
+  assert.equal(landed, 1);
+  D.links.nav.hashOwn = location.hash;
+  handlers.hashchange();
+  assert.equal(landed, 1, 'a hash the page wrote itself');
+  const leave = (jobs) => { D.files.Q.jobs.length = 0; D.files.Q.jobs.push(...jobs); const ev = uiEvent({}); handlers.beforeunload(ev); return ev.defaultPrevented; };
+  assert.equal(leave([]), false);
+  assert.equal(leave([{ sync: true }]), false);
+  assert.equal(leave([{ label: 'a save' }]), true);
+  D.files.Q.jobs.length = 0;
+});
+
+test('start-up\'s scroll marks the head of the main column, and nothing else', async () => {
+  const { S, handlers } = await startUp({ protocol: 'file:' });
+  const toggled = [], head = { classList: { toggle: (c, on) => toggled.push([c, on]) } };
+  const main = { id: 'main', scrollTop: 10, querySelector: () => head };
+  handlers.scroll(uiEvent({ id: 'other', scrollTop: 10 }));
+  assert.ok(!S.scrolled);
+  handlers.scroll(uiEvent(main));
+  assert.equal(S.scrolled, true);
+  assert.deepEqual(toggled, [['scrolled', true]]);
+  handlers.scroll(uiEvent(main));
+  assert.equal(toggled.length, 1, 'only a change touches the head');
+  main.scrollTop = 0;
+  handlers.scroll(uiEvent(main));
+  assert.deepEqual(toggled[1], ['scrolled', false]);
+});
+
 // ---------------------------------------------------------------- and the test would catch it if they didn't
 
 const tags = (...names) => names.map(n => `<script src="ui/${n}.js"></script>`).join('\n');
-const page = (body) => `<head><link rel="stylesheet" href="ui/discerny.css"><script>theme</script></head><body>${body}<script>'use strict';</script></body>`;
-const listed = ['ui/core.js', 'ui/files.js', 'ui/discerny.css'];
+const page = (body, head = '<script>theme</script>') => `<head>${head}<link rel="stylesheet" href="ui/discerny.css"></head><body>${body}</body>`;
+const everyTag = tags(...CONCERNS);
+const listed = [...SCRIPTS, STYLESHEET];
 
 test('layout: a good page and folder pass', () => {
-  assert.deepEqual(layoutProblems(page(tags('core', 'files')), listed), []);
+  assert.deepEqual(layoutProblems(page(everyTag), listed), []);
 });
 
-test('layout: fails when the script tags are out of concern order', () => {
-  assert.match(layoutProblems(page(tags('files', 'core')), listed).join(), /out of concern order/);
+test('layout: fails when the script tags are out of concern order, or main isn\'t last', () => {
+  assert.match(layoutProblems(page(tags('files', 'core', ...CONCERNS.slice(2))), listed).join(), /out of concern order/);
+  assert.match(layoutProblems(page(tags('main', ...CONCERNS.slice(0, -1))), listed).join(), /out of concern order/);
 });
 
 test('layout: fails when ui/ holds an unlisted file', () => {
-  assert.match(layoutProblems(page(tags('core', 'files')), [...listed, 'ui/extra.js']).join(), /unlisted file: ui\/extra\.js/);
-  assert.match(layoutProblems(page(tags('core', 'files')), [...listed, 'ui/notes.md']).join(), /unlisted file: ui\/notes\.md/);
+  assert.match(layoutProblems(page(everyTag), [...listed, 'ui/extra.js']).join(), /unlisted file: ui\/extra\.js/);
+  assert.match(layoutProblems(page(everyTag), [...listed, 'ui/notes.md']).join(), /unlisted file: ui\/notes\.md/);
 });
 
-test('layout: fails when a listed file has no tag, or a tag names a missing or unknown file', () => {
-  assert.match(layoutProblems(page(tags('core')), listed).join(), /no script tag loads ui\/files\.js/);
-  assert.match(layoutProblems(page(tags('core', 'files', 'model')), listed).join(), /names ui\/model\.js/);
-  assert.match(layoutProblems(page(tags('core', 'other')), ['ui/core.js', 'ui/discerny.css']).join(), /ui\/other\.js, which isn't a concern's file/);
+test('layout: fails when any concern has no tag, with its file there or not, or a tag names a missing or unknown file', () => {
+  for (const c of CONCERNS) {
+    const without = tags(...CONCERNS.filter(x => x !== c)), gone = new RegExp(`no script tag loads ui/${c}\\.js`);
+    assert.match(layoutProblems(page(without), listed).join(), gone);
+    assert.match(layoutProblems(page(without), listed.filter(f => f !== `ui/${c}.js`)).join(), gone);
+  }
+  assert.match(layoutProblems(page(everyTag), listed.filter(f => f !== 'ui/model.js')).join(), /names ui\/model\.js/);
+  assert.match(layoutProblems(page(`${everyTag}\n<script src="ui/other.js"></script>`), listed).join(), /ui\/other\.js, which isn't a concern's file/);
 });
 
-test('layout: fails on a module, a deferred script, a script after the page\'s own, or a missing stylesheet', () => {
-  assert.match(layoutProblems(page('<script type="module" src="ui/core.js"></script>'), ['ui/core.js', 'ui/discerny.css']).join(), /isn't an ordinary script tag/);
-  assert.match(layoutProblems(page('<script defer src="ui/core.js"></script>'), ['ui/core.js', 'ui/discerny.css']).join(), /isn't an ordinary script tag/);
-  assert.match(layoutProblems(`<link rel="stylesheet" href="ui/discerny.css"><script>x</script>${tags('core')}`, ['ui/core.js', 'ui/discerny.css']).join(), /comes after the page's own script/);
-  assert.match(layoutProblems(tags('core'), ['ui/core.js']).join(), /stylesheets should be/);
+test('layout: fails on a module, a deferred script, or a missing stylesheet', () => {
+  assert.match(layoutProblems(page(everyTag.replace('<script src="ui/core.js"', '<script type="module" src="ui/core.js"')), listed).join(), /isn't an ordinary script tag/);
+  assert.match(layoutProblems(page(everyTag.replace('<script src="ui/core.js"', '<script defer src="ui/core.js"')), listed).join(), /isn't an ordinary script tag/);
+  assert.match(layoutProblems(`<head><script>theme</script></head><body>${everyTag}</body>`, listed).join(), /stylesheets should be/);
+});
+
+test('layout: fails when the page holds any script or style of its own but the snippet in its head', () => {
+  assert.match(layoutProblems(page(`${everyTag}<script>boot();</script>`), listed).join(), /body holds a script of its own/);
+  assert.match(layoutProblems(page(`<script>boot();</script>${everyTag}`), listed).join(), /body holds a script of its own/);
+  assert.match(layoutProblems(page(everyTag, '<script>a</script><script>b</script>'), listed).join(), /head should hold one script/);
+  assert.match(layoutProblems(page(everyTag, ''), listed).join(), /head should hold one script/);
+  assert.match(layoutProblems(page(everyTag, '<script>theme</script><style>a { color: red }</style>'), listed).join(), /style of its own/);
+  assert.match(layoutProblems(page(`<style>a { color: red }</style>${everyTag}`), listed).join(), /style of its own/);
 });
 
 const goodCore = "var D = { core: {} };\nfunction f(a) { var b = a + 1, c = Math.max(b, 2); return [b, c].map(function (x) { return x; }); }\n";
@@ -1764,14 +1947,13 @@ test('ops: fails when it builds markup, in a string or a template', () => {
     assert.match(opsProblems(`${goodOps}function g(a) { return ${use}; }\n`, smallCore).join(), /builds markup/, use);
 });
 
-test('ops: fails when it reaches a concern after it, fires a hook not its own, or leans on the page\'s script', () => {
+test('ops: fails when it reaches a concern after it, or fires a hook not its own', () => {
   assert.match(namespaceProblems('ops', 'D.links.go(); ').join(), /ops uses D\.links/);
   assert.match(namespaceProblems('ops', 'D.views.page(); ').join(), /ops uses D\.views/);
   assert.match(namespaceProblems('ops', 'D.model.S = 1; ').join(), /assigns to D\.model\.S/);
   assert.match(hookProblems([{ concern: 'ops', src: "D.files.fire('toast', 'x');" }]).join(), /ops fires toast/);
   assert.match(hookProblems([{ concern: 'ops', src: "D.files.install('redraw', f);" }]).join(), /ops installs redraw/);
   assert.deepEqual(hookProblems([{ concern: 'ops', src: "D.files.fire('redraw'); D.files.install('toast', f); D.files.install('runJob', f); D.files.install('afterJob', f);" }]), []);
-  assert.match(inlineCallProblems('ops', 'select(a);', 'function select(a) {}').join(), /calls select\(\) bare/);
 });
 
 const goodLinks = "(function () { 'use strict'; var S = D.model.S, nav = { hashOwn: '' }; function f(a) { if (location.hash !== nav.hashOwn) return encodeURIComponent(a); location.replace(a); location.hash = a; return parse(D.model.item(a)); } D.links = { f: f, nav: nav }; })();\n";
@@ -1796,13 +1978,12 @@ test('links: fails when it builds markup, in a string or a template', () => {
     assert.match(linksProblems(`${goodLinks}function g(a) { return ${use}; }\n`, smallCore).join(), /builds markup/, use);
 });
 
-test('links: fails when it reaches a concern after it, sets off any hook, or leans on the page\'s script', () => {
+test('links: fails when it reaches a concern after it, or sets off any hook', () => {
   assert.match(namespaceProblems('links', 'D.views.page(); ').join(), /links uses D\.views/);
   assert.match(namespaceProblems('links', 'D.input.go(); ').join(), /links uses D\.input/);
   assert.match(namespaceProblems('links', 'D.model.S = 1; ').join(), /assigns to D\.model\.S/);
   assert.match(hookProblems([{ concern: 'links', src: "D.files.fire('redraw');" }]).join(), /links fires redraw/);
   assert.match(hookProblems([{ concern: 'links', src: "D.files.install('afterDraw', f);" }]).join(), /links installs afterDraw/);
-  assert.match(inlineCallProblems('links', 'go(a);', 'function go(a) {}').join(), /calls go\(\) bare/);
 });
 
 const goodViews = "(function () { 'use strict'; var S = D.model.S; function f(a) { return parse(a) + S.view + D.files.srv + D.files.Q.jobs.length + D.links.nav.offView + D.links.search(a) + D.model.item(a) + D.views.f(a); } D.views = { f: f }; })();\n";
@@ -1813,7 +1994,7 @@ test('views: a good file passes, and reading or quiet words are not uses', () =>
     assert.deepEqual(viewsProblems(`${goodViews}function g(a) { return ${quiet}; }\n`, smallCore), [], quiet);
 });
 
-test('views: fails when it uses ops, files beyond Q and srv, the DOM, fetch or the page\'s script', () => {
+test('views: fails when it uses ops, files beyond Q and srv, the DOM, fetch or a later concern\'s private names', () => {
   for (const use of ['D.ops.commit(a)', 'D.ops.toastShow(a)', 'D.files.kick()', 'D.files.writeText(a, a)', 'D.files.dir', 'document.title', 'window.innerWidth', 'location.hash', 'fetch(a)', 'localStorage.x', 'setTimeout(a)', 'render()', 'go(a)', 'commit(a)', 'toggleDone(a)'])
     assert.ok(viewsProblems(`${goodViews}function g(a) { return ${use}; }\n`, smallCore).length, use);
 });
@@ -1823,13 +2004,12 @@ test('views: fails when it changes app state, however it goes about it', () => {
     assert.match(viewsProblems(`${goodViews}function g(a) { return ${use}; }\n`, smallCore).join(), /changes|calls/, use);
 });
 
-test('views: fails when it reaches a concern after it, sets off any hook, or leans on the page\'s script', () => {
+test('views: fails when it reaches a concern after it, or sets off any hook', () => {
   assert.match(namespaceProblems('views', 'D.render.render();').join(), /views uses D\.render/);
   assert.match(namespaceProblems('views', 'D.input.go();').join(), /views uses D\.input/);
   assert.match(namespaceProblems('views', 'D.model.S = 1;').join(), /assigns to D\.model\.S/);
   assert.deepEqual(namespaceProblems('views', 'D.views = {}; D.views.page(); D.links.search(a); D.ops;'), []);
   assert.match(hookProblems([{ concern: 'views', src: "D.files.install('afterDraw', f);" }]).join(), /views installs afterDraw/);
-  assert.match(inlineCallProblems('views', 'go(a);', 'function go(a) {}').join(), /calls go\(\) bare/);
 });
 
 test('views: the offers are read from either way of adding them', () => {
@@ -1872,7 +2052,7 @@ test('input: fails when it builds markup, in a string or a template', () => {
     assert.match(inputProblems(`${goodInput}function g(a) { return ${use}; }\n`, smallCore).join(), /builds markup/, use);
 });
 
-test('input: fails when it reaches round a concern, by the browser or the page\'s script', () => {
+test('input: fails when it reaches round a concern, by the browser or start-up', () => {
   for (const use of ['fetch(a)', 'localStorage.x', 'indexedDB.open(a)', 'boot()', 'vRow(a)', 'commit(a)', 'kick()'])
     assert.ok(inputProblems(`${goodInput}function g(a) { return ${use}; }\n`, smallCore).length, use);
 });
@@ -1884,7 +2064,42 @@ test('input: fails when it reaches a concern after it, or sets off a hook not it
   assert.match(hookProblems([{ concern: 'input', src: "D.files.fire('redraw');" }]).join(), /input fires redraw/);
   assert.match(hookProblems([{ concern: 'input', src: "D.files.fire('afterDraw');" }]).join(), /input fires afterDraw/);
   assert.match(hookProblems([{ concern: 'input', src: "D.files.install('toast', f);" }]).join(), /input installs toast/);
-  assert.match(inlineCallProblems('input', 'boot();', 'function boot() {}').join(), /calls boot\(\) bare/);
+});
+
+const goodMain = "(function () { 'use strict'; var S = D.model.S; async function boot() { D.render.measure(); document.addEventListener('click', function (ev) { D.input.ACT.x(ev); }); window.addEventListener('resize', D.render.render); if (location.protocol === 'http:' && (await D.files.serverInfo())) { D.input.openFolder(); return; } var h = parse(''); S.gate = { mode: 'pick', msg: h }; } boot(); })();\n";
+const mainWith = (more) => goodMain.replace(' boot(); })', ` ${more} boot(); })`);
+
+test('main: a good file passes, and quiet words are not uses', () => {
+  assert.deepEqual(mainProblems(goodMain, smallCore), []);
+  assert.deepEqual(hookProblems([{ concern: 'main', src: goodMain }]), []);
+  assert.deepEqual(namespaceProblems('main', goodMain), []);
+  assert.deepEqual(mainProblems(`// fetch(a) and '<div>'\n${goodMain}// var extra\n`, smallCore), []);
+});
+
+test('main: fails when it isn\'t wrapped, as boot would reach the global', () => {
+  assert.match(mainProblems('var S = D.model.S; async function boot() {} boot();\n', smallCore).join(), /should be wrapped/);
+  assert.match(mainProblems(`${goodMain}var extra = 1;\n`, smallCore).join(), /should be wrapped/);
+});
+
+test('main: fails when it holds anything but start-up, or offers anything', () => {
+  assert.match(mainProblems(mainWith('function poll() {}'), smallCore).join(), /only start-up, but declares poll/);
+  assert.match(mainProblems(mainWith('var timers = 1;'), smallCore).join(), /only start-up, but declares timers/);
+  assert.match(mainProblems(mainWith('D.main = { boot: boot };'), smallCore).join(), /main offers nothing/);
+});
+
+test('main: fails when it uses anything from outside itself and core', () => {
+  for (const use of ['fetch(a)', 'localStorage.x', 'indexedDB.open(a)', 'setTimeout(a)', 'setInterval(a)', 'navigator.clipboard', 'setThemeColor(a)', 'go(a)', 'vRow(a)', 'commit(a)', 'kick()', 'render()'])
+    assert.match(mainProblems(goodMain.replace('var h = ', `${use}; var h = `).replace('boot() {', 'boot(a) {'), smallCore).join(), /main uses/, use);
+});
+
+test('main: fails when it builds markup, or writes markup to the page', () => {
+  assert.match(mainProblems(goodMain.replace("parse('')", "'<div>'"), smallCore).join(), /builds markup/);
+  assert.match(innerHtmlProblems('ui/main.js', 'document.body.innerHTML = a;').join(), /only render/);
+});
+
+test('main: fails when it fires or installs a hook', () => {
+  assert.match(hookProblems([{ concern: 'main', src: "D.files.fire('redraw');" }]).join(), /main fires redraw/);
+  assert.match(hookProblems([{ concern: 'main', src: "D.files.install('afterDraw', f);" }]).join(), /main installs afterDraw/);
 });
 
 test('only render writes markup to the page', () => {
@@ -1913,25 +2128,24 @@ test('namespaces: a concern fails when it uses one after it, or assigns to anoth
   assert.deepEqual(namespaceProblems('files', "var a = 'D.model.S'; // D.model.S\n"), []);
 });
 
-test('bare calls: a concern fails when it calls a function from the page\'s own script', () => {
-  const inline = 'var S = {}; function render() { function inner() {} return inner(); }';
-  assert.match(inlineCallProblems('files', 'render();', inline).join(), /calls render\(\) bare/);
-  assert.deepEqual(inlineCallProblems('files', 'x.render(); inner(); var a = "render()";', inline), []);
+test('namesAtTopLevel reads a whole script: what it declares, and nothing from inside a bracket', () => {
+  const names = namesAtTopLevel(codeOf('var S = {}; function render(a) { function inner(b) {} return inner(a); }'));
+  assert.deepEqual([...names].sort(), ['S', 'render']);
 });
 
-test('hooks: the table\'s own firers and installers pass, and the page\'s script may stand in', () => {
+test('hooks: the table\'s own firers and installers pass', () => {
   const good = [
     { concern: 'files', src: "function fire(name, arg) { return on[name](arg); } function install(name, fn) {} fire('redraw'); fire('toast', 'x'); fire('runJob', j); fire('afterJob'); fire('folderState', {});" },
     { concern: 'ops', src: "D.files.fire('redraw'); D.files.install('toast', f);" },
     { concern: 'model', src: "D.files.install('folderState', f);" },
-    { concern: 'page', src: "D.files.install('redraw', f);" },
+    { concern: 'render', src: "D.files.install('redraw', f);" },
   ];
   assert.deepEqual(hookProblems(good), []);
 });
 
 test('hooks: fails on a name not in the table, or one that is not a plain string', () => {
   assert.match(hookProblems([{ concern: 'files', src: "fire('nope');" }]).join(), /nope, which isn't in the table/);
-  assert.match(hookProblems([{ concern: 'page', src: "D.files.install('nope', f);" }]).join(), /nope, which isn't in the table/);
+  assert.match(hookProblems([{ concern: 'input', src: "D.files.install('nope', f);" }]).join(), /nope, which isn't in the table/);
   assert.match(hookProblems([{ concern: 'files', src: 'fire(name);' }]).join(), /not a plain string/);
   assert.match(hookProblems([{ concern: 'files', src: "fire('constructor');" }]).join(), /constructor, which isn't in the table/);
 });
@@ -1942,14 +2156,19 @@ test('hooks: fails when a concern fires or installs a hook its row doesn\'t name
   assert.match(hookProblems([{ concern: 'input', src: "D.files.install('redraw', f);" }]).join(), /input installs redraw/);
   for (const concern of ['core', 'views', 'main'])
     assert.match(hookProblems([{ concern, src: "D.files.fire('redraw');" }]).join(), new RegExp(`${concern} fires redraw`));
+  assert.match(hookProblems([{ concern: 'the page', src: "D.files.install('redraw', f);" }]).join(), /the page installs redraw/);
 });
 
-test('hooks: fails when a hook is installed twice across the concerns and the page\'s own script', () => {
-  assert.match(hookProblems([{ concern: 'render', src: "D.files.install('redraw', f);" }, { concern: 'page', src: "D.files.install('redraw', g);" }]).join(), /redraw is installed more than once/);
+test('hooks: fails when a hook is installed twice across the concerns', () => {
+  assert.match(hookProblems([{ concern: 'render', src: "D.files.install('redraw', f);" }, { concern: 'render', src: "D.files.install('redraw', g);" }]).join(), /redraw is installed more than once/);
 });
 
-test('hooks: once main has landed, every hook needs an installer', () => {
-  assert.match(hookProblems([], { mainLanded: true }).join(), /afterDraw has no installer/);
+test('hooks: across the whole UI, every hook needs an installer', () => {
+  assert.match(hookProblems([], { whole: true }).join(), /afterDraw has no installer/);
+  for (const name of Object.keys(HOOK_TABLE)) {
+    const installers = Object.keys(HOOK_TABLE).filter(n => n !== name).map(n => ({ concern: HOOK_TABLE[n].installedBy, src: `D.files.install('${n}', f);` }));
+    assert.deepEqual(hookProblems(installers, { whole: true }), [`${name} has no installer`]);
+  }
   assert.deepEqual(hookProblems([]), []);
 });
 
