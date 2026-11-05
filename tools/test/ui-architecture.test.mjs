@@ -268,6 +268,20 @@ function modelProblems(src, core = CORE) {
   return out.concat(markupProblems('model', src));
 }
 
+// ---------------------------------------------------------------- ops's rules
+
+// What ops may use from the browser, beyond itself, core and JavaScript's own built-ins: its timers, for toasts and rereading a file, and the console.
+const OPS_BROWSER = new Set(['D', 'setTimeout', 'console']);
+
+// What's wrong with ops's source: anything from outside itself and core, the DOM or location, or markup.
+function opsProblems(src, core = CORE) {
+  const code = codeOf(src), out = [];
+  const known = new Set([...namesDeclared(code), ...namesAtTopLevel(codeOf(core))]);
+  const used = namesUsed(code);
+  for (const n of used) if (!known.has(n) && !BUILT_INS.has(n) && !OPS_BROWSER.has(n)) out.push(`ops uses ${n}, from outside itself and core`);
+  return out.concat(markupProblems('ops', src));
+}
+
 // ---------------------------------------------------------------- the hooks
 
 // The whole set. A new hook needs a row here and in files's registry; if the need can be met by moving code, move the code.
@@ -326,7 +340,7 @@ test('core offers only what it has, and the page reaches it through D.core', () 
 
 test('the page\'s own script is read whole, or the bare-call rule would miss what is in it', () => {
   const names = namesAtTopLevel(codeOf(inlineScript(PAGE)));
-  for (const n of ['S', 'boot', 'render', 'commit', 'poll']) assert.ok(names.has(n), n);
+  for (const n of ['S', 'boot', 'render', 'toggleDone', 'poll']) assert.ok(names.has(n), n);
   assert.equal(names.has('setThemeColor'), false);
 });
 
@@ -343,6 +357,10 @@ test('files uses only core, and knows nothing of Items, state or the DOM', () =>
 
 test('model uses only core and its hook, never changes files, never uses DOM APIs and never builds markup', () => {
   assert.deepEqual(modelProblems(readRepo('ui/model.js')), []);
+});
+
+test('ops uses only the concerns before it, never builds markup and never uses DOM APIs or location', () => {
+  assert.deepEqual(opsProblems(readRepo('ui/ops.js')), []);
 });
 
 test('no local D hides the namespace, and S is the only alias, in any moved concern or the page\'s own script', () => {
@@ -388,7 +406,7 @@ const named = (name) => { const e = new Error(name + ' happened'); e.name = name
 test('files offers its interface on D.files, and nothing else reaches the global', () => {
   const { D, F } = loadFiles();
   assert.deepEqual(Object.keys(D), ['core', 'files']);
-  for (const n of ['dir', 'useFolder', 'srv', 'serverInfo', 'serverMtimes', 'api', 'lastMod', 'readText', 'writeText', 'modOf', 'readDrafts', 'idbGet', 'idbSet', 'Q', 'requestSync', 'scheduleSync', 'kick', 'discardPending', 'isPermErr', 'isMoved', 'errText', 'formatGate', 'install', 'fire']) {
+  for (const n of ['dir', 'useFolder', 'srv', 'serverInfo', 'serverMtimes', 'folderSuggestions', 'api', 'lastMod', 'readText', 'writeText', 'modOf', 'readDrafts', 'idbGet', 'idbSet', 'Q', 'requestSync', 'scheduleSync', 'kick', 'discardPending', 'isPermErr', 'isMoved', 'errText', 'formatGate', 'install', 'fire']) {
     assert.ok(n in F, n);
     assert.notEqual(F[n], undefined, n);
   }
@@ -420,6 +438,15 @@ test('both ways of reaching a folder sit behind readText', async () => {
   assert.equal(await served.F.readText('A.md'), 'by server');
   assert.equal(served.F.lastMod['A.md'], 9);
   assert.deepEqual(asked[1], ['/api/file/A.md', 's']);
+});
+
+test('folderSuggestions gives what the server suggests, or null when it has none to give', async () => {
+  const asked = [];
+  const yes = loadFiles({ fetch: async (p) => { asked.push(p); return { ok: true, json: async () => [{ name: 'a', folder: '/a' }] }; } });
+  assert.deepEqual(await yes.F.folderSuggestions(), [{ name: 'a', folder: '/a' }]);
+  assert.deepEqual(asked, ['/api/folders']);
+  const no = loadFiles({ fetch: async () => ({ ok: false }) });
+  assert.equal(await no.F.folderSuggestions(), null);
 });
 
 test('hooks: install refuses a name not in the set, and a second installer', () => {
@@ -531,7 +558,7 @@ function withData(D) {
 test('model offers its interface on D.model, and keeps the rest private', () => {
   const D = loadModel();
   assert.deepEqual(Object.keys(D), ['core', 'files', 'model']);
-  for (const n of ['S', 'SET', 'setSettings', 'pauseDays', 'searchAll', 'flatResults', 'ix', 'item', 'allItems', 'entsOf', 'inboxList', 'nextList', 'prjItems', 'scored', 'todayStr', 'whereOf', 'homeView', 'recOf', 'inboxCount', 'changeByLine', 'relOf', 'undosOf', 'CHANGE_WORD', 'changeVal', 'canSnooze', 'prjName', 'commentAt', 'personOf', 'entSnapshot', 'cur', 'panelOpen', 'isRail', 'isDrawer', 'forced', 'forceClear', 'lsSet']) {
+  for (const n of ['S', 'SET', 'setSettings', 'pauseDays', 'searchAll', 'flatResults', 'ix', 'item', 'allItems', 'entsOf', 'inboxList', 'nextList', 'prjItems', 'scored', 'todayStr', 'whereOf', 'homeView', 'recOf', 'inboxCount', 'changeByLine', 'relOf', 'undosOf', 'CHANGE_WORD', 'changeVal', 'canSnooze', 'prjName', 'commentAt', 'personOf', 'entSnapshot', 'cur', 'panelOpen', 'isRail', 'isDrawer', 'forced', 'forceClear', 'lsSet', 'idNum', 'changesOn']) {
     assert.ok(n in D.model, n);
     assert.notEqual(D.model[n], undefined, n);
   }
@@ -598,6 +625,261 @@ test('the helpers stranded in later sections work from state alone', () => {
   assert.equal(M.entSnapshot('PRJ-0001').id, 'PRJ-0001');
   M.forceClear('qa-in');
   assert.equal(M.forced.has('qa-in'), true);
+});
+
+// ---------------------------------------------------------------- ops as it runs
+
+const STARTER = {
+  'DISCERNY.md': `<!-- format: ${FORMAT_NOW} -->\n`,
+  'TASKS.md': '# Tasks\n\n<!-- next-id: 5 -->\n- [ ] T-0001 Order the widgets {type: task; due-date: 2026-01-10}\n- [ ] T-0002 Read the memo {type: fyi}\n- [ ] T-0003 Wait for parts {type: task; status: waiting; who: Bo Example}\n- [ ] T-0004 Finish the report {type: task}\n  - comment: {added-datetime: 2026-01-01 09:00; author: email; acknowledged: no; suggests: done}\n    All done\n',
+  'INBOX.md': '# Inbox\n\n## Changes\n- Relate T-0001 and T-0002 {kind: related; source: x; received-datetime: 2026-01-01 09:00}\n  - why: y\n',
+  'DONE.md': '# Done\n',
+  'PEOPLE.md': '# People\n\n<!-- next-id: 3 -->\n## Us\n- Ann Example {id: P-0001}\n- Bo Example {id: P-0002}\n',
+  'PROJECTS.md': '# Projects\n\n<!-- next-id: 2 -->\n- Widgets {id: PRJ-0001; type: project; status: active}\n',
+  'SYSTEMS.md': '# Systems\n',
+  'RELATIONSHIPS.md': '# Relationships\n',
+  'ASK-AGENT.md': '# Ask\n',
+  'ASK-AGENT-LOG.md': '# Log\n',
+  'SOURCES.md': '# Sources\n\n## defaults\n- timezone: Europe/London\n',
+  'INTERACTIONS.md': '# Interactions\n',
+  'IGNORED.md': '# Ignored\n',
+  'DISMISSED.md': '# Dismissed\n',
+};
+
+// A fresh copy of ops over the concerns before it, in Node, on an in-memory folder, with nothing from the DOM. Each redraw and toast is recorded.
+function loadOps({ folder = { ...STARTER } } = {}) {
+  const events = [], timers = [], writes = [];
+  let mod = 1;
+  const mods = {};
+  const load = new Function('fetch', 'setTimeout', 'clearTimeout', 'console', 'localStorage',
+    `${CORE}\n${readRepo('ui/files.js')}\n${readRepo('ui/model.js')}\n${readRepo('ui/ops.js')}\n;return D;`);
+  const D = load(() => { throw new Error('no server here'); }, (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, () => {}, { error() {} }, { getItem: () => null, setItem() {} });
+  const notThere = () => { const e = new Error('not there'); e.name = 'NotFoundError'; return e; };
+  D.files.useFolder({
+    name: 'folder',
+    getFileHandle: async (n, o) => {
+      if (!(n in folder) && !(o && o.create)) throw notThere();
+      return {
+        getFile: async () => ({ lastModified: mods[n] || 0, text: async () => folder[n] || '' }),
+        createWritable: async () => ({ write: async (t) => { folder[n] = t; mods[n] = ++mod; writes.push(n); events.push('wrote ' + n); }, close: async () => {}, abort: async () => {} }),
+      };
+    },
+    getDirectoryHandle: async () => { throw notThere(); },
+  });
+  D.files.install('redraw', () => { events.push('redraw'); });
+  return { D, O: D.ops, S: D.model.S, Q: D.files.Q, folder, events, timers, writes };
+}
+// Waits for the queue to finish. With naps, it also runs the short timers a job is asleep on while it rereads a file.
+async function drained(t, { naps = false } = {}) {
+  for (let i = 0; i < 400; i++) {
+    await new Promise(r => setImmediate(r));
+    if (naps) t.timers.splice(0).forEach(x => { if (x.ms < 2000) x.fn(); else t.timers.push(x); });
+    if (!t.Q.running && (!t.Q.jobs.length || t.Q.blocked)) return;
+  }
+  assert.fail('the queue never finished');
+}
+async function opened(options) {
+  const t = loadOps(options);
+  t.O.applyLoaded(await t.O.loadAll());
+  t.events.length = 0;
+  return t;
+}
+
+test('ops offers its interface on D.ops, and keeps the rest private', () => {
+  const { D, O } = loadOps();
+  assert.deepEqual(Object.keys(D), ['core', 'files', 'model', 'ops']);
+  for (const n of ['OPS', 'op', 'LOG_KEYS', 'commit', 'patch', 'loadAll', 'applyLoaded', 'ignorable', 'dismissLine', 'toastShow', 'toastDrop', 'toastUndo', 'undoLast', 'relYes', 'changeNo', 'emailYes', 'prioYes', 'promotePerson', 'demotePerson', 'undoChange', 'markDoneAck', 'personAdd', 'snoozeItem', 'chase', 'gotIt', 'acknowledge', 'makeTask', 'setItemDue', 'saveComment']) {
+    assert.ok(n in O, n);
+    assert.notEqual(O[n], undefined, n);
+  }
+  for (const n of ['persist', 'runJob', 'readStable', 'looksWrong', 'countOf', 'sleep', 'BASE', 'PARSE', 'serKey', 'sigs', 'parseSources', 'applyAliasNews', 'duePatch', 'noteAlias', 'undoFns', 'toggleDone', 'accept', 'dismiss', 'mergeItems', 'deleteTask', 'addQuick', 'addCommentFrom']) assert.equal(n in O, false, n);
+  for (const n of ['entGroup', 'newPrjOnTask', 'restoreEnt', 'meta', 'complete', 'ensureIds']) assert.equal(typeof O.OPS[n], 'function', n);
+});
+
+test('ops installs toast, runJob and afterJob, and only once', () => {
+  const { D } = loadOps();
+  for (const name of ['toast', 'runJob', 'afterJob']) assert.throws(() => D.files.install(name, () => {}), new RegExp(`bad hook install: ${name}`));
+});
+
+test('a sync job reads the folder into state', async () => {
+  const t = loadOps();
+  t.Q.jobs.push({ sync: true });
+  await t.D.files.kick();
+  assert.equal(t.S.m.tasks.items.length, 4);
+  assert.equal(t.S.m.people.people[1].name, 'Bo Example');
+  assert.ok(t.S.lastSync > 0, 'a sync job notes when it read');
+});
+
+test('commit applies to the screen, redraws, then saves, and its undo takes it back', async () => {
+  const t = await opened();
+  const before = t.S.ver;
+  t.O.patch('T-0001', { urgency: 'soon' }, 'Changed.', t.O.OPS.meta('T-0001', { urgency: '' }));
+  assert.equal(t.D.model.item('T-0001').meta.urgency, 'soon', 'on screen at once');
+  assert.equal(t.S.ver, before + 1);
+  assert.deepEqual(t.events.slice(0, 3), ['redraw', 'redraw', 'redraw'], 'its toast, the commit and the queue starting');
+  assert.equal(t.writes.length, 0, 'not saved until the queue has run');
+  await drained(t);
+  assert.match(t.folder['TASKS.md'], /T-0001 [^\n]*urgency: soon/);
+  assert.equal(t.O.undoLast(), true);
+  await drained(t);
+  assert.doesNotMatch(t.folder['TASKS.md'], /urgency: soon/);
+  assert.equal(t.S.toasts.at(-1).text, 'Undone.');
+});
+
+test('a save is applied to what the file holds now, so an edit from outside stays', async () => {
+  const t = await opened();
+  const was = t.folder['TASKS.md'];
+  t.folder['TASKS.md'] = was + '- [ ] T-0009 Added by an agent {type: task}\n';
+  t.O.commit(t.O.OPS.meta('T-0001', { urgency: 'later' }));
+  await drained(t);
+  assert.match(t.folder['TASKS.md'], /T-0009 Added by an agent/);
+  assert.match(t.folder['TASKS.md'], /T-0001 [^\n]*urgency: later/);
+});
+
+test('a file suddenly empty refuses the save, and nothing is written over it', async () => {
+  const t = await opened();
+  t.folder['TASKS.md'] = '';
+  t.O.commit(t.O.OPS.meta('T-0001', { urgency: 'later' }));
+  await drained(t, { naps: true });
+  assert.match(t.Q.blocked.msg, /TASKS\.md is empty or missing/);
+  assert.equal(t.folder['TASKS.md'], '');
+  assert.deepEqual(t.writes, []);
+});
+
+test('toasts: a new one redraws and goes on its timer, a dropped one redraws once', async () => {
+  const t = await opened();
+  const id = t.O.toastShow('Hello');
+  assert.deepEqual(t.events, ['redraw']);
+  assert.equal(t.timers.at(-1).ms, 5000);
+  t.O.toastShow('With undo', t.O.op('x', [], () => {}));
+  assert.equal(t.timers.at(-1).ms, 9000);
+  t.events.length = 0;
+  t.O.toastDrop(id);
+  t.O.toastDrop(id);
+  assert.deepEqual(t.events, ['redraw']);
+  t.D.files.fire('toast', 'From files');
+  assert.equal(t.S.toasts.at(-1).text, 'From files');
+  assert.equal(t.S.toasts.at(-1).undo, false);
+});
+
+test('undoLast says when there is nothing to undo', async () => {
+  const t = await opened();
+  t.O.toastShow('No undo here');
+  assert.equal(t.O.undoLast(), false);
+});
+
+test('a change from outside is marked and told', async () => {
+  const t = await opened();
+  t.folder['TASKS.md'] = t.folder['TASKS.md'].replace('Read the memo', 'Read the new memo');
+  t.O.applyLoaded(await t.O.loadAll());
+  assert.equal(t.S.fresh.has('T-0002'), true);
+  assert.match(t.S.toasts.at(-1).text, /Updated from your files: 1 item changed/);
+});
+
+test('a Record saved under another number is renamed on screen and followed', async () => {
+  const t = await opened();
+  t.S.sel = 'T-0005';
+  t.S.composer['T-0005'] = 'draft';
+  t.D.model.S.m.tasks.items.push({ id: 'T-0005', title: 'Mine', meta: {}, subs: [] });
+  t.D.model.aliasNews.push(['T-0005', 'T-0006']);
+  t.D.files.fire('afterJob');
+  assert.equal(t.S.sel, 'T-0006');
+  assert.equal(t.S.composer['T-0006'], 'draft');
+  assert.ok(t.S.m.tasks.items.some(i => i.id === 'T-0006'));
+  assert.match(t.S.toasts.at(-1).text, /Saved as T-0006: T-0005/);
+});
+
+test('an answer to a change Proposal writes the line, says so, and undoes', async () => {
+  const t = await opened();
+  const line = t.D.model.inboxCount() && t.S.m.inbox.post.find(l => /^- Relate/.test(l));
+  t.O.relYes(line);
+  await drained(t);
+  assert.match(t.folder['RELATIONSHIPS.md'], /T-0001 ~ T-0002 \{kind: related\}/);
+  assert.doesNotMatch(t.folder['INBOX.md'], /Relate T-0001/);
+  assert.equal(t.S.toasts.at(-1).text, 'Related T-0001 and T-0002.');
+  t.O.undoLast();
+  await drained(t);
+  assert.doesNotMatch(t.folder['RELATIONSHIPS.md'], /T-0001 ~ T-0002/);
+  assert.match(t.folder['INBOX.md'], /Relate T-0001 and T-0002/);
+});
+
+test('a No to a change Proposal is remembered for good', async () => {
+  const t = await opened();
+  t.O.changeNo(t.S.m.inbox.post.find(l => /^- Relate/.test(l)));
+  await drained(t);
+  assert.match(t.folder['IGNORED.md'], /rel\|T-0001\|T-0002/);
+  assert.doesNotMatch(t.folder['INBOX.md'], /Relate T-0001/);
+});
+
+test('the actions that only commit do what they say', async () => {
+  const t = await opened();
+  t.O.acknowledge('T-0002');
+  await drained(t);
+  assert.match(t.folder['DONE.md'], /\[x\] T-0002/);
+  assert.equal(t.S.toasts.at(-1).text, 'Filed T-0002 as read.');
+  t.O.gotIt('T-0003');
+  await drained(t);
+  assert.doesNotMatch(t.folder['TASKS.md'], /T-0003 [^\n]*status: waiting/);
+  t.O.chase('T-0001');
+  await drained(t);
+  assert.match(t.folder['ASK-AGENT.md'], /- T-0001 \{/);
+  t.O.chase('T-0001');
+  assert.match(t.S.toasts.at(-1).text, /already queued/);
+  t.O.setItemDue('T-0001', '2026-03-04', '10:30');
+  await drained(t);
+  assert.match(t.folder['TASKS.md'], /T-0001 [^\n]*due-date: 2026-03-04; [^\n]*due-time: 10:30/);
+  t.O.setItemDue('T-0001', 'not a date');
+  t.O.promotePerson('P-0002');
+  await drained(t);
+  assert.match(t.folder['INTERACTIONS.md'], /P-0002 decision promote/);
+  t.O.demotePerson('P-0002');
+  await drained(t);
+  assert.match(t.folder['INTERACTIONS.md'], /P-0002 decision demote/);
+  t.O.markDoneAck('T-0004');
+  await drained(t);
+  assert.match(t.folder['DONE.md'], /\[x\] T-0004/);
+  assert.equal(t.O.undoLast(), true);
+  await drained(t);
+  assert.match(t.folder['TASKS.md'], /T-0004 Finish the report/);
+  assert.match(t.folder['TASKS.md'], /acknowledged: no/);
+});
+
+test('saving a Comment with no change only redraws', async () => {
+  const t = await opened();
+  t.O.commit(t.O.OPS.comment('T-0001', { at: '2026-01-02 09:00', author: 'user', text: 'First' }));
+  await drained(t);
+  t.events.length = 0;
+  t.S.cmtEdit = 'x';
+  t.S.cmtEditText = 'First';
+  t.O.saveComment('T-0001', 0);
+  assert.equal(t.S.cmtEdit, null);
+  assert.deepEqual(t.events, ['redraw']);
+  assert.equal(t.Q.jobs.length, 0);
+  t.S.cmtEditText = 'Second';
+  t.O.saveComment('T-0001', 0);
+  await drained(t);
+  assert.match(t.folder['TASKS.md'], /Second/);
+  assert.doesNotMatch(t.folder['TASKS.md'], /First/);
+});
+
+test('the Side panel\'s extra operations change the Record and restore it', async () => {
+  const t = await opened();
+  t.O.commit(t.O.OPS.entGroup('PRJ', 'PRJ-0001', 'Later'));
+  await drained(t);
+  assert.match(t.folder['PROJECTS.md'], /## Later\n- Widgets/);
+  const out = {};
+  t.O.commit(t.O.OPS.newPrjOnTask('T-0001', 'Gadgets', out));
+  await drained(t);
+  assert.equal(out.id, 'PRJ-0002');
+  assert.match(t.folder['PROJECTS.md'], /- Gadgets \{id: PRJ-0002/);
+  assert.match(t.folder['TASKS.md'], /T-0001 [^\n]*projects: PRJ-0002/);
+  const snap = t.D.model.entSnapshot('PRJ-0002');
+  t.O.commit(t.O.OPS.deleteEnt('PRJ', 'PRJ-0002'));
+  await drained(t);
+  assert.doesNotMatch(t.folder['PROJECTS.md'], /Gadgets/);
+  t.O.commit(t.O.OPS.restoreEnt('PRJ', snap));
+  await drained(t);
+  assert.match(t.folder['PROJECTS.md'], /- Gadgets \{id: PRJ-0002/);
 });
 
 // ---------------------------------------------------------------- and the test would catch it if they didn't
@@ -700,6 +982,33 @@ test('model: fails when it builds markup, in a string or a template', () => {
   for (const use of [`'<div class="x">'`, `"<span>"`, `'</div>'`, `'  <b>'`, '`<li>${a}</li>`'])
     assert.match(modelProblems(`${goodModel}function g(a) { return ${use}; }\n`, smallCore).join(), /builds markup/, use);
   assert.deepEqual(markupProblems('model', "var a = '<' + b; var c = x < y; var d = '< 3';"), []);
+});
+
+const goodOps = "(function () { 'use strict'; var S = D.model.S; function f(a) { setTimeout(f, 1); console.error(a); D.files.fire('redraw'); return parse(a); } D.ops = { f: f }; D.files.install('toast', f); })();\n";
+
+test('ops: a good file passes, and quiet words are not uses', () => {
+  assert.deepEqual(opsProblems(goodOps, smallCore), []);
+  assert.deepEqual(opsProblems(`${goodOps}var x = 'document.title and a < b'; // window.x\n`, smallCore), []);
+});
+
+test('ops: fails when it uses the DOM, location or anything else outside itself and core', () => {
+  for (const use of ['document.title', 'window.innerWidth', 'location.hash', 'localStorage.x', 'fetch(a)', 'render()', 'go(a)', 'focusLater(a)', 'esc(a)', 'requestAnimationFrame(a)'])
+    assert.ok(opsProblems(`${goodOps}function g(a) { return ${use}; }\n`, smallCore).length, use);
+});
+
+test('ops: fails when it builds markup, in a string or a template', () => {
+  for (const use of [`'<div class="x">'`, `"<span>"`, `'</div>'`, '`<li>${a}</li>`'])
+    assert.match(opsProblems(`${goodOps}function g(a) { return ${use}; }\n`, smallCore).join(), /builds markup/, use);
+});
+
+test('ops: fails when it reaches a concern after it, fires a hook not its own, or leans on the page\'s script', () => {
+  assert.match(namespaceProblems('ops', 'D.links.go(); ').join(), /ops uses D\.links/);
+  assert.match(namespaceProblems('ops', 'D.views.page(); ').join(), /ops uses D\.views/);
+  assert.match(namespaceProblems('ops', 'D.model.S = 1; ').join(), /assigns to D\.model\.S/);
+  assert.match(hookProblems([{ concern: 'ops', src: "D.files.fire('toast', 'x');" }]).join(), /ops fires toast/);
+  assert.match(hookProblems([{ concern: 'ops', src: "D.files.install('redraw', f);" }]).join(), /ops installs redraw/);
+  assert.deepEqual(hookProblems([{ concern: 'ops', src: "D.files.fire('redraw'); D.files.install('toast', f); D.files.install('runJob', f); D.files.install('afterJob', f);" }]), []);
+  assert.match(inlineCallProblems('ops', 'select(a);', 'function select(a) {}').join(), /calls select\(\) bare/);
 });
 
 test('a local D hiding the namespace fails, and so does any alias but S', () => {

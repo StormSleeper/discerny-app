@@ -67,6 +67,8 @@ var ALIAS = {}, aliasNews = [];
 function rid(id) { var n = 0; while (id && ALIAS[id] && n++ < 20) id = ALIAS[id]; return id; }
 function entIn(M, kind, id) { var x = rid(id); return M[EDEF[kind].key].ents.filter(function (e) { return e.meta.id === x; })[0]; }
 
+function idNum(id) { return parseInt(String(id).replace(/^[A-Z]+-/, ''), 10) || 0; }
+
 /* ===================== dates (always local time) ===================== */
 var DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 var DOWL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -526,6 +528,9 @@ function changeVal(field, v) {
   var d = pd(v); return d.getDate() + ' ' + MON[d.getMonth()] + yearTail(d) + (timeOf(v) ? ' ' + timeOf(v) : '');
 }
 
+// The Relationship Proposals with an end on this Item, which go when the Item is dismissed.
+function changesOn(m, id) { return changesOf(m.post).filter(function (c) { return c.type === 'relationship' && (c.a === id || c.b === id); }); }
+
 /* ===================== helpers for an Item or Record on screen ===================== */
 function canSnooze(i) { return whereOf(i.id) === 'open' && isDay(dueOf(i.meta)) && i.meta.type !== 'meeting'; }
 function prjName(id) { return entById(id) ? entPath(id) : id; }
@@ -607,7 +612,7 @@ D.model = {
   pad2: pad2, todayStr: todayStr, nowStamp: nowStamp, lsSet: lsSet, lsJson: lsJson,
   S: S,
   get SET() { return SET; }, setSettings: setSettings, pauseDays: pauseDays,
-  ANY: ANY, fItem: fItem, recIn: recIn, ALIAS: ALIAS, aliasNews: aliasNews, rid: rid, entIn: entIn,
+  ANY: ANY, fItem: fItem, recIn: recIn, ALIAS: ALIAS, aliasNews: aliasNews, rid: rid, entIn: entIn, idNum: idNum,
   MONL: MONL, isDay: isDay, pd: pd, addDays: addDays, addWorkdays: addWorkdays, dd: dd, timeOf: timeOf, fmt: fmt,
   fmtY: fmtY, fmtLong: fmtLong, fmtDT: fmtDT, relDays: relDays, mondayOf: mondayOf, isoWeek: isoWeek, plural: plural,
   ix: ix, item: item, whereOf: whereOf, personById: personById, personByName: personByName, entById: entById, relsOf: relsOf,
@@ -627,7 +632,7 @@ D.model = {
   cleanTitle: cleanTitle, cleanName: cleanName, parseQuick: parseQuick, TYPE_WORD: TYPE_WORD, QA_TYPES: QA_TYPES,
   counts: counts, reviewState: reviewState, reviewSteps: reviewSteps,
   changeCards: changeCards, inboxCount: inboxCount, ackItems: ackItems, fromCalendar: fromCalendar, undosOf: undosOf,
-  changeByLine: changeByLine, relOf: relOf, CHANGE_WORD: CHANGE_WORD, changeVal: changeVal,
+  changesOn: changesOn, changeByLine: changeByLine, relOf: relOf, CHANGE_WORD: CHANGE_WORD, changeVal: changeVal,
   canSnooze: canSnooze, prjName: prjName, cur: cur, recOf: recOf, commentAt: commentAt, personOf: personOf,
   entSnapshot: entSnapshot,
   isRail: isRail, panelOpen: panelOpen, isDrawer: isDrawer,

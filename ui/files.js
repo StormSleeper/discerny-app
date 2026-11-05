@@ -61,6 +61,11 @@ async function serverMtimes() {
   if (!r.ok) throw await apiError(r);
   return await r.json();
 }
+// The folders the server suggests opening, or null when it has none to give.
+async function folderSuggestions() {
+  var r = await fetch('/api/folders');
+  return r.ok ? await r.json() : null;
+}
 async function readText(name) {
   if (srv) {
     var r = await api('/api/file/' + name);
@@ -161,7 +166,7 @@ function discardPending() { Q.jobs = []; Q.blocked = null; requestSync(false); }
 
 // dir and srv get reassigned, so they're read-only accessors; useFolder and serverInfo set them.
 D.files = {
-  get dir() { return dir; }, useFolder: useFolder, get srv() { return srv; }, serverInfo: serverInfo, serverMtimes: serverMtimes,
+  get dir() { return dir; }, useFolder: useFolder, get srv() { return srv; }, serverInfo: serverInfo, serverMtimes: serverMtimes, folderSuggestions: folderSuggestions,
   api: api, lastMod: lastMod, readText: readText, writeText: writeText, modOf: modOf, readDrafts: readDrafts, idbGet: idbGet, idbSet: idbSet,
   Q: Q, requestSync: requestSync, scheduleSync: scheduleSync, kick: kick, discardPending: discardPending,
   isPermErr: isPermErr, isMoved: isMoved, errText: errText, formatGate: formatGate, install: install, fire: fire
