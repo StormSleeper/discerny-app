@@ -297,6 +297,60 @@ function linksProblems(src, core = CORE) {
   return out.concat(markupProblems('links', src));
 }
 
+// ---------------------------------------------------------------- views's rules
+
+// The four files of the views, which are one concern.
+const VIEW_FILES = SCRIPTS.filter(f => concernOf(f) === 'views');
+
+// What a piece of code does to a value it should only read: assigning to it, or a method that changes it. `root` is a pattern for the value, and `bare` allows it with no member after it.
+function changesTo(code, root) {
+  const member = String.raw`(?:\.[A-Za-z_$][\w$]*|\[[^\]]*\])`;
+  return [
+    new RegExp(String.raw`${root}${member}+\s*(?:=(?!=)|\+\+|--|[-+*/%]=|\|\|=|&&=|\?\?=)`),
+    new RegExp(String.raw`${root}${member}*\.(?:push|pop|shift|unshift|splice|sort|reverse|fill|add|delete|clear|set)\s*\(`),
+    new RegExp(String.raw`(?:\+\+|--|\bdelete\s)\s*${root}\b`),
+  ].some(re => re.test(code));
+}
+
+// What's wrong with a views file: anything from outside itself and core, which is how it would reach the DOM, fetch or the page's script; ops; files beyond Q and srv; or changing app state.
+function viewsProblems(src, core = CORE) {
+  const code = codeOf(src), out = [];
+  const known = new Set([...namesDeclared(code), ...namesAtTopLevel(codeOf(core)), 'D']);
+  for (const n of namesUsed(code)) if (!known.has(n) && !BUILT_INS.has(n)) out.push(`views uses ${n}, from outside itself and core`);
+  if (/(?<![\w$.])D\.ops\b/.test(code)) out.push('views uses D.ops: drawing never changes anything');
+  for (const m of code.matchAll(/(?<![\w$.])D\.files\.([A-Za-z_$][\w$]*)/g)) if (m[1] !== 'Q' && m[1] !== 'srv') out.push(`views reaches D.files.${m[1]}: it reads only Q and srv`);
+  const held = { S: String.raw`(?<![\w$.])(?:D\.model\.)?S`, 'D.files.Q': String.raw`(?<![\w$.])D\.files\.Q`, 'D.links.nav': String.raw`(?<![\w$.])D\.links\.nav`, 'D.model.forced': String.raw`(?<![\w$.])D\.model\.forced` };
+  for (const [what, root] of Object.entries(held)) if (changesTo(code, root)) out.push(`views changes ${what}: it only reads app state`);
+  for (const m of code.matchAll(/(?<![\w$.])D\.(?:model\.(?:lsSet|forceClear|setSettings)|links\.syncLink)\b/g)) out.push(`views calls ${m[0]}, which changes app state`);
+  return out;
+}
+
+// The names a views file offers: those in its D.views = {...} or Object.assign(D.views, {...}).
+function viewsOffers(src) {
+  const m = /D\.views = \{([\s\S]*?)\};|Object\.assign\(D\.views, \{([\s\S]*?)\}\);/.exec(codeOf(src));
+  return m ? [...(m[1] ?? m[2]).matchAll(/([A-Za-z_$][\w$]*)\s*:/g)].map(x => x[1]) : null;
+}
+
+// ---------------------------------------------------------------- render's rules
+
+// What render may use from the browser, beyond itself, core and JavaScript's own built-ins. `get` is the word in its accessor.
+const RENDER_BROWSER = new Set(['D', 'get', 'document', 'window', 'requestAnimationFrame', 'console']);
+
+// What's wrong with render's source: anything from outside itself and core, or knowing what a View means.
+function renderProblems(src, core = CORE) {
+  const code = codeOf(src), out = [];
+  const known = new Set([...namesDeclared(code), ...namesAtTopLevel(codeOf(core))]);
+  for (const n of namesUsed(code)) if (!known.has(n) && !BUILT_INS.has(n) && !RENDER_BROWSER.has(n)) out.push(`render uses ${n}, from outside itself and core`);
+  for (const [what, re] of [['S.view', /(?<![\w$.])S\.view\b/], ['item(', /(?<![\w$])item\s*\(/], ['inboxCount', /\binboxCount\b/]]) if (re.test(code)) out.push(`render mentions ${what}: it never knows what a View means`);
+  if (codeOf(src, { keepStrings: true }).includes('data-row')) out.push('render mentions data-row: it never knows what a View means');
+  return out;
+}
+
+// Only render puts markup on the page.
+function innerHtmlProblems(where, src) {
+  return /\.\s*(?:innerHTML|outerHTML)\s*=(?!=)|\.\s*insertAdjacentHTML\s*\(/.test(codeOf(src)) ? [`${where} writes markup to the page, which only render does`] : [];
+}
+
 // ---------------------------------------------------------------- the hooks
 
 // The whole set. A new hook needs a row here and in files's registry; if the need can be met by moving code, move the code.
@@ -355,7 +409,7 @@ test('core offers only what it has, and the page reaches it through D.core', () 
 
 test('the page\'s own script is read whole, or the bare-call rule would miss what is in it', () => {
   const names = namesAtTopLevel(codeOf(inlineScript(PAGE)));
-  for (const n of ['S', 'boot', 'render', 'toggleDone', 'poll']) assert.ok(names.has(n), n);
+  for (const n of ['S', 'boot', 'go', 'toggleDone', 'poll']) assert.ok(names.has(n), n);
   assert.equal(names.has('setThemeColor'), false);
 });
 
@@ -382,10 +436,43 @@ test('links uses only the concerns before it, never calls ops, never navigates a
   assert.deepEqual(linksProblems(readRepo('ui/links.js')), []);
 });
 
+test('views reads model and links, and files only for Q and srv, and never assigns to app state or uses ops, DOM APIs or fetch', () => {
+  assert.equal(VIEW_FILES.length, 4);
+  for (const f of VIEW_FILES) assert.deepEqual(viewsProblems(readRepo(f)), [], f);
+});
+
+test('the first views file creates D.views, the others add to it, and no name is offered twice', () => {
+  const offers = VIEW_FILES.map(f => viewsOffers(readRepo(f)));
+  offers.forEach((o, i) => assert.ok(o && o.length, VIEW_FILES[i]));
+  assert.match(codeOf(readRepo(VIEW_FILES[0])), /D\.views = \{/);
+  for (const f of VIEW_FILES.slice(1)) assert.match(codeOf(readRepo(f)), /Object\.assign\(D\.views, \{/, f);
+  const all = offers.flat();
+  assert.deepEqual(all.filter((n, i) => all.indexOf(n) !== i), []);
+});
+
+test('render uses only the concerns before it, and never knows what a View means', () => {
+  assert.deepEqual(renderProblems(readRepo('ui/render.js')), []);
+});
+
+test('no concern but render writes markup to the page', () => {
+  const sources = movedScripts().filter(f => f !== 'ui/render.js').map(f => [f, readRepo(f)]).concat([['the page', inlineScript(PAGE)]]);
+  for (const [where, src] of sources) assert.deepEqual(innerHtmlProblems(where, src), []);
+  assert.match(codeOf(readRepo('ui/render.js')), /\.innerHTML\s*=/);
+});
+
+test('the views and render have left the page, whose callers reach them through D.views and D.render', () => {
+  const inline = inlineScript(PAGE), names = namesAtTopLevel(codeOf(inline));
+  for (const n of ['prioMark', 'scoreCell', 'scoreFact', 'prioToggle', 'esc', 'bt', 'ic', 'vRow', 'vSec', 'viewToday', 'viewInbox', 'viewAll', 'viewDone', 'vChange', 'viewProject', 'viewPeople', 'viewReview', 'viewClaude', 'vPanel', 'panelTask', 'vSide', 'vMain', 'viewFor', 'vPalette', 'vGate', 'vApp', 'keyOf', 'morphNode', 'morphChildren', 'renderQ', 'measure', 'render', 'renderNow', 'afterRender', 'focusLater']) assert.equal(names.has(n), false, n);
+  assert.match(codeOf(inline), /D\.views\.viewFor\(/);
+  assert.match(codeOf(inline), /D\.render\.render\(/);
+  assert.match(codeOf(inline), /D\.render\.focusLater\(/);
+  assert.match(codeOf(inline), /D\.render\.measure\(/);
+});
+
 test('the Link code has left the page, whose callers reach it through D.links', () => {
   const inline = inlineScript(PAGE), names = namesAtTopLevel(codeOf(inline));
   for (const n of ['LINK_VIEW', 'VIEW_LINK', 'RECORD_VIEW', 'stateKey', 'ENT_Q', 'LINK_STATE', 'TAB_LINK', 'linkValue', 'linkQuery', 'stateOfHash', 'linkItem', 'linkNow', 'linkOfHash', 'mergedInto', 'idShaped', 'linkText', 'missingId', 'linkResult', 'syncLink', 'search', 'linkPush', 'hashOwn', 'landing', 'autoOpen', 'offView']) assert.equal(names.has(n), false, n);
-  assert.match(codeOf(inline), /D\.links\.search\(/);
+  assert.match(codeOf(readRepo('ui/views-shell.js')), /D\.links\.search\(/);
   assert.match(codeOf(inline), /D\.links\.nav\.hashOwn/);
 });
 
@@ -1052,6 +1139,146 @@ test('search adds the Link row to searchAll, and adds nothing when the text is n
   assert.equal(row('nowhere'), null);
 });
 
+// ---------------------------------------------------------------- views as they run
+
+// A fresh copy of the views over what they read, in Node, with no ops, window or document. Only links reads the address.
+function loadViews() {
+  const location = { hash: '', replace(h) { location.hash = h; } };
+  const load = new Function('localStorage', 'location', `${CORE}\n${readRepo('ui/files.js')}\n${readRepo('ui/model.js')}\n${readRepo('ui/links.js')}\n${VIEW_FILES.map(readRepo).join('\n')}\n;return D;`);
+  const D = load({ getItem: () => null, setItem() {} }, location);
+  withData(D);
+  D.model.S.ready = true;
+  D.model.S.width = 1600;
+  D.model.S.eq = ''; // going to a View sets it
+  return { D, V: D.views, S: D.model.S };
+}
+const stateNow = (S) => JSON.stringify(S, (k, v) => (v instanceof Set ? [...v] : v));
+
+test('views offers what the page and the steps use on D.views, and keeps the rest private', () => {
+  const { D, V } = loadViews();
+  assert.deepEqual(Object.keys(D), ['core', 'files', 'model', 'links', 'views']);
+  for (const n of ['page', 'viewFor', 'esc', 'mergeCands', 'linkCands']) assert.equal(typeof V[n], 'function', n);
+  for (const n of ['vApp', 'vMain', 'vGate', 'saveState', 'vBanner', 'vFolderForm', 'vClaudeTab', 'panelEnt']) assert.equal(n in V, false, n);
+});
+
+test('page() draws the app when the folder is read, and the gate when it isn\'t', () => {
+  const { V, S } = loadViews();
+  assert.match(V.page(), /data-k="app"/);
+  S.ready = false;
+  S.gate = { mode: 'pick', msg: '' };
+  assert.match(V.page(), /data-k="gate"/);
+  S.ready = true;
+  S.m = null;
+  assert.match(V.page(), /data-k="gate"/);
+});
+
+test('every View draws from state alone, and drawing changes nothing', () => {
+  const { V, S } = loadViews();
+  const pages = [['today'], ['inbox'], ['next'], ['waiting'], ['upcoming'], ['fyi'], ['all'], ['done'], ['projects'], ['systems'], ['people'], ['project', 'PRJ-0001'], ['system', 'SYS-0009'], ['person', 'P-0001'], ['review'], ['claude']];
+  for (const [view, entity] of pages) {
+    S.view = view;
+    S.entity = entity || null;
+    const before = stateNow(S);
+    assert.match(V.page(), /data-k="main"/, view);
+    assert.equal(stateNow(S), before, view);
+  }
+  S.view = 'today';
+  S.entity = null;
+  for (const dialog of ['palette', 'keys']) {
+    S.dialog = dialog;
+    const before = stateNow(S);
+    assert.match(V.page(), /dlg-scrim/, dialog);
+    assert.equal(stateNow(S), before, dialog);
+  }
+  S.dialog = null;
+  for (const id of ['T-0001', 'T-0002', 'P-0001', 'PRJ-0001']) {
+    S.sel = id;
+    S.panel = true;
+    const before = stateNow(S);
+    assert.match(V.page(), /class="panel/, id);
+    assert.equal(stateNow(S), before, id);
+  }
+});
+
+// ---------------------------------------------------------------- render as it runs
+
+// A fresh copy of render over the views, in Node, with a small stand-in for the document. Frames wait in `frames` until a test lets one fall.
+function loadRender() {
+  const frames = [], errors = [], focused = [], template = { innerHTML: null, content: { childNodes: [] } }, found = {};
+  const root = { nodeType: 1, firstChild: null };
+  const document = { activeElement: null, body: {}, getElementById: () => root, createElement: () => template, querySelector: (sel) => found[sel] || null, contains: () => true };
+  const element = (sel) => { found[sel] = { focus() { focused.push(sel); } }; };
+  const location = { hash: '', replace() {} };
+  const load = new Function('localStorage', 'location', 'document', 'window', 'requestAnimationFrame', 'console', `${CORE}\n${readRepo('ui/files.js')}\n${readRepo('ui/model.js')}\n${readRepo('ui/links.js')}\n${VIEW_FILES.map(readRepo).join('\n')}\n${readRepo('ui/render.js')}\n;return D;`);
+  const D = load({ getItem: () => null, setItem() {} }, location, document, { innerWidth: 1234 }, (f) => { frames.push(f); return frames.length; }, { error(e) { errors.push(e); } });
+  const after = [];
+  D.files.install('afterDraw', () => { after.push(D.model.S.focusSel); });
+  return { D, R: D.render, S: D.model.S, frames, template, after, element, focused, errors };
+}
+
+test('render offers its interface on D.render, and keeps the morph private', () => {
+  const { D, R } = loadRender();
+  assert.deepEqual(Object.keys(D), ['core', 'files', 'model', 'links', 'views', 'render']);
+  for (const n of ['render', 'renderNow', 'focusLater', 'measure']) assert.equal(typeof R[n], 'function', n);
+  assert.equal(R.renderQ, false);
+  for (const n of ['morphChildren', 'morphNode', 'morphAttrs', 'keyOf', 'sameNode', 'afterRender']) assert.equal(n in R, false, n);
+});
+
+test('renderQ reads live, and says a frame is queued until it falls', () => {
+  const { R, frames } = loadRender();
+  R.render();
+  assert.equal(R.renderQ, true);
+  R.render();
+  assert.equal(frames.length, 1, 'one frame, however many ask');
+  frames[0]();
+  assert.equal(R.renderQ, false);
+  assert.throws(() => { 'use strict'; R.renderQ = true; }, TypeError);
+});
+
+test('render installs redraw, which queues a frame', () => {
+  const { D, R, frames } = loadRender();
+  D.files.fire('redraw');
+  assert.equal(frames.length, 1);
+  assert.equal(R.renderQ, true);
+  assert.throws(() => D.files.install('redraw', () => {}), /bad hook install: redraw/);
+});
+
+test('a frame measures, draws page(), keeps S.focusSel and then fires afterDraw', () => {
+  const { D, R, S, template, after, element, focused } = loadRender();
+  element('#x');
+  S.focusSel = '#x';
+  D.model.forced.add('a');
+  R.renderNow();
+  assert.equal(S.width, 1234);
+  assert.equal(template.innerHTML, D.views.page());
+  assert.equal(D.model.forced.size, 0);
+  assert.deepEqual(focused, ['#x']);
+  assert.deepEqual(after, [null], 'afterDraw comes once, after the focus');
+});
+
+test('a View that throws is told on the page, and afterDraw still fires', () => {
+  const { D, R, template, after, errors } = loadRender();
+  D.views.page = () => { throw new Error('boom'); };
+  R.renderNow();
+  assert.match(template.innerHTML, /Something went wrong drawing the page/);
+  assert.match(template.innerHTML, /boom/);
+  assert.equal(errors.length, 1);
+  assert.equal(after.length, 1);
+});
+
+test('focusLater moves focus at once when it can, or draws so that it can', () => {
+  const { R, S, frames, element, focused, template } = loadRender();
+  R.focusLater('#gone');
+  assert.equal(frames.length, 0, 'drawn now, not queued');
+  assert.notEqual(template.innerHTML, null);
+  assert.equal(S.focusSel, null);
+  element('#x');
+  R.focusLater('#x');
+  assert.deepEqual(focused, ['#x']);
+  assert.equal(S.focusSel, '#x', 'kept for the frame');
+  assert.equal(frames.length, 1);
+});
+
 // ---------------------------------------------------------------- and the test would catch it if they didn't
 
 const tags = (...names) => names.map(n => `<script src="ui/${n}.js"></script>`).join('\n');
@@ -1210,6 +1437,65 @@ test('links: fails when it reaches a concern after it, sets off any hook, or lea
   assert.match(hookProblems([{ concern: 'links', src: "D.files.fire('redraw');" }]).join(), /links fires redraw/);
   assert.match(hookProblems([{ concern: 'links', src: "D.files.install('afterDraw', f);" }]).join(), /links installs afterDraw/);
   assert.match(inlineCallProblems('links', 'go(a);', 'function go(a) {}').join(), /calls go\(\) bare/);
+});
+
+const goodViews = "(function () { 'use strict'; var S = D.model.S; function f(a) { return parse(a) + S.view + D.files.srv + D.files.Q.jobs.length + D.links.nav.offView + D.links.search(a) + D.model.item(a) + D.views.f(a); } D.views = { f: f }; })();\n";
+
+test('views: a good file passes, and reading or quiet words are not uses', () => {
+  assert.deepEqual(viewsProblems(goodViews, smallCore), []);
+  for (const quiet of ['S.view === a', 'S.view == a', 'S.n != a', 'S.n <= 1', 'S.n >= 1', "'document.title and S.view = a and D.ops.commit(a)'", 'S.m.items.filter(f).length', 'S.m.items.slice().sort(f)', 'D.model.forced.has(a)'])
+    assert.deepEqual(viewsProblems(`${goodViews}function g(a) { return ${quiet}; }\n`, smallCore), [], quiet);
+});
+
+test('views: fails when it uses ops, files beyond Q and srv, the DOM, fetch or the page\'s script', () => {
+  for (const use of ['D.ops.commit(a)', 'D.ops.toastShow(a)', 'D.files.kick()', 'D.files.writeText(a, a)', 'D.files.dir', 'document.title', 'window.innerWidth', 'location.hash', 'fetch(a)', 'localStorage.x', 'setTimeout(a)', 'render()', 'go(a)', 'commit(a)', 'toggleDone(a)'])
+    assert.ok(viewsProblems(`${goodViews}function g(a) { return ${use}; }\n`, smallCore).length, use);
+});
+
+test('views: fails when it changes app state, however it goes about it', () => {
+  for (const use of ['S.view = a', 'S.m.x = a', 'S.wb[a] = 1', 'S.n++', '--S.n', 'S.n += 1', 'delete S.x', 'S.toasts.push(a)', 'S.fresh.add(a)', 'S.fresh.clear()', 'D.model.S.view = a', 'D.files.Q.blocked = a', 'D.files.Q.jobs.push(a)', 'D.links.nav.offView = a', 'D.model.forced.add(a)', 'D.model.forceClear(a)', 'D.model.lsSet(a, a)', 'D.model.setSettings(a)', 'D.links.syncLink()'])
+    assert.match(viewsProblems(`${goodViews}function g(a) { return ${use}; }\n`, smallCore).join(), /changes|calls/, use);
+});
+
+test('views: fails when it reaches a concern after it, sets off any hook, or leans on the page\'s script', () => {
+  assert.match(namespaceProblems('views', 'D.render.render();').join(), /views uses D\.render/);
+  assert.match(namespaceProblems('views', 'D.input.go();').join(), /views uses D\.input/);
+  assert.match(namespaceProblems('views', 'D.model.S = 1;').join(), /assigns to D\.model\.S/);
+  assert.deepEqual(namespaceProblems('views', 'D.views = {}; D.views.page(); D.links.search(a); D.ops;'), []);
+  assert.match(hookProblems([{ concern: 'views', src: "D.files.install('afterDraw', f);" }]).join(), /views installs afterDraw/);
+  assert.match(inlineCallProblems('views', 'go(a);', 'function go(a) {}').join(), /calls go\(\) bare/);
+});
+
+test('views: the offers are read from either way of adding them', () => {
+  assert.deepEqual(viewsOffers('D.views = { a: a, b: b };'), ['a', 'b']);
+  assert.deepEqual(viewsOffers('Object.assign(D.views, { c: c });'), ['c']);
+  assert.equal(viewsOffers('var a = 1;'), null);
+});
+
+const goodRender = "(function () { 'use strict'; var S = D.model.S, q = false; function f(a) { var t = document.createElement(a); t.innerHTML = D.views.page(); S.width = window.innerWidth; console.error(a); requestAnimationFrame(f); D.files.fire('afterDraw'); return parse(a) + S.focusSel; } D.render = { get q() { return q; }, f: f }; D.files.install('redraw', f); })();\n";
+
+test('render: a good file passes, and quiet words are not uses', () => {
+  assert.deepEqual(renderProblems(goodRender, smallCore), []);
+  assert.deepEqual(hookProblems([{ concern: 'render', src: goodRender }]), []);
+  assert.deepEqual(renderProblems(`${goodRender}// S.view and item(a) and data-row\nvar x = 'S.view and inboxCount';\n`, smallCore), []);
+});
+
+test('render: fails when it knows what a View means, or uses anything else outside itself and core', () => {
+  for (const use of ['S.view', 'D.model.item(a)', 'item(a)', 'D.model.inboxCount()', "'.main [data-row]'", 'toggleDone(a)', 'go(a)', 'vRow(a)', 'fetch(a)', 'localStorage.x', 'location.hash'])
+    assert.ok(renderProblems(`${goodRender}function g(a) { return ${use}; }\n`, smallCore).length, use);
+});
+
+test('render: fails when it reaches a concern after it, or sets off a hook not its own', () => {
+  assert.match(namespaceProblems('render', 'D.input.go();').join(), /render uses D\.input/);
+  assert.match(namespaceProblems('render', 'D.views.page = f;').join(), /assigns to D\.views\.page/);
+  assert.match(hookProblems([{ concern: 'render', src: "D.files.fire('redraw');" }]).join(), /render fires redraw/);
+  assert.match(hookProblems([{ concern: 'render', src: "D.files.install('afterDraw', f);" }]).join(), /render installs afterDraw/);
+});
+
+test('only render writes markup to the page', () => {
+  for (const use of ['a.innerHTML = b', 'a.outerHTML = b', "a.insertAdjacentHTML('beforeend', b)"])
+    assert.match(innerHtmlProblems('views', `${use};`).join(), /only render/, use);
+  assert.deepEqual(innerHtmlProblems('views', "var a = b.innerHTML; var c = b.innerHTML === d; var e = 'x.innerHTML = y';"), []);
 });
 
 test('a local D hiding the namespace fails, and so does any alias but S', () => {
